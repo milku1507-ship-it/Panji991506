@@ -39,7 +39,8 @@ function AppContent() {
   const [ingredients, setIngredients] = React.useState<Ingredient[]>([]);
   const [products, setProducts] = React.useState<Product[]>([]);
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
-  const [storeSettings, setStoreSettings] = React.useState<StoreSettings>({
+  const SETTINGS_CACHE_KEY = 'ceumilan_store_settings_cache';
+  const defaultSettings: StoreSettings = {
     name: 'Ceumilan Pay',
     showLogoOnReceipt: true,
     showNameOnReceipt: true,
@@ -48,6 +49,13 @@ function AppContent() {
     showLogoInSidebar: true,
     receiptFooter: 'Terima kasih sudah berbelanja!',
     onboardingCompleted: false
+  };
+  const [storeSettings, setStoreSettings] = React.useState<StoreSettings>(() => {
+    try {
+      const cached = localStorage.getItem(SETTINGS_CACHE_KEY);
+      if (cached) return { ...defaultSettings, ...JSON.parse(cached) };
+    } catch (_) {}
+    return defaultSettings;
   });
 
   // Auth Listener
@@ -113,7 +121,9 @@ function AppContent() {
     // Sync Store Settings
     const unsubSettings = onSnapshot(doc(db, `users/${uid}/profil_toko/settings`), (snapshot) => {
       if (snapshot.exists()) {
-        setStoreSettings(snapshot.data() as StoreSettings);
+        const data = snapshot.data() as StoreSettings;
+        setStoreSettings(data);
+        try { localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(data)); } catch (_) {}
       }
     }, (error) => {
       console.error('Settings sync error:', error);
@@ -187,6 +197,8 @@ function AppContent() {
   const updateStoreSettings = async (newSettings: StoreSettings) => {
     // 1. Always update local state for immediate feedback
     setStoreSettings(newSettings);
+    // Also cache locally so login page shows the logo before auth loads
+    try { localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(newSettings)); } catch (_) {}
     
     // 2. Persist to appropriate storage
     if (user) {
