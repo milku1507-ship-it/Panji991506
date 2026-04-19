@@ -48,19 +48,12 @@ export default function LoginPage({ settings }: LoginPageProps) {
       <div className="w-full max-w-md space-y-8 text-center">
         <div className="space-y-4">
           <div className="flex justify-center">
-            <div className="w-24 h-24 rounded-[2rem] bg-white shadow-xl shadow-brand-200 flex items-center justify-center overflow-hidden border-4 border-white">
-              {settings.logo ? (
-                <img 
-                  src={settings.logo} 
-                  alt={settings.name} 
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain p-2"
-                />
-              ) : (
-                <div className="w-full h-full orange-gradient flex items-center justify-center text-white font-black text-4xl">
-                  {settings.name.charAt(0)}
-                </div>
-              )}
+            <div className="w-28 h-28 rounded-[2rem] bg-black shadow-xl shadow-brand-200 overflow-hidden border-4 border-white">
+              <img
+                src="/logo.png"
+                alt={settings.name}
+                className="w-full h-full object-contain"
+              />
             </div>
           </div>
           <div className="space-y-2">
