@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { Store, Upload, Save, ArrowLeft, Settings2 } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 
-import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData, storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 
 interface StoreSettingsManagerProps {
   settings: StoreSettings;
@@ -22,8 +22,6 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
   const user = auth.currentUser;
   const [localSettings, setLocalSettings] = React.useState<StoreSettings>(settings);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
-  const [uploadProgress, setUploadProgress] = React.useState<number | null>(null);
   const [isCompressing, setIsCompressing] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -40,34 +38,23 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
     setIsCompressing(true);
     try {
       const compressionOptions = {
-        maxSizeMB: 0.2,
-        maxWidthOrHeight: 800,
+        maxSizeMB: 0.1,
+        maxWidthOrHeight: 600,
         useWebWorker: true,
-        onProgress: (progress: number) => {
-          console.log(`[KOMPRES] ${progress}%`);
-        }
       };
 
       const compressedFile = await imageCompression(file, compressionOptions);
       console.log(`[KOMPRES] ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`);
 
-      setSelectedFile(compressedFile);
-
       const reader = new FileReader();
       reader.onloadend = () => {
         setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
+        toast.success(`Logo siap — ${(compressedFile.size / 1024).toFixed(0)}KB ✓`);
       };
       reader.readAsDataURL(compressedFile);
-      toast.success(`Gambar dikompres ke ${(compressedFile.size / 1024).toFixed(0)}KB ✓`);
     } catch (err) {
       console.error('Kompresi gagal:', err);
-      toast.error('Kompresi gagal, menggunakan file asli.');
-      setSelectedFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+      toast.error('Kompresi gagal, coba gambar lain.');
     } finally {
       setIsCompressing(false);
     }
@@ -75,74 +62,18 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
 
   const handleSave = async () => {
     setIsSaving(true);
-    setUploadProgress(null);
-
     try {
-      let finalSettings = { ...localSettings };
-
-      if (selectedFile && user) {
-        const filePath = `logos/${user.uid}/logo-${Date.now()}.png`;
-        const storageRef = ref(storage, filePath);
-
-        await new Promise<void>((resolve, reject) => {
-          const TIMEOUT_MS = 15000;
-          let timeoutId: ReturnType<typeof setTimeout>;
-
-          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
-
-          timeoutId = setTimeout(() => {
-            uploadTask.cancel();
-            reject(new Error('Upload timeout: koneksi terlalu lambat. Coba lagi.'));
-          }, TIMEOUT_MS);
-
-          uploadTask.on(
-            'state_changed',
-            (snapshot) => {
-              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-              setUploadProgress(pct);
-            },
-            (error) => {
-              clearTimeout(timeoutId);
-              console.error('[UPLOAD] Error:', error);
-              reject(error);
-            },
-            async () => {
-              clearTimeout(timeoutId);
-              try {
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                finalSettings.logo = downloadURL;
-
-                if (user) {
-                  await setDoc(
-                    doc(db, `users/${user.uid}/profil_toko/logo`),
-                    sanitizeData({ url: downloadURL, updatedAt: new Date().toISOString() })
-                  );
-                }
-                resolve();
-              } catch (err) {
-                reject(err);
-              }
-            }
-          );
-        });
-
-        setUploadProgress(null);
-      }
-
-      await setSettings(finalSettings);
+      await setSettings(localSettings);
       toast.success('Pengaturan toko berhasil disimpan ✓');
       onBack();
     } catch (error) {
       console.error('Error saving settings:', error);
-      setUploadProgress(null);
       const errMsg = error instanceof Error ? error.message : 'Gagal menyimpan pengaturan toko.';
       toast.error(errMsg);
     } finally {
       setIsSaving(false);
     }
   };
-
-  const isUploading = isSaving && uploadProgress !== null;
 
   return (
     <div className="space-y-6 pb-20">
@@ -198,27 +129,12 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                 >
                   {isCompressing ? 'Mengkompres...' : 'Upload Logo'}
                 </Button>
-                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 10MB — dikompres otomatis ke 200KB)</p>
+                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 10MB — dikompres otomatis ke ~100KB)</p>
               </div>
 
               {isCompressing && (
                 <div className="w-full text-center">
                   <p className="text-xs text-primary font-medium animate-pulse">Mengkompres gambar...</p>
-                </div>
-              )}
-
-              {isUploading && uploadProgress !== null && (
-                <div className="w-full space-y-1">
-                  <div className="flex justify-between text-xs font-medium text-gray-600">
-                    <span>Mengunggah logo...</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-primary h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
                 </div>
               )}
 
@@ -400,11 +316,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
             disabled={isSaving || isCompressing}
             className="flex-1 h-14 rounded-2xl font-bold orange-gradient text-white shadow-lg shadow-brand-200"
           >
-            {isUploading && uploadProgress !== null
-              ? `Mengunggah ${uploadProgress}%...`
-              : isSaving
-              ? 'Menyimpan...'
-              : 'Simpan Perubahan'}
+            {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </Button>
         </div>
       </div>
