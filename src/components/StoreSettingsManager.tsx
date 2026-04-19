@@ -40,8 +40,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
     setIsCompressing(true);
     try {
       const compressionOptions = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1024,
+        maxSizeMB: 0.2,
+        maxWidthOrHeight: 800,
         useWebWorker: true,
         onProgress: (progress: number) => {
           console.log(`[KOMPRES] ${progress}%`);
@@ -58,9 +58,10 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
       };
       reader.readAsDataURL(compressedFile);
-      toast.success('Gambar berhasil dikompres ✓');
+      toast.success(`Gambar dikompres ke ${(compressedFile.size / 1024).toFixed(0)}KB ✓`);
     } catch (err) {
       console.error('Kompresi gagal:', err);
+      toast.error('Kompresi gagal, menggunakan file asli.');
       setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -84,7 +85,15 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         const storageRef = ref(storage, filePath);
 
         await new Promise<void>((resolve, reject) => {
+          const TIMEOUT_MS = 15000;
+          let timeoutId: ReturnType<typeof setTimeout>;
+
           const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+
+          timeoutId = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error('Upload timeout: koneksi terlalu lambat. Coba lagi.'));
+          }, TIMEOUT_MS);
 
           uploadTask.on(
             'state_changed',
@@ -93,10 +102,12 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
               setUploadProgress(pct);
             },
             (error) => {
+              clearTimeout(timeoutId);
               console.error('[UPLOAD] Error:', error);
               reject(error);
             },
             async () => {
+              clearTimeout(timeoutId);
               try {
                 const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
                 finalSettings.logo = downloadURL;
@@ -124,7 +135,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
     } catch (error) {
       console.error('Error saving settings:', error);
       setUploadProgress(null);
-      toast.error('Gagal menyimpan pengaturan toko. Coba lagi.');
+      const errMsg = error instanceof Error ? error.message : 'Gagal menyimpan pengaturan toko.';
+      toast.error(errMsg);
     } finally {
       setIsSaving(false);
     }
@@ -186,7 +198,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                 >
                   {isCompressing ? 'Mengkompres...' : 'Upload Logo'}
                 </Button>
-                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 10MB — otomatis dikompres)</p>
+                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 10MB — dikompres otomatis ke 200KB)</p>
               </div>
 
               {isCompressing && (

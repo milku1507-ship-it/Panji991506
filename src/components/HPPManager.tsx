@@ -35,7 +35,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 
-import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
@@ -504,13 +504,35 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           fromHpp: true
         };
         
-        // Update locally
-        setIngredients(prev => prev.map(i => i.id === ingredientId ? updatedIng : i));
+        // Find all ingredients with same name (case insensitive) and sync price
+        const sameNameIngredients = ingredients.filter(
+          i => i.name.toLowerCase().trim() === nama.toLowerCase().trim() && i.id !== ingredientId
+        );
         
-        // Update Firestore
+        // Update locally — main ingredient + all same-name ones
+        setIngredients(prev => prev.map(i => {
+          if (i.id === ingredientId) return updatedIng;
+          if (i.name.toLowerCase().trim() === nama.toLowerCase().trim()) {
+            return { ...i, price: harga, unit: satuan };
+          }
+          return i;
+        }));
+        
+        // Batch update Firestore
         if (user) {
           console.log("[HPPManager] Syncing ingredient to Firestore stock...");
-          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
+          const batch = writeBatch(db);
+          batch.set(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
+          for (const ing of sameNameIngredients) {
+            batch.set(
+              doc(db, `users/${user.uid}/stok/${ing.id}`),
+              sanitizeData({ ...ing, price: harga, unit: satuan })
+            );
+          }
+          await batch.commit();
+          if (sameNameIngredients.length > 0) {
+            console.log(`[HPPManager] Synced price to ${sameNameIngredients.length} ingredient(s) with same name.`);
+          }
         }
       } else {
         // Create new ingredient

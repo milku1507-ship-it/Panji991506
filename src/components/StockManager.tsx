@@ -21,7 +21,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
@@ -92,31 +92,46 @@ export default function StockManager({ user, ingredients, setIngredients, transa
     setIsSaving(true);
     
     try {
-      if (user) {
-        const updatedIng = {
-          ...editingIngredient,
-          unit: getBaseUnit(editingIngredient.unit)
-        };
-        
-        // Optimistic update
-        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? updatedIng : i));
-        
-        // Close modal immediately
-        setIsEditDialogOpen(false);
-        setEditingIngredient(null);
-        toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
+      const updatedIng = {
+        ...editingIngredient,
+        unit: getBaseUnit(editingIngredient.unit)
+      };
 
+      const normalizedName = editingIngredient.name.toLowerCase().trim();
+
+      // Find all other ingredients with the same name (case insensitive)
+      const sameNameIngredients = ingredients.filter(
+        i => i.name.toLowerCase().trim() === normalizedName && i.id !== editingIngredient.id
+      );
+
+      // Optimistic update — main ingredient + all same-name ones
+      setIngredients(prev => prev.map(i => {
+        if (i.id === editingIngredient.id) return updatedIng;
+        if (i.name.toLowerCase().trim() === normalizedName) {
+          return { ...i, price: updatedIng.price, unit: updatedIng.unit };
+        }
+        return i;
+      }));
+
+      // Close modal immediately
+      setIsEditDialogOpen(false);
+      setEditingIngredient(null);
+      toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
+
+      if (user) {
         console.log("[StockManager] Syncing ingredient to Firestore...");
-        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(updatedIng));
-      } else {
-        const updatedIng = {
-          ...editingIngredient,
-          unit: getBaseUnit(editingIngredient.unit)
-        };
-        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? updatedIng : i));
-        setIsEditDialogOpen(false);
-        setEditingIngredient(null);
-        toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
+        const batch = writeBatch(db);
+        batch.set(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(updatedIng));
+        for (const ing of sameNameIngredients) {
+          batch.set(
+            doc(db, `users/${user.uid}/stok/${ing.id}`),
+            sanitizeData({ ...ing, price: updatedIng.price, unit: updatedIng.unit })
+          );
+        }
+        await batch.commit();
+        if (sameNameIngredients.length > 0) {
+          console.log(`[StockManager] Synced price to ${sameNameIngredients.length} ingredient(s) with same name.`);
+        }
       }
       console.log("[StockManager] handleEditIngredient finished successfully.");
     } catch (error) {
