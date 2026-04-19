@@ -566,11 +566,58 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         harga,
         satuan
       };
-      
-      setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
+
+      // Propagate new price to ALL other variants across ALL products that share the same bahan name
+      const updatedActiveVariant = { ...activeHppVariant, bahan: newBahan };
+      const normalizedNama = nama.toLowerCase().trim();
+      const modifiedProductIds = new Set<string>();
+
+      const syncedProducts = products.map(p => {
+        const updatedVarian = p.varian.map(v => {
+          // Skip the variant currently being edited (already handled above)
+          if (p.id === selectedProductId && v.id === activeHppVariant.id) {
+            return { ...v, bahan: newBahan };
+          }
+          const hasSameName = v.bahan.some(
+            b => b.nama.toLowerCase().trim() === normalizedNama
+          );
+          if (!hasSameName) return v;
+          modifiedProductIds.add(p.id);
+          return {
+            ...v,
+            bahan: v.bahan.map(b =>
+              b.nama.toLowerCase().trim() === normalizedNama
+                ? { ...b, harga, satuan, ingredientId }
+                : b
+            )
+          };
+        });
+        return { ...p, varian: updatedVarian };
+      });
+
+      setProducts(syncedProducts);
+      setActiveHppVariant(updatedActiveVariant);
+
+      // Batch write all modified hpp documents to Firestore
+      if (user && modifiedProductIds.size > 0) {
+        const hppBatch = writeBatch(db);
+        for (const pid of modifiedProductIds) {
+          const updatedProd = syncedProducts.find(p => p.id === pid);
+          if (updatedProd) {
+            hppBatch.set(doc(db, `users/${user.uid}/hpp/${pid}`), sanitizeData(updatedProd));
+          }
+        }
+        await hppBatch.commit();
+        console.log(`[HPPManager] Propagated price to ${modifiedProductIds.size} other product(s).`);
+      }
+
       setIsMaterialModalOpen(false);
       setEditingMaterial(null);
-      toast.success('Bahan diperbarui & Stok disinkronkan ✓');
+      const syncCount = modifiedProductIds.size;
+      toast.success(syncCount > 0
+        ? `Bahan diperbarui & disinkronkan ke ${syncCount} produk lain ✓`
+        : 'Bahan diperbarui & Stok disinkronkan ✓'
+      );
       console.log("[HPPManager] handleSaveMaterial finished successfully.");
     } catch (error) {
       console.error("[HPPManager] Error in handleSaveMaterial:", error);
