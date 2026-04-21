@@ -41,7 +41,7 @@ function AppContent() {
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const SETTINGS_CACHE_KEY = 'ceumilan_store_settings_cache';
   const defaultSettings: StoreSettings = {
-    name: 'Ceumilan Pay',
+    name: 'CeuMilan',
     showLogoOnReceipt: true,
     showNameOnReceipt: true,
     showAddressOnReceipt: true,
@@ -67,7 +67,7 @@ function AppContent() {
         setProducts([]);
         setTransactions([]);
         setStoreSettings({
-          name: 'Ceumilan Pay',
+          name: 'CeuMilan',
           showLogoOnReceipt: true,
           showNameOnReceipt: true,
           showAddressOnReceipt: true,
@@ -295,7 +295,7 @@ function AppContent() {
       const newSettings = { 
         ...storeSettings, 
         onboardingCompleted: true,
-        name: storeSettings.name || 'Ceumilan Pay'
+        name: storeSettings.name || 'CeuMilan'
       };
       batch.set(doc(db, `users/${uid}/profil_toko/settings`), sanitizeData(newSettings));
       

@@ -265,7 +265,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
 
                 <div className="p-6 border-t border-gray-50">
                   <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-tighter">
-                    Ceumilan Pay v1.0.0
+                    CeuMilan v1.0.0
                   </p>
                 </div>
               </motion.div>
