@@ -48,11 +48,13 @@ export default function LoginPage({ settings }: LoginPageProps) {
       <div className="w-full max-w-md space-y-8 text-center">
         <div className="space-y-4">
           <div className="flex justify-center">
-            <img
-              src="/logo.png"
-              alt={settings.name}
-              className="w-40 h-40 object-contain drop-shadow-2xl"
-            />
+            <div className="bg-white rounded-[2rem] shadow-lg shadow-gray-200 border border-gray-100 p-4 inline-flex items-center justify-center">
+              <img
+                src="/logo.png"
+                alt={settings.name}
+                className="w-36 h-36 object-contain"
+              />
+            </div>
           </div>
           <div className="space-y-2">
             <h1 className="text-4xl font-black text-[#1A1A2E]">{settings.name}</h1>
