@@ -1,54 +1,79 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 530" width="460" height="530">
   <defs>
     <style>
-      .lt { font-family: 'Arial Black', 'Arial', sans-serif; font-weight: 900; fill: white; }
+      .lt {
+        font-family: 'Arial Rounded MT Bold', 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+        font-weight: 900;
+      }
     </style>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.4)"/>
-    </filter>
   </defs>
 
-  <!-- White border glow (underneath) -->
-  <rect x="18" y="18" width="464" height="464" rx="78" ry="78" fill="white" opacity="0.15"/>
+  <!-- White glow border -->
+  <rect x="10" y="5" width="440" height="520" rx="78" ry="78"
+    fill="none" stroke="white" stroke-width="22" opacity="0.95"/>
 
-  <!-- Main background -->
-  <rect x="25" y="25" width="450" height="450" rx="72" ry="72" fill="#8B0000"/>
+  <!-- Dark red main background -->
+  <rect x="22" y="15" width="416" height="500" rx="68" ry="68" fill="#8B0000"/>
 
-  <!-- Inner subtle dark border -->
-  <rect x="25" y="25" width="450" height="450" rx="72" ry="72" fill="none" stroke="#6A0000" stroke-width="4"/>
+  <!-- ══════════════════════════════════ -->
+  <!-- ROW 1: "Ceu"                        -->
+  <!-- ══════════════════════════════════ -->
+  <text x="230" y="165"
+    class="lt" font-size="152" fill="white" text-anchor="middle"
+    stroke="#6A0000" stroke-width="9" stroke-linejoin="round" paint-order="stroke">Ceu</text>
 
-  <!-- === CEU === -->
-  <text x="250" y="158" class="lt" font-size="138" text-anchor="middle"
-    stroke="#6A0000" stroke-width="6" stroke-linejoin="round" paint-order="stroke">ceu</text>
+  <!-- ══════════════════════════════════ -->
+  <!-- ROW 2: ICON (left) + "il" (right)  -->
+  <!-- ══════════════════════════════════ -->
 
-  <!-- === YELLOW BOWL / FACE ICON === -->
-  <!-- Bowl body (bottom half ellipse) -->
-  <path d="M148 258 Q250 328 352 258 L352 240 Q250 240 148 240 Z" fill="#FFD700"/>
+  <!-- Icon occupies roughly x:55–260, y:172–360 -->
+  <!-- "il" occupies roughly x:260–415, y:215–355 -->
 
-  <!-- Bowl top rim -->
-  <ellipse cx="250" cy="240" rx="102" ry="20" fill="#FFD700"/>
+  <!-- === YELLOW FACE / BOWL CHARACTER === -->
 
-  <!-- Noodles / chips wavy top -->
-  <path d="M168 232 Q183 218 198 232 Q213 246 228 232 Q243 218 258 232 Q273 246 288 232 Q303 218 318 232 Q330 222 334 230"
-    fill="none" stroke="#C8900A" stroke-width="10" stroke-linecap="round"/>
+  <!-- Noodle / chip strands (hair on top) -->
+  <path d="M 64 192 Q 80 174 96 192 Q 112 210 128 192 Q 144 174 160 192 Q 176 210 192 192 Q 208 174 224 192 Q 236 182 248 190"
+    fill="none" stroke="#C8900A" stroke-width="14" stroke-linecap="round"/>
 
-  <!-- Smile mouth -->
-  <path d="M213 272 Q250 296 287 272"
-    fill="none" stroke="#6A0000" stroke-width="6" stroke-linecap="round"/>
+  <!-- Noodle top flat bar -->
+  <rect x="60" y="185" width="196" height="16" rx="8" fill="#FFD700"/>
+
+  <!-- Face background (yellow filled shape) -->
+  <!-- Large yellow arc / bowl (chin/smile) -->
+  <path d="M 60 220 Q 58 340 160 356 Q 258 340 258 220 Z" fill="#FFD700"/>
+
+  <!-- Inner bowl color (slightly darker) -->
+  <path d="M 70 228 Q 68 332 160 345 Q 248 332 248 228 Z" fill="#E6A800"/>
+
+  <!-- Face highlight: eyes area (lighter inner) -->
+  <ellipse cx="160" cy="255" rx="80" ry="45" fill="#FFD700" opacity="0.5"/>
 
   <!-- Left eye -->
-  <ellipse cx="220" cy="260" rx="9" ry="8" fill="#6A0000"/>
-  <circle cx="217" cy="258" r="3" fill="white" opacity="0.5"/>
+  <ellipse cx="128" cy="258" rx="14" ry="13" fill="#4A0000"/>
+  <circle cx="124" cy="254" r="5" fill="white" opacity="0.5"/>
 
-  <!-- Right eye (i-dot style) + yellow accent -->
-  <circle cx="310" cy="222" r="18" fill="#FFD700"/>
-  <circle cx="310" cy="222" r="11" fill="#C8900A"/>
+  <!-- Right eye -->
+  <ellipse cx="196" cy="258" rx="14" ry="13" fill="#4A0000"/>
+  <circle cx="192" cy="254" r="5" fill="white" opacity="0.5"/>
 
-  <!-- === MIL === -->
-  <text x="250" y="346" class="lt" font-size="132" text-anchor="middle"
-    stroke="#6A0000" stroke-width="6" stroke-linejoin="round" paint-order="stroke">mil</text>
+  <!-- Smile / mouth line -->
+  <path d="M 132 284 Q 160 308 188 284"
+    fill="none" stroke="#4A0000" stroke-width="8" stroke-linecap="round"/>
 
-  <!-- === ANN === -->
-  <text x="250" y="460" class="lt" font-size="132" text-anchor="middle"
-    stroke="#6A0000" stroke-width="6" stroke-linejoin="round" paint-order="stroke">ann</text>
+  <!-- Yellow i-dot (dot of letter "i", upper right) -->
+  <circle cx="337" cy="190" r="24" fill="#FFD700"/>
+  <circle cx="337" cy="190" r="15" fill="#E6A800"/>
+
+  <!-- === "il" text (right half of middle row) === -->
+  <text x="337" y="342"
+    class="lt" font-size="148" fill="white" text-anchor="middle"
+    stroke="#6A0000" stroke-width="9" stroke-linejoin="round" paint-order="stroke">il</text>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- ROW 3: "an"                         -->
+  <!-- ══════════════════════════════════ -->
+  <text x="230" y="470"
+    class="lt" font-size="152" fill="white" text-anchor="middle"
+    letter-spacing="20"
+    stroke="#6A0000" stroke-width="9" stroke-linejoin="round" paint-order="stroke">an</text>
 </svg>
