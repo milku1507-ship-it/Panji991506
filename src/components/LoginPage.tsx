@@ -49,9 +49,9 @@ export default function LoginPage({ settings }: LoginPageProps) {
         <div className="space-y-4">
           <div className="flex justify-center">
             <img
-              src="/logo.svg"
+              src="/logo.png"
               alt={settings.name}
-              className="w-36 h-36 object-contain drop-shadow-xl"
+              className="w-40 h-40 object-contain drop-shadow-2xl"
             />
           </div>
           <div className="space-y-2">
