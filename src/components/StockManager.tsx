@@ -604,16 +604,16 @@ const StockCard: React.FC<{
         </div>
 
         <div className="space-y-4">
-          <div className="flex justify-between items-end">
-            <div>
+          <div className="flex justify-between items-end gap-2 min-w-0">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <p className="text-[10px] font-bold text-gray-400 uppercase">Stok Saat Ini</p>
-              <p className="text-2xl font-black text-[#1A1A2E]">
+              <p className="text-2xl font-black text-[#1A1A2E] truncate leading-tight">
                 {formatSmartUnit(item.currentStock, item.unit)}
               </p>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <p className="text-[10px] font-bold text-gray-400 uppercase">Nilai Stok</p>
-              <p className="text-sm font-black text-primary">{formatCurrency(item.currentStock * (item.price || 0), true)}</p>
+              <p className="text-sm font-black text-primary whitespace-nowrap">{formatCurrency(item.currentStock * (item.price || 0), true)}</p>
             </div>
           </div>
 

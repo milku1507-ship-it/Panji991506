@@ -44,8 +44,12 @@ export function fromBaseValue(value: number, unit: string): number {
   return value / rate;
 }
 
+function fmtNum(val: number, maxDecimals = 2): string {
+  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: maxDecimals }).format(val);
+}
+
 export function formatSmartUnit(value: number, unit: string): string {
-  if (!unit) return `${value}`;
+  if (!unit) return fmtNum(value);
   const base = getBaseUnit(unit);
   const rate = getConversionRate(unit);
   const valInBase = value * rate;
@@ -53,35 +57,35 @@ export function formatSmartUnit(value: number, unit: string): string {
   // Gram/Kg logic
   if (base === 'gram') {
     if (Math.abs(valInBase) >= 1000) {
-      return `${Number((valInBase / 1000).toFixed(3))} kg`;
+      return `${fmtNum(valInBase / 1000)} kg`;
     }
-    return `${Number(valInBase.toFixed(3))} gram`;
+    return `${fmtNum(valInBase)} gram`;
   }
   
   // Ml/Liter logic
   if (base === 'ml') {
     if (Math.abs(valInBase) >= 1000) {
-      return `${Number((valInBase / 1000).toFixed(3))} liter`;
+      return `${fmtNum(valInBase / 1000)} liter`;
     }
-    return `${Number(valInBase.toFixed(3))} ml`;
+    return `${fmtNum(valInBase)} ml`;
   }
 
   // Mg to Gram
   if (base === 'mg') {
     if (Math.abs(valInBase) >= 1000) {
-      return `${Number((valInBase / 1000).toFixed(3))} gram`;
+      return `${fmtNum(valInBase / 1000)} gram`;
     }
-    return `${Number(valInBase.toFixed(3))} mg`;
+    return `${fmtNum(valInBase)} mg`;
   }
 
   // Cm to Meter
   if (base === 'cm') {
     if (Math.abs(valInBase) >= 100) {
-      return `${Number((valInBase / 100).toFixed(3))} m`;
+      return `${fmtNum(valInBase / 100)} m`;
     }
-    return `${Number(valInBase.toFixed(3))} cm`;
+    return `${fmtNum(valInBase)} cm`;
   }
 
-  // Default: return value and unit as is
-  return `${value} ${unit}`;
+  // Default: format with thousands separator, max 2 decimal places
+  return `${fmtNum(value)} ${unit}`;
 }
