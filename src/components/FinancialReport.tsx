@@ -1,14 +1,64 @@
 import React from 'react';
+import * as XLSX from 'xlsx';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
+import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Transaction, Product, Variant, HppMaterial } from '../types';
 import { CATEGORIES_LIST } from '../constants/data';
 import { cn } from '@/lib/utils';
-import { formatCompactNumber, formatCurrency, filterByPeriod, getTxNominal } from '../lib/formatUtils';
+import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
+
+type RangePreset = 'Hari Ini' | 'Minggu Ini' | 'Bulan Ini' | 'Custom';
+
+const toISO = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const parseTxDate = (raw: any): Date | null => {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) return d;
+  const parts = String(raw).split('/');
+  if (parts.length === 3) {
+    const nd = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
+    if (!isNaN(nd.getTime())) return nd;
+  }
+  return null;
+};
+
+const getPresetRange = (preset: RangePreset): { start: string; end: string } => {
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let start = new Date(end);
+  if (preset === 'Hari Ini') {
+    // start = today
+  } else if (preset === 'Minggu Ini') {
+    const day = now.getDay();
+    const diff = day === 0 ? 6 : day - 1; // Monday as start
+    start = new Date(end);
+    start.setDate(end.getDate() - diff);
+  } else if (preset === 'Bulan Ini') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  return { start: toISO(start), end: toISO(end) };
+};
+
+const formatRangeLabel = (start: string, end: string) => {
+  if (!start || !end) return 'Pilih Tanggal';
+  const fmt = (s: string) => {
+    const d = new Date(s);
+    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+  return `${fmt(start)} – ${fmt(end)}`;
+};
 
 interface FinancialReportProps {
   transactions: Transaction[];
@@ -16,15 +66,47 @@ interface FinancialReportProps {
 }
 
 export default function FinancialReport({ transactions, products }: FinancialReportProps) {
-  const [period, setPeriod] = React.useState('Semua Waktu');
+  const initialRange = React.useMemo(() => getPresetRange('Bulan Ini'), []);
+  const [preset, setPreset] = React.useState<RangePreset>('Bulan Ini');
+  const [startDate, setStartDate] = React.useState<string>(initialRange.start);
+  const [endDate, setEndDate] = React.useState<string>(initialRange.end);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
+
+  const periodLabel = preset === 'Custom' ? formatRangeLabel(startDate, endDate) : preset;
 
   const isIncome = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
   const isExpense = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
 
-  const filteredTransactions = React.useMemo(
-    () => filterByPeriod(transactions, period),
-    [transactions, period]
-  );
+  const filteredTransactions = React.useMemo(() => {
+    if (!startDate || !endDate) return transactions;
+    const s = new Date(startDate); s.setHours(0, 0, 0, 0);
+    const e = new Date(endDate); e.setHours(23, 59, 59, 999);
+    return transactions.filter(t => {
+      const d = parseTxDate(t.tanggal);
+      if (!d) return false;
+      return d.getTime() >= s.getTime() && d.getTime() <= e.getTime();
+    });
+  }, [transactions, startDate, endDate]);
+
+  const applyPreset = (p: RangePreset) => {
+    setPreset(p);
+    if (p !== 'Custom') {
+      const r = getPresetRange(p);
+      setStartDate(r.start);
+      setEndDate(r.end);
+      setPickerOpen(false);
+    }
+  };
+
+  const onStartChange = (v: string) => {
+    setStartDate(v);
+    setPreset('Custom');
+  };
+  const onEndChange = (v: string) => {
+    setEndDate(v);
+    setPreset('Custom');
+  };
 
   const totalIncome = filteredTransactions
     .filter(isIncome)
@@ -173,17 +255,54 @@ export default function FinancialReport({ transactions, products }: FinancialRep
     return Object.values(stats);
   }, [filteredTransactions, products]);
 
-  const exportCSV = () => {
-    const headers = ['Tanggal', 'Keterangan', 'Kategori', 'Jenis', 'Nominal'];
-    const rows = filteredTransactions.map(t => [t.tanggal, t.keterangan, t.kategori, t.jenis, t.nominal]);
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `Laporan_Keuangan_${period.replace(" ", "_")}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const exportXLS = async () => {
+    if (filteredTransactions.length === 0) {
+      toast.error('Tidak ada data untuk di-export');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      await new Promise(r => setTimeout(r, 50));
+      const rows = filteredTransactions.map(t => {
+        const jenis = (t.jenis || (t as any).type || '').toLowerCase();
+        const tipe = jenis === 'pemasukan' ? 'Income' : jenis === 'pengeluaran' ? 'Expense' : (t.jenis || '');
+        const total = getTxNominal(t);
+        return {
+          'Tanggal': t.tanggal || '',
+          'Nama Produk / Transaksi': t.keterangan || '',
+          'Kategori': t.kategori || '',
+          'Jumlah': total,
+          'Tipe': tipe,
+          'Total': total,
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Bold header row
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c: C });
+        if (ws[addr]) {
+          ws[addr].s = { font: { bold: true } };
+        }
+      }
+      ws['!cols'] = [
+        { wch: 14 }, { wch: 32 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 14 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Laporan');
+
+      const safeLabel = (preset === 'Custom' ? `${startDate}_${endDate}` : preset).replace(/\s+/g, '_');
+      XLSX.writeFile(wb, `Laporan_Keuangan_${safeLabel}.xlsx`);
+      toast.success('Berhasil export laporan');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal export laporan');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // DEPRECATED Helpers
@@ -197,25 +316,87 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           <h2 className="text-3xl font-black text-[#1A1A2E]">Laporan Keuangan</h2>
           <p className="text-gray-500 font-medium">Analisis mendalam performa bisnis.</p>
         </div>
-        <div className="flex gap-3">
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-[150px] rounded-2xl border-none shadow-sm bg-white font-bold">
-              <Calendar className="w-4 h-4 mr-2 text-primary" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="rounded-2xl">
-              <SelectItem value="Bulan Ini">Bulan Ini</SelectItem>
-              <SelectItem value="Tahun Ini">Tahun Ini</SelectItem>
-              <SelectItem value="Semua Waktu">Semua Waktu</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button 
-            onClick={exportCSV}
-            variant="outline" 
+        <div className="flex flex-wrap gap-3">
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="outline"
+                  className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-700 hover:text-primary"
+                >
+                  <Calendar className="w-4 h-4 text-primary" />
+                  {periodLabel}
+                </Button>
+              }
+            />
+            <PopoverContent align="end" className="w-[320px] p-4">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pilihan Cepat</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['Hari Ini', 'Minggu Ini', 'Bulan Ini'] as RangePreset[]).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => applyPreset(p)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-bold transition-colors',
+                          preset === p
+                            ? 'bg-primary text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        )}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Custom</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500">Mulai</label>
+                      <Input
+                        type="date"
+                        value={startDate}
+                        max={endDate || undefined}
+                        onChange={(e) => onStartChange(e.target.value)}
+                        className="rounded-xl"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500">Akhir</label>
+                      <Input
+                        type="date"
+                        value={endDate}
+                        min={startDate || undefined}
+                        onChange={(e) => onEndChange(e.target.value)}
+                        className="rounded-xl"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => setPickerOpen(false)}
+                  className="w-full rounded-xl font-bold"
+                >
+                  Terapkan
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            onClick={exportXLS}
+            disabled={isExporting}
+            variant="outline"
             className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-600 hover:text-primary"
           >
-            <Download className="w-4 h-4" />
-            Export CSV
+            {isExporting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            {isExporting ? 'Mengexport...' : 'Export XLS'}
           </Button>
         </div>
       </div>
@@ -254,7 +435,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
             </div>
             <Badge className="bg-white/20 text-white border-none font-black">Profit</Badge>
           </div>
-          <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Laba Bersih ({period})</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Laba Bersih ({periodLabel})</p>
           <h3 className="text-2xl font-black mt-1">{formatCurrency(netProfit, true)}</h3>
           <p className="text-[10px] font-bold mt-2">Margin Keuntungan: {margin.toFixed(1)}%</p>
         </Card>
