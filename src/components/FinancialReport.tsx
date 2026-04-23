@@ -441,6 +441,19 @@ export default function FinancialReport({ transactions, products }: FinancialRep
         </Card>
       </div>
 
+      {filteredTransactions.length === 0 ? (
+        <Card className="border-none shadow-sm rounded-3xl bg-white">
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="p-4 rounded-3xl bg-gray-100 text-gray-400 mb-4">
+              <Inbox className="w-10 h-10" />
+            </div>
+            <h3 className="text-lg font-black text-[#1A1A2E] mb-1">Tidak ada data</h3>
+            <p className="text-sm font-medium text-gray-500">
+              Tidak ada transaksi pada periode {periodLabel.toLowerCase()}.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Expense Breakdown */}
         <div className="space-y-6">
@@ -615,6 +628,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   );
 }
