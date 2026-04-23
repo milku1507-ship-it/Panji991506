@@ -157,6 +157,38 @@ export default function TransactionManager({ user, transactions, setTransactions
     toast.success('Form berhasil diisi oleh AI. Silakan cek & simpan.');
   };
 
+  const saveAIBatch = async (list: any[]): Promise<{ saved: number; failed: number }> => {
+    let saved = 0;
+    let failed = 0;
+    for (const fields of list) {
+      try {
+        const txData: any = {
+          tanggal: fields.tanggal || new Date().toISOString().split('T')[0],
+          tanggal_akhir: null,
+          jenis: fields.jenis || 'Pengeluaran',
+          kategori: fields.kategori || 'Lainnya',
+          keterangan: fields.keterangan || '',
+          nominal: Number(fields.nominal) || 0,
+          qty_beli: Number(fields.qty_beli) || 0,
+          qty_total: 0,
+          penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
+        };
+        await processAndSaveTransaction(txData);
+        saved++;
+      } catch (err) {
+        console.error('[AI batch] failed to save', err);
+        failed++;
+      }
+    }
+    if (saved > 0) {
+      toast.success(`${saved} transaksi tersimpan${failed > 0 ? `, ${failed} gagal` : ''} ✓`);
+      if (onSuccess) onSuccess();
+    } else if (failed > 0) {
+      toast.error('Gagal menyimpan transaksi');
+    }
+    return { saved, failed };
+  };
+
   // Derive selected product IDs from penjualan_detail to prevent double counting and state sync issues
   const selectedProductIds = React.useMemo(() => {
     return newTx.penjualan_detail?.map(pd => pd.produk_id) || [];
@@ -1565,6 +1597,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         categories={dynamicCategories}
         currentForm={newTx}
         onApply={applyAIFields}
+        onSaveBatch={saveAIBatch}
       />
     </div>
   );
