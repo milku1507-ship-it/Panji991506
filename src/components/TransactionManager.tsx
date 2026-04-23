@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Sparkles } from 'lucide-react';
+import TransactionAIChat from './TransactionAIChat';
 import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee } from '../types';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -129,6 +130,32 @@ export default function TransactionManager({ user, transactions, setTransactions
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isRange, setIsRange] = React.useState(false);
+  const [aiChatOpen, setAiChatOpen] = React.useState(false);
+
+  const applyAIFields = (fields: any) => {
+    setNewTx(prev => {
+      const next: any = { ...prev };
+      if (fields.tanggal) next.tanggal = fields.tanggal;
+      if (fields.jenis) next.jenis = fields.jenis;
+      if (fields.kategori) next.kategori = fields.kategori;
+      if (fields.keterangan) next.keterangan = fields.keterangan;
+      if (typeof fields.nominal === 'number') next.nominal = fields.nominal;
+      if (typeof fields.qty_beli === 'number') next.qty_beli = fields.qty_beli;
+      if (Array.isArray(fields.penjualan_detail) && fields.penjualan_detail.length > 0) {
+        next.penjualan_detail = fields.penjualan_detail.map((pd: any) => ({
+          produk_id: pd.produk_id,
+          produk_nama: pd.produk_nama,
+          varian: (pd.varian || []).map((v: any) => ({
+            varian_id: v.varian_id,
+            varian_nama: v.varian_nama,
+            qty: Number(v.qty) || 0,
+          })),
+        }));
+      }
+      return next;
+    });
+    toast.success('Form berhasil diisi oleh AI. Silakan cek & simpan.');
+  };
 
   // Derive selected product IDs from penjualan_detail to prevent double counting and state sync issues
   const selectedProductIds = React.useMemo(() => {
@@ -1023,9 +1050,19 @@ export default function TransactionManager({ user, transactions, setTransactions
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transaction Form */}
         <Card className="lg:col-span-1 border-none shadow-sm rounded-3xl bg-white">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold">Catat Transaksi</CardTitle>
-            <CardDescription>Input data keuangan baru</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-lg font-bold">Catat Transaksi</CardTitle>
+              <CardDescription>Input data keuangan baru</CardDescription>
+            </div>
+            <Button
+              onClick={() => setAiChatOpen(true)}
+              size="sm"
+              className="rounded-2xl gap-1.5 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
+            >
+              <Sparkles className="w-4 h-4" />
+              AI
+            </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -1520,6 +1557,15 @@ export default function TransactionManager({ user, transactions, setTransactions
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TransactionAIChat
+        open={aiChatOpen}
+        onOpenChange={setAiChatOpen}
+        products={products}
+        categories={dynamicCategories}
+        currentForm={newTx}
+        onApply={applyAIFields}
+      />
     </div>
   );
 }
