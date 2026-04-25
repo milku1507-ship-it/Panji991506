@@ -230,6 +230,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     try {
       const formData = new FormData(e.target as HTMLFormElement);
       const nama = formData.get('nama') as string;
+      const sku = ((formData.get('sku') as string) || '').trim();
       const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
       const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
       const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
@@ -245,11 +246,12 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
       let updatedVarian;
       if (editingVariant) {
-        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, harga_jual, qty_batch, harga_packing } : v);
+        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing } : v);
       } else {
         const newVariant: Variant = {
           id: 'var_' + Math.random().toString(36).substr(2, 9),
           nama,
+          sku,
           harga_jual,
           qty_batch,
           harga_packing,
@@ -1215,6 +1217,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <div className="space-y-2">
               <Label htmlFor="nama" className="font-bold">Nama Varian</Label>
               <Input id="nama" name="nama" defaultValue={editingVariant?.nama || ''} placeholder="Contoh: Ayam Ori" required className="rounded-xl h-12" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sku" className="font-bold">SKU Varian <span className="text-gray-400 font-medium">(opsional)</span></Label>
+              <Input id="sku" name="sku" defaultValue={editingVariant?.sku || ''} placeholder="Nomor Referensi SKU dari marketplace" className="rounded-xl h-12" />
+              <p className="text-[11px] text-gray-400 font-medium">Untuk mencocokkan otomatis saat import XLS marketplace.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

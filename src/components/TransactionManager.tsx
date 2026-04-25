@@ -416,16 +416,18 @@ export default function TransactionManager({ user, transactions, setTransactions
           return;
         }
 
-        // Keywords UPPERCASE — urutan = prioritas tertinggi ke terendah
-        const skuPriorityGroups  = [["NOMORREFERENSISKU"], ["SKUINDUK"], ["SELLERSKU"], ["SKU"]];
+        // Keywords UPPERCASE — fleksibel untuk berbagai marketplace
+        const variantSkuKeywords = ["NOMORREFERENSISKU", "REFERENSISKU", "SKUVARIAN", "VARIANTSKU", "VARIATIONSKU"];
+        const productSkuKeywords = ["SKUINDUK", "SKUPRODUK", "SELLERSKU", "PRODUCTSKU", "MASTERSKU", "SKU"];
         const variantKeywords    = ["NAMAVARIASI", "NAMAVARIAN", "VARIASI", "VARIANT", "VARIATION"];
-        const qtyKeywords        = ["JUMLAH", "QUANTITY", "QTY"];
-        const payKeywords        = ["PEMBAYARANPEMBELI", "DIBAYARPEMBELI", "BUYERPAYMENT", "TOTALPEMBAYARAN"];
-        const orderIdKeywords    = ["NO.PESANAN", "NOPESANAN", "NOMORPESANAN", "ORDERID", "ORDERNUMBER", "NOINVOICE", "NOFAKTUR"];
+        const productNameKeywords= ["NAMAPRODUK", "PRODUKNAMA", "PRODUCTNAME", "ITEMNAME", "NAMABARANG"];
+        const qtyKeywords        = ["JUMLAH", "QUANTITY", "QTY", "KUANTITAS"];
+        const payKeywords        = ["DIBAYARPEMBELI", "PEMBAYARANPEMBELI", "BUYERPAYMENT", "TOTALPEMBAYARAN", "TOTALDIBAYAR", "TOTALHARGA", "TOTAL"];
+        const orderIdKeywords    = ["NO.PESANAN", "NOPESANAN", "NOMORPESANAN", "ORDERID", "ORDERNUMBER", "NOINVOICE", "NOFAKTUR", "INVOICE"];
         const dateKeywords       = ["WAKTUPESANANDIBUAT", "TANGGALPEMBAYARAN", "TANGGAL", "ORDERCREATEDDATE", "DATE"];
 
-        // Cari baris header — scan 30 baris pertama untuk kolom SKU & Jumlah
-        const allSkuKeywords = skuPriorityGroups.flat();
+        // Cari baris header — scan 30 baris pertama, butuh kolom SKU (apa pun) + Jumlah
+        const allSkuKeywords = [...variantSkuKeywords, ...productSkuKeywords];
         let headerRowIndex = -1;
         for (let i = 0; i < Math.min(rawRows.length, 30); i++) {
           const rowNorm = rawRows[i].map((c: any) => normalizeSKU(c));
@@ -438,38 +440,27 @@ export default function TransactionManager({ user, transactions, setTransactions
         }
 
         if (headerRowIndex === -1) {
-          toast.error("Format Shopee tidak dikenali. Kolom 'Nomor Referensi SKU' atau 'Jumlah' tidak ditemukan.");
+          toast.error("Format file tidak dikenali. Kolom SKU atau Jumlah tidak ditemukan.");
           return;
         }
 
         const headerRow = rawRows[headerRowIndex] as any[];
         const normalizedHeaders = headerRow.map((h: any) => normalizeSKU(h));
 
-        // Cari kolom berdasarkan prioritas: exact match lebih dulu, lalu substring
+        // Exact match dulu, baru substring
         const findColIdx = (keywords: string[]): number => {
           let idx = normalizedHeaders.findIndex((h: string) => h !== '' && keywords.includes(h));
           if (idx !== -1) return idx;
           return normalizedHeaders.findIndex((h: string) => h !== '' && keywords.some(k => h.includes(k)));
         };
 
-        // SKU: cari "Nomor Referensi SKU" dulu, baru "SKU Induk", dst.
-        const findSkuColIdx = (): number => {
-          for (const group of skuPriorityGroups) {
-            const idx = findColIdx(group);
-            if (idx !== -1) return idx;
-          }
-          return -1;
-        };
-
-        // Parse angka format Indonesia: "573.200" → 573200, "573.200,50" → 573200.50
+        // Parse angka format Indonesia
         const parseIdAmount = (val: any): number => {
           const s = String(val ?? '0').trim().replace(/[Rp\s]/g, '');
           if (!s || s === '0') return 0;
           if (s.includes(',')) {
-            // Comma = pemisah desimal; titik = pemisah ribuan
             return Number(s.replace(/\./g, '').replace(',', '.')) || 0;
           }
-          // Tidak ada koma: cek apakah titik terakhir diikuti tepat 3 angka (ribuan)
           const lastDot = s.lastIndexOf('.');
           if (lastDot >= 0 && s.length - lastDot - 1 === 3) {
             return Number(s.replace(/\./g, '')) || 0;
@@ -477,48 +468,52 @@ export default function TransactionManager({ user, transactions, setTransactions
           return Number(s.replace(/[^0-9.]/g, '')) || 0;
         };
 
-        const sIdx    = findSkuColIdx();
-        const vIdx    = findColIdx(variantKeywords);
-        const qIdx    = findColIdx(qtyKeywords);
-        const payIdx  = findColIdx(payKeywords);
-        const oidIdx  = findColIdx(orderIdKeywords);
-        const dateIdx = findColIdx(dateKeywords);
+        const variantSkuIdx = findColIdx(variantSkuKeywords);  // Nomor Referensi SKU
+        const productSkuIdx = findColIdx(productSkuKeywords);  // SKU Induk
+        const vIdx          = findColIdx(variantKeywords);
+        const productNameIdx= findColIdx(productNameKeywords);
+        const qIdx          = findColIdx(qtyKeywords);
+        const payIdx        = findColIdx(payKeywords);
+        const oidIdx        = findColIdx(orderIdKeywords);
+        const dateIdx       = findColIdx(dateKeywords);
 
-        if (sIdx === -1 || qIdx === -1) {
-          toast.error(`Kolom wajib tidak ditemukan. Header terdeteksi: ${headerRow.slice(0, 10).join(', ')}`);
+        if ((variantSkuIdx === -1 && productSkuIdx === -1) || qIdx === -1) {
+          toast.error(`Kolom wajib tidak ditemukan. Header: ${headerRow.slice(0, 10).join(', ')}`);
           return;
         }
 
         const dataRows = rawRows.slice(headerRowIndex + 1);
         const today = new Date().toISOString().split('T')[0];
 
-        console.log(`[SHOPEE IMPORT] Header row index: ${headerRowIndex}`);
-        console.log(`[SHOPEE IMPORT] Kolom SKU: index ${sIdx} → "${headerRow[sIdx]}"`);
-        console.log(`[SHOPEE IMPORT] Kolom Qty: index ${qIdx} → "${headerRow[qIdx]}"`);
-        console.log(`[SHOPEE IMPORT] Kolom Payment: index ${payIdx} → "${payIdx !== -1 ? headerRow[payIdx] : 'N/A'}"`);
-        console.log(`[SHOPEE IMPORT] Kolom Order ID: index ${oidIdx} → "${oidIdx !== -1 ? headerRow[oidIdx] : 'N/A'}"`);
-        console.log(`[SHOPEE IMPORT] Total data rows: ${dataRows.length}`);
+        console.log(`[XLS IMPORT] Header row: ${headerRowIndex}`);
+        console.log(`[XLS IMPORT] SKU Varian col: ${variantSkuIdx}, SKU Induk col: ${productSkuIdx}, Qty: ${qIdx}, Order ID: ${oidIdx}`);
 
-        // Map SKU database (UPPERCASE)
+        // Index katalog: by product SKU & by variant SKU
         const dbProducts = products.map(p => ({ ...p, normSku: normalizeSKU(p.sku) }));
-        const dbSkuSet = new Set(dbProducts.filter(p => p.normSku !== '').map(p => p.normSku));
+        const productBySku = new Map<string, typeof dbProducts[number]>();
+        for (const p of dbProducts) {
+          if (p.normSku) productBySku.set(p.normSku, p);
+        }
+        const variantBySku = new Map<string, { product: typeof dbProducts[number]; variant: typeof dbProducts[number]['varian'][number] }>();
+        for (const p of dbProducts) {
+          for (const v of p.varian) {
+            const vs = normalizeSKU(v.sku || '');
+            if (vs) variantBySku.set(vs, { product: p, variant: v });
+          }
+        }
 
         const missingSku: string[] = [];
 
-        // Helper: parse tanggal dari string Excel
         const parseDate = (val: any): string => {
           if (!val) return today;
           const s = String(val).trim();
-          // Format DD/MM/YYYY HH:MM atau DD/MM/YYYY
           const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
           if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-          // Format YYYY-MM-DD
           if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
           return today;
         };
 
-        // Grouping per Order ID
-        // key = orderId, value = { tanggal, totalPayment, items[] }
+        // Setiap baris XLS = 1 OrderItem terpisah (TIDAK digabung walau SKU+varian sama)
         type OrderItem = {
           produk_id: string; produk_nama: string;
           varian_id: string; varian_nama: string;
@@ -526,114 +521,134 @@ export default function TransactionManager({ user, transactions, setTransactions
         };
         type OrderGroup = { orderId: string; tanggal: string; totalPayment: number; items: OrderItem[] };
         const orderMap = new Map<string, OrderGroup>();
-        let rowSeq = 0; // fallback jika tidak ada Order ID
+        let rowSeq = 0;
 
         for (let i = 0; i < dataRows.length; i++) {
           const row = dataRows[i] as any[];
-
-          // Lewati baris kosong
           if (!row || row.every((cell: any) => cell === '' || cell == null)) continue;
 
-          const rawSku = String(row[sIdx] ?? '').trim();
-          const normXlsSku = normalizeSKU(rawSku);
+          const rawVarSku  = variantSkuIdx !== -1 ? String(row[variantSkuIdx] ?? '').trim() : '';
+          const rawProdSku = productSkuIdx !== -1 ? String(row[productSkuIdx] ?? '').trim() : '';
+          const normVarSku  = normalizeSKU(rawVarSku);
+          const normProdSku = normalizeSKU(rawProdSku);
+          const rawVarian = vIdx !== -1 ? String(row[vIdx] ?? '').trim() : '';
+          const rawProdName = productNameIdx !== -1 ? String(row[productNameIdx] ?? '').trim() : '';
 
-          console.log(`[SHOPEE IMPORT] Baris ${i + 1} — SKU: "${normXlsSku}", Match: ${dbSkuSet.has(normXlsSku)}`);
+          if (!normVarSku && !normProdSku) continue;
 
-          if (normXlsSku === '') { continue; }
+          // 1) Coba match SKU varian dulu (paling spesifik)
+          let product: typeof dbProducts[number] | undefined;
+          let variant: typeof dbProducts[number]['varian'][number] | undefined;
+          let matchSource = '';
 
-          if (!dbSkuSet.has(normXlsSku)) {
-            if (!missingSku.includes(rawSku)) missingSku.push(rawSku);
+          if (normVarSku && variantBySku.has(normVarSku)) {
+            const m = variantBySku.get(normVarSku)!;
+            product = m.product;
+            variant = m.variant;
+            matchSource = 'variant-sku';
+          } else if (normProdSku && productBySku.has(normProdSku)) {
+            // 2) Fallback: match via SKU induk → cari varian by name
+            product = productBySku.get(normProdSku);
+            if (product) {
+              if (rawVarian) {
+                variant = product.varian.find(v => normalizeSKU(v.nama) === normalizeSKU(rawVarian));
+                if (!variant) {
+                  variant = product.varian.find(v =>
+                    v.nama.toUpperCase().includes(rawVarian.toUpperCase()) ||
+                    rawVarian.toUpperCase().includes(v.nama.toUpperCase())
+                  );
+                }
+              }
+              if (!variant && product.varian.length > 0) variant = product.varian[0];
+              matchSource = 'product-sku';
+            }
+          } else if (normVarSku && productBySku.has(normVarSku)) {
+            // 3) Sebagian marketplace pakai produk SKU di kolom variant SKU — coba juga
+            product = productBySku.get(normVarSku);
+            if (product) {
+              if (product.varian.length > 0) variant = product.varian[0];
+              matchSource = 'variant-sku-as-product';
+            }
+          }
+
+          if (!product) {
+            const tag = rawVarSku || rawProdSku;
+            if (!missingSku.includes(tag)) missingSku.push(tag);
             continue;
           }
 
-          const qty      = Number(String(row[qIdx] ?? '0').replace(/[^0-9]/g, '')) || 0;
-          const payment  = payIdx !== -1 ? parseIdAmount(row[payIdx]) : 0;
-          console.log(`[SHOPEE ROW] raw="${row[payIdx]}" → parsed payment=${payment}`);
-          const rawVarian = vIdx !== -1 ? String(row[vIdx] ?? '').trim() : '';
-          const rawDate  = dateIdx !== -1 ? row[dateIdx] : '';
-          const tanggal  = parseDate(rawDate);
+          // Produk tanpa varian → buat varian sintetis
+          if (!variant) {
+            variant = {
+              id: '__no_variant__',
+              nama: rawVarian || product.nama,
+              sku: '',
+              harga_jual: 0,
+              qty_batch: 0,
+              harga_packing: 0,
+              bahan: [],
+            } as any;
+          }
 
-          // Order ID: gunakan nilai dari kolom, atau buat fallback unik per baris pertama
+          const qty     = Number(String(row[qIdx] ?? '0').replace(/[^0-9]/g, '')) || 0;
+          const payment = payIdx !== -1 ? parseIdAmount(row[payIdx]) : 0;
+          const tanggal = parseDate(dateIdx !== -1 ? row[dateIdx] : '');
           const rawOrderId = oidIdx !== -1 ? String(row[oidIdx] ?? '').trim() : '';
           rowSeq++;
           const orderId = rawOrderId !== '' ? rawOrderId : `AUTO-${rowSeq}`;
 
-          const product = dbProducts.find(p => p.normSku === normXlsSku)!;
-
-          // Cari varian: exact → partial → varian pertama
-          let variant = product.varian.find(v => normalizeSKU(v.nama) === normalizeSKU(rawVarian));
-          if (!variant && rawVarian) {
-            variant = product.varian.find(v =>
-              v.nama.toUpperCase().includes(rawVarian.toUpperCase()) ||
-              rawVarian.toUpperCase().includes(v.nama.toUpperCase())
-            );
-          }
-          if (!variant && product.varian.length > 0) {
-            variant = product.varian[0];
-            console.log(`[SHOPEE IMPORT] Varian "${rawVarian}" → fallback: "${variant.nama}"`);
-          }
-          if (!variant) {
-            if (!missingSku.includes(rawSku)) missingSku.push(rawSku);
-            continue;
-          }
-
-          // Masukkan ke group pesanan
           if (!orderMap.has(orderId)) {
             orderMap.set(orderId, { orderId, tanggal, totalPayment: 0, items: [] });
           }
           const order = orderMap.get(orderId)!;
           order.totalPayment += payment;
 
-          // Jika varian yang sama sudah ada di pesanan ini, tambahkan qty-nya
-          const existingItem = order.items.find(
-            it => it.produk_id === product.id && it.varian_id === variant!.id
-          );
-          if (existingItem) {
-            existingItem.qty += qty;
-            existingItem.payment += payment;
-          } else {
-            order.items.push({
-              produk_id: product.id,
-              produk_nama: product.nama,
-              varian_id: variant.id,
-              varian_nama: variant.nama,
-              qty,
-              payment
-            });
-          }
+          // Tiap baris XLS push sebagai item terpisah — TANPA merge
+          order.items.push({
+            produk_id: product.id,
+            produk_nama: product.nama,
+            varian_id: variant!.id,
+            varian_nama: variant!.nama || rawVarian || rawProdName || product.nama,
+            qty,
+            payment,
+          });
+
+          console.log(`[XLS ROW ${i + 1}] order=${orderId} sku=${rawVarSku || rawProdSku} match=${matchSource} qty=${qty}`);
         }
 
-        console.log(`[SHOPEE IMPORT] Total row Excel: ${dataRows.length}`);
-        console.log(`[SHOPEE IMPORT] Total pesanan valid: ${orderMap.size}`);
-        console.log(`[SHOPEE IMPORT] SKU tidak ditemukan: ${missingSku.length}`, missingSku);
+        console.log(`[XLS IMPORT] Total rows: ${dataRows.length}, Pesanan: ${orderMap.size}, Missing SKU: ${missingSku.length}`);
 
         if (orderMap.size === 0) {
-          const skuInDb = [...dbSkuSet].slice(0, 8).join(', ');
+          const skuInDb = [...productBySku.keys()].slice(0, 8).join(', ');
           toast.error(
-            `0 item cocok. SKU di Excel: ${missingSku.slice(0, 5).join(', ')}. SKU di DB: ${skuInDb || 'Belum ada SKU terdaftar'}`,
+            `0 item cocok. SKU di file: ${missingSku.slice(0, 5).join(', ')}. SKU di katalog: ${skuInDb || 'belum terdaftar'}`,
             { duration: 10000 }
           );
           return;
         }
 
-        // Buat 1 transaksi per pesanan (Order ID)
+        // 1 pesanan = 1 transaksi; tiap baris XLS = item terpisah dalam penjualan_detail
         const transactionsToCreate = [...orderMap.values()].map(order => {
-          // Ringkasan keterangan: "Shopee #ID: ProdukA (Var1 x10), ProdukB (Var2 x5)"
           const shortId = order.orderId.length > 12 ? order.orderId.slice(-8) : order.orderId;
           const itemSummary = order.items
-            .map(it => `${it.produk_nama} (${it.varian_nama} x${it.qty})`)
+            .map(it => `${it.produk_nama}${it.varian_nama && it.varian_nama !== it.produk_nama ? ` (${it.varian_nama})` : ''} x${it.qty}`)
             .join(', ');
-          const keterangan = `Shopee #${shortId}: ${itemSummary}`;
+          const keterangan = `Pesanan #${shortId}: ${itemSummary}`;
 
           const totalQty = order.items.reduce((s, it) => s + it.qty, 0);
 
-          // Susun penjualan_detail: gabungkan item per produk
+          // Group per produk_id, tetapi simpan tiap baris sebagai entry varian terpisah
+          // (jangan dedupe — user ingin tiap baris XLS tetap ada)
           const produkMap = new Map<string, { produk_id: string; produk_nama: string; varian: { varian_id: string; varian_nama: string; qty: number }[] }>();
           for (const it of order.items) {
             if (!produkMap.has(it.produk_id)) {
               produkMap.set(it.produk_id, { produk_id: it.produk_id, produk_nama: it.produk_nama, varian: [] });
             }
-            produkMap.get(it.produk_id)!.varian.push({ varian_id: it.varian_id, varian_nama: it.varian_nama, qty: it.qty });
+            produkMap.get(it.produk_id)!.varian.push({
+              varian_id: it.varian_id,
+              varian_nama: it.varian_nama,
+              qty: it.qty,
+            });
           }
 
           return {

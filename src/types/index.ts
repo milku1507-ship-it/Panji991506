@@ -24,6 +24,7 @@ export type HppMaterial = {
 export type Variant = {
   id: string;
   nama: string;
+  sku?: string;
   harga_jual: number;
   qty_batch: number;
   harga_packing: number;
