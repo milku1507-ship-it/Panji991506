@@ -577,11 +577,11 @@ export default function TransactionManager({ user, transactions, setTransactions
             continue;
           }
 
-          // Produk tanpa varian → buat varian sintetis
+          // Produk tanpa varian → buat varian sintetis pakai nama produk dari app
           if (!variant) {
             variant = {
               id: '__no_variant__',
-              nama: rawVarian || product.nama,
+              nama: product.nama,
               sku: '',
               harga_jual: 0,
               qty_batch: 0,
@@ -604,11 +604,12 @@ export default function TransactionManager({ user, transactions, setTransactions
           order.totalPayment += payment;
 
           // Tiap baris XLS push sebagai item terpisah — TANPA merge
+          // Nama produk & nama varian SELALU dari katalog app (bukan dari XLS)
           order.items.push({
             produk_id: product.id,
             produk_nama: product.nama,
             varian_id: variant!.id,
-            varian_nama: variant!.nama || rawVarian || rawProdName || product.nama,
+            varian_nama: variant!.nama,
             qty,
             payment,
           });
