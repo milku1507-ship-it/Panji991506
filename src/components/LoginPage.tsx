@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { auth, googleProvider, signInWithPopup } from '../lib/firebase';
 import { toast } from 'sonner';
-import { Store } from 'lucide-react';
+import { ExternalLink, Info } from 'lucide-react';
 import { StoreSettings } from '../types';
 
 interface LoginPageProps {
@@ -11,9 +11,35 @@ interface LoginPageProps {
 
 export default function LoginPage({ settings }: LoginPageProps) {
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isInIframe, setIsInIframe] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      setIsInIframe(window.self !== window.top);
+    } catch {
+      // Cross-origin access throws — that's a strong signal we're in an iframe
+      setIsInIframe(true);
+    }
+  }, []);
+
+  const handleOpenInNewTab = () => {
+    // Open the same app URL in a top-level tab so popup auth + cookies work
+    window.open(window.location.href, '_blank', 'noopener,noreferrer');
+  };
 
   const handleGoogleLogin = async () => {
     if (isLoading) return;
+
+    // Inside Replit's preview iframe, third-party cookies are blocked,
+    // so Google's popup login can't communicate back. Open a top-level tab instead.
+    if (isInIframe) {
+      handleOpenInNewTab();
+      toast.info('Login dibuka di tab baru', {
+        description: 'Selesaikan login Google di tab baru, lalu data akan tersinkron otomatis.',
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
@@ -24,19 +50,32 @@ export default function LoginPage({ settings }: LoginPageProps) {
         console.log('User closed the login popup');
         return;
       }
-      
+
       console.error('Login error:', error);
-      
-      if (error.code === 'auth/network-request-failed') {
+
+      if (
+        error.code === 'auth/popup-blocked' ||
+        error.code === 'auth/cancelled-popup-request' ||
+        error.code === 'auth/web-storage-unsupported'
+      ) {
+        // Browser blocked popup or storage — fall back to opening in a new tab
+        toast.error('Browser memblokir popup login.', {
+          description: 'Buka aplikasi di tab baru lalu coba lagi.',
+          action: { label: 'Buka Tab Baru', onClick: handleOpenInNewTab },
+        });
+      } else if (error.code === 'auth/unauthorized-domain') {
+        toast.error('Domain ini belum diizinkan di Firebase.', {
+          description: 'Tambahkan domain Replit (.replit.dev / .replit.app) ke Authorized Domains di Firebase Console → Authentication → Settings.',
+        });
+      } else if (error.code === 'auth/network-request-failed') {
         toast.error('Koneksi gagal. Silakan periksa internet Anda atau coba lagi.', {
           description: 'Pastikan tidak ada ad-blocker yang menghalangi login Google.',
-          action: {
-            label: 'Coba Lagi',
-            onClick: handleGoogleLogin
-          }
+          action: { label: 'Coba Lagi', onClick: handleGoogleLogin },
         });
       } else {
-        toast.error('Gagal masuk dengan Google. Silakan coba lagi.');
+        toast.error('Gagal masuk dengan Google. Silakan coba lagi.', {
+          description: error?.message || error?.code || undefined,
+        });
       }
     } finally {
       setIsLoading(false);
@@ -63,13 +102,34 @@ export default function LoginPage({ settings }: LoginPageProps) {
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-50 space-y-6">
-          <Button 
+          {isInIframe && (
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3 text-left">
+              <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-blue-800">
+                  Login Google butuh tab baru
+                </p>
+                <p className="text-[11px] text-blue-700 leading-relaxed mt-1">
+                  Preview Replit dijalankan dalam frame, jadi popup Google tidak bisa
+                  ngirim hasilnya kembali. Klik tombol di bawah untuk buka aplikasi di
+                  tab baru, lalu login seperti biasa.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <Button
             onClick={handleGoogleLogin}
             disabled={isLoading}
             className="w-full h-14 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-3 shadow-lg shadow-brand-200 hover:scale-[1.02] active:scale-95 transition-all"
           >
             {isLoading ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : isInIframe ? (
+              <>
+                <ExternalLink className="w-5 h-5" />
+                Buka di Tab Baru untuk Login
+              </>
             ) : (
               <>
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -94,7 +154,7 @@ export default function LoginPage({ settings }: LoginPageProps) {
               </>
             )}
           </Button>
-          
+
           <p className="text-xs text-gray-400 font-medium">
             Data kamu tersimpan aman dan bisa diakses di perangkat manapun
           </p>
