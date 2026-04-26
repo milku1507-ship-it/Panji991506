@@ -5,6 +5,7 @@ import HPPManager from './components/HPPManager';
 import StockManager from './components/StockManager';
 import TransactionManager from './components/TransactionManager';
 import FinancialReport from './components/FinancialReport';
+import ROASCalculator from './components/ROASCalculator';
 import StoreSettingsManager from './components/StoreSettingsManager';
 import CategoryManager from './components/CategoryManager';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
@@ -580,6 +581,8 @@ function AppContent() {
         />;
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} />;
+      case 'roas':
+        return <ROASCalculator products={products} ingredients={ingredients} user={user} />;
       case 'store-settings':
         return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} onManageCategories={() => handleTabChange('category-settings')} />;
       case 'category-settings':

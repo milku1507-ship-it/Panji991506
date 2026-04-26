@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, Bell, Printer, Save, User, Lock, LogOut } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, Bell, Printer, Save, User, Lock, LogOut, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
@@ -19,7 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'hpp', label: 'HPP', icon: Calculator },
   { id: 'stock', label: 'Stok', icon: Package },
-  { id: 'transactions', label: 'History', icon: History },
+  { id: 'roas', label: 'ROAS', icon: TrendingUp },
   { id: 'reports', label: 'Laporan', icon: PieChart },
 ];
 
@@ -35,6 +35,7 @@ const MENU_GROUPS = [
     items: [
       { id: 'products', label: 'Manajemen Produk', icon: Package },
       { id: 'hpp', label: 'Manajemen HPP', icon: Calculator },
+      { id: 'roas', label: 'Kalkulator ROAS', icon: TrendingUp },
       { id: 'reports', label: 'Laporan Keuangan', icon: PieChart },
       { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
     ]
