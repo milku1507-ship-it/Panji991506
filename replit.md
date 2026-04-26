@@ -7,8 +7,9 @@ Indonesian UMKM (small business) bookkeeping app: HPP, stock, transactions, fina
 - Tailwind CSS v4 + shadcn/ui (in `components/ui`)
 - Firebase Auth (Google sign-in), Firestore, Firebase Storage — points at the user's existing Firebase project (`mila1507`)
 - Gemini AI for natural-language transaction parsing, accessed through Replit AI Integrations (`AI_INTEGRATIONS_GEMINI_API_KEY` / `AI_INTEGRATIONS_GEMINI_BASE_URL`)
-- Express (`scripts/server.ts`) used for the production `npm run start` build to serve `dist/` and the `/api/ai-parse` endpoint
-- Vite dev server uses `scripts/aiParseMiddleware.ts` to expose `/api/ai-parse` during development
+- Express (`scripts/server.ts`) used for the production `npm run start` build to serve `dist/` and the AI endpoints (`/api/ai-parse`, `/api/parse-hpp`)
+- Vite dev server uses `scripts/aiParseMiddleware.ts` to expose the same AI endpoints during development
+- `/api/parse-hpp` (`scripts/aiParseHppShared.ts`) powers the "Paste Otomatis" smart-input on the HPP variants page — turns free-text HPP notes into a structured variant + bahan list grouped by kelompok
 
 ## Layout
 - `src/` — React app (App, components, lib, constants, types, SettingsContext)

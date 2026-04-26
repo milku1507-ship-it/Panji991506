@@ -6,12 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { 
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
-  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search
+  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search, Sparkles
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PasteHppDialog, { ParsedHppResult } from './PasteHppDialog';
 import {
   Dialog,
   DialogClose,
@@ -75,6 +76,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [editingMaterial, setEditingMaterial] = React.useState<{ material: HppMaterial, index: number } | null>(null);
   const [productFees, setProductFees] = React.useState<AdditionalFee[]>([]);
   const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
+  const [isPasteHppOpen, setIsPasteHppOpen] = React.useState(false);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
   const selectedVariant = selectedProduct?.varian.find(v => v.id === selectedVariantId);
@@ -631,6 +633,165 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       console.log("[HPPManager] setIsSaving(false) called in handleSaveMaterial.");
     }
   };
+  const handlePasteHppConfirm = async (parsed: ParsedHppResult) => {
+    if (!selectedProductId) {
+      toast.error('Pilih produk dulu');
+      return;
+    }
+    const product = products.find(p => p.id === selectedProductId);
+    if (!product) {
+      toast.error('Produk tidak ditemukan');
+      return;
+    }
+
+    const variantNama = (parsed.variant.nama_varian || '').trim() || 'Varian Baru';
+    const qtyBatch = Math.max(1, Math.round(Number(parsed.variant.qty_batch) || 1));
+    const hargaJual = Math.round(Number(parsed.variant.harga_jual) || 0);
+    const hargaPacking = Math.round(Number(parsed.variant.harga_packing) || 0);
+
+    const validKategori = new Set([...(settings?.kategori_hpp || []), 'Lainnya']);
+
+    type IngredientPlan = {
+      id: string;
+      isNew: boolean;
+      name: string;
+      category: string;
+      unit: string; // base unit
+      price: number; // per base unit
+    };
+
+    const ingredientPlans: IngredientPlan[] = [];
+    const newBahan: HppMaterial[] = [];
+
+    for (const b of parsed.bahan) {
+      const nama = (b.nama || '').trim();
+      if (!nama) continue;
+
+      const satuanInput = (b.satuan || 'pcs').trim();
+      const qtyInput = Number(b.qty) || 0;
+      const hargaInput = Number(b.harga_per_satuan) || 0;
+      let kelompok = (b.kelompok || 'Lainnya').trim();
+      if (!validKategori.has(kelompok)) kelompok = 'Lainnya';
+
+      const baseUnit = getBaseUnit(satuanInput);
+      const qtyBase = toBaseValue(qtyInput, satuanInput);
+      const pricePerBase = hargaInput / getConversionRate(satuanInput);
+
+      // Find or create matching ingredient (by case-insensitive name)
+      const normalizedNama = nama.toLowerCase();
+      const existing = ingredients.find(i => i.name.toLowerCase().trim() === normalizedNama);
+      const planned = ingredientPlans.find(p => p.name.toLowerCase() === normalizedNama);
+
+      let ingredientId: string;
+      if (existing) {
+        ingredientId = existing.id;
+        if (!planned) {
+          ingredientPlans.push({
+            id: ingredientId,
+            isNew: false,
+            name: nama,
+            category: kelompok,
+            unit: baseUnit,
+            price: pricePerBase,
+          });
+        }
+      } else if (planned) {
+        ingredientId = planned.id;
+      } else {
+        ingredientId = 'ing_' + Math.random().toString(36).substr(2, 9);
+        ingredientPlans.push({
+          id: ingredientId,
+          isNew: true,
+          name: nama,
+          category: kelompok,
+          unit: baseUnit,
+          price: pricePerBase,
+        });
+      }
+
+      newBahan.push({
+        id: 'mat_' + Math.random().toString(36).substr(2, 9),
+        ingredientId,
+        nama,
+        kelompok,
+        qty: qtyBase,
+        satuan: baseUnit,
+        harga: pricePerBase,
+      });
+    }
+
+    const newVariant: Variant = {
+      id: 'var_' + Math.random().toString(36).substr(2, 9),
+      nama: variantNama,
+      sku: '',
+      harga_jual: hargaJual,
+      qty_batch: qtyBatch,
+      harga_packing: hargaPacking,
+      min_order: 1,
+      bahan: newBahan,
+    };
+
+    const updatedProduct: Product = {
+      ...product,
+      varian: [...product.varian, newVariant],
+    };
+
+    // Update local ingredient list (create new + sync price/unit on existing)
+    const updatedIngredientsLocal: Ingredient[] = ingredients.map(i => {
+      const plan = ingredientPlans.find(p => p.id === i.id);
+      if (!plan || plan.isNew) return i;
+      return { ...i, name: plan.name, category: plan.category, unit: plan.unit, price: plan.price, fromHpp: true };
+    });
+    for (const plan of ingredientPlans) {
+      if (plan.isNew) {
+        updatedIngredientsLocal.push({
+          id: plan.id,
+          name: plan.name,
+          category: plan.category,
+          unit: plan.unit,
+          price: plan.price,
+          initialStock: 0,
+          currentStock: 0,
+          minStock: 0,
+          fromHpp: true,
+        });
+      }
+    }
+
+    // Optimistic local updates
+    setIngredients(updatedIngredientsLocal);
+    setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+
+    // Persist to Firestore in a batch
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        batch.set(
+          doc(db, `users/${user.uid}/hpp/${selectedProductId}`),
+          sanitizeData(updatedProduct)
+        );
+        for (const plan of ingredientPlans) {
+          const ingDoc = updatedIngredientsLocal.find(i => i.id === plan.id);
+          if (ingDoc) {
+            batch.set(doc(db, `users/${user.uid}/stok/${plan.id}`), sanitizeData(ingDoc));
+          }
+        }
+        await batch.commit();
+      } catch (error) {
+        console.error('[HPPManager] paste-hpp save error:', error);
+        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/hpp/${selectedProductId}`);
+        throw error;
+      }
+    }
+
+    toast.success(
+      `Varian "${variantNama}" dibuat dengan ${newBahan.length} bahan ✓`,
+      { description: ingredientPlans.filter(p => p.isNew).length > 0
+          ? `${ingredientPlans.filter(p => p.isNew).length} bahan baru ditambahkan ke Stok`
+          : undefined }
+    );
+  };
+
   const handleSaveHpp = async () => {
     if (!activeHppVariant || !selectedProductId) return;
     
@@ -748,13 +909,23 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           </Button>
         )}
         {view === 'variants' && (
-          <Button 
-            onClick={() => { setEditingVariant(null); setIsVariantModalOpen(true); }}
-            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-brand-200 gap-2 h-12 px-6"
-          >
-            <Plus className="w-4 h-4" />
-            Varian Baru
-          </Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={() => setIsPasteHppOpen(true)}
+              className="border-primary text-primary hover:bg-brand-50 font-bold rounded-2xl gap-2 h-12 px-5"
+            >
+              <Sparkles className="w-4 h-4" />
+              Paste Otomatis
+            </Button>
+            <Button 
+              onClick={() => { setEditingVariant(null); setIsVariantModalOpen(true); }}
+              className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-brand-200 gap-2 h-12 px-6"
+            >
+              <Plus className="w-4 h-4" />
+              Varian Baru
+            </Button>
+          </div>
         )}
         {view === 'detail' && (
           <Button 
@@ -1507,6 +1678,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PasteHppDialog
+        open={isPasteHppOpen}
+        onOpenChange={setIsPasteHppOpen}
+        productName={selectedProduct?.nama || ''}
+        kategoriHpp={settings?.kategori_hpp || []}
+        ingredients={ingredients}
+        onConfirm={handlePasteHppConfirm}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { runAIParse } from './aiParseShared';
+import { runParseHpp } from './aiParseHppShared';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,16 @@ app.post('/api/ai-parse', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     console.error('[ai-parse] error', err);
+    res.status(500).json({ error: err?.message || 'AI error' });
+  }
+});
+
+app.post('/api/parse-hpp', async (req, res) => {
+  try {
+    const result = await runParseHpp(req.body);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[parse-hpp] error', err);
     res.status(500).json({ error: err?.message || 'AI error' });
   }
 });
