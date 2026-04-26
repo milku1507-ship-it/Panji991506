@@ -13,14 +13,17 @@ const app = express();
 // Proxy Firebase Auth handler BEFORE express.json so request bodies are forwarded as-is.
 // This makes authDomain == app domain, avoiding cross-site storage partitioning that
 // breaks signInWithRedirect on Chrome/Android and other modern browsers.
-const firebaseAuthProxy = createProxyMiddleware({
-  target: 'https://mila1507.firebaseapp.com',
-  changeOrigin: true,
-  secure: true,
-  xfwd: false,
-});
-app.use('/__/auth', firebaseAuthProxy);
-app.use('/__/firebase', firebaseAuthProxy);
+// IMPORTANT: use pathFilter (NOT app.use(prefix, ...)) so the original `/__/auth/...`
+// path is preserved when forwarded — otherwise Firebase Hosting returns "Site Not Found".
+app.use(
+  createProxyMiddleware({
+    target: 'https://mila1507.firebaseapp.com',
+    changeOrigin: true,
+    secure: true,
+    xfwd: false,
+    pathFilter: ['/__/auth/**', '/__/firebase/**'],
+  })
+);
 
 app.use(express.json({ limit: '2mb' }));
 
