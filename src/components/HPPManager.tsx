@@ -234,6 +234,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
       const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
       const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
+      const min_order = Math.max(1, parseInt(formData.get('min_order') as string) || 1);
 
       if (!selectedProductId) {
         throw new Error("Produk tidak dipilih");
@@ -246,7 +247,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
       let updatedVarian;
       if (editingVariant) {
-        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing } : v);
+        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing, min_order } : v);
       } else {
         const newVariant: Variant = {
           id: 'var_' + Math.random().toString(36).substr(2, 9),
@@ -255,6 +256,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           harga_jual,
           qty_batch,
           harga_packing,
+          min_order,
           bahan: []
         };
         updatedVarian = [...product.varian, newVariant];
@@ -1237,6 +1239,32 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Label htmlFor="harga_packing" className="font-bold">Harga Packing / pack</Label>
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
             </div>
+            {(() => {
+              const v = editingVariant;
+              const materials = v ? v.bahan.reduce((a, b) => a + getMaterialCost(b), 0) : 0;
+              const qb = Math.max(1, v?.qty_batch || 1);
+              const matPerPcs = materials / qb;
+              const hj = v?.harga_jual || 0;
+              const hp = v?.harga_packing || 0;
+              const margin = hj - matPerPcs;
+              const suggested = margin > 0 ? Math.max(1, Math.ceil(hp / margin)) : null;
+              const defaultMin = v?.min_order ?? (suggested || 1);
+              return (
+                <div className="space-y-2">
+                  <Label htmlFor="min_order" className="font-bold">Minimal Order (pcs)</Label>
+                  <Input id="min_order" name="min_order" type="number" min={1} defaultValue={defaultMin} required className="rounded-xl h-12" />
+                  {suggested !== null ? (
+                    <p className="text-[11px] text-gray-500 font-medium">
+                      Saran logis: <span className="font-bold text-primary">{suggested} pcs</span> — agar biaya packing 1 pak ({formatCurrency(hp, true)}) tertutup oleh margin per pcs ({formatCurrency(margin, true)}).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-amber-600 font-medium">
+                      Margin per pcs masih rugi. Naikkan harga jual atau turunkan biaya bahan dulu.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
               <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100 active:scale-95 transition-all">

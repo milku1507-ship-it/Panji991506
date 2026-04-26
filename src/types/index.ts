@@ -28,6 +28,7 @@ export type Variant = {
   harga_jual: number;
   qty_batch: number;
   harga_packing: number;
+  min_order?: number;
   bahan: HppMaterial[];
 };
 
