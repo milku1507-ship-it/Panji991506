@@ -9,6 +9,7 @@ Indonesian UMKM (small business) bookkeeping app: HPP, stock, transactions, fina
 - Gemini AI for natural-language transaction parsing, accessed through Replit AI Integrations (`AI_INTEGRATIONS_GEMINI_API_KEY` / `AI_INTEGRATIONS_GEMINI_BASE_URL`)
 - Express (`scripts/server.ts`) used for the production `npm run start` build to serve `dist/` and the AI endpoints (`/api/ai-parse`, `/api/parse-hpp`)
 - Vite dev server uses `scripts/aiParseMiddleware.ts` to expose the same AI endpoints during development
+- Firebase Auth handler is reverse-proxied: `/__/auth/*` and `/__/firebase/*` forward to `mila1507.firebaseapp.com` via `http-proxy-middleware` (prod) and Vite `server.proxy` (dev). `authDomain` is set dynamically to `window.location.host` so the entire OAuth redirect flow stays on a single origin — fixes "missing initial state" / storage-partitioning errors with `signInWithRedirect` on Chrome/Android
 - `/api/parse-hpp` (`scripts/aiParseHppShared.ts`) powers the "Paste Otomatis" smart-input on the HPP variants page — turns free-text HPP notes into a structured variant + bahan list grouped by kelompok
 
 ## Layout

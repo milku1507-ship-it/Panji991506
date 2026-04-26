@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { runAIParse } from './aiParseShared';
 import { runParseHpp } from './aiParseHppShared';
 
@@ -8,6 +9,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Proxy Firebase Auth handler BEFORE express.json so request bodies are forwarded as-is.
+// This makes authDomain == app domain, avoiding cross-site storage partitioning that
+// breaks signInWithRedirect on Chrome/Android and other modern browsers.
+const firebaseAuthProxy = createProxyMiddleware({
+  target: 'https://mila1507.firebaseapp.com',
+  changeOrigin: true,
+  secure: true,
+  xfwd: false,
+});
+app.use('/__/auth', firebaseAuthProxy);
+app.use('/__/firebase', firebaseAuthProxy);
+
 app.use(express.json({ limit: '2mb' }));
 
 app.post('/api/ai-parse', async (req, res) => {

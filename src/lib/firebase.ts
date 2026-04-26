@@ -44,10 +44,18 @@ import {
 } from 'firebase/storage';
 import firebaseConfigImport from '../../firebase-applet-config.json';
 
-// Support environment variables for Vercel deployment
+// Use the app's own host as authDomain whenever possible. The server proxies
+// `/__/auth/*` and `/__/firebase/*` to mila1507.firebaseapp.com, so Firebase Auth
+// keeps working but storage stays on a single origin — fixes the
+// "missing initial state" error in storage-partitioned browsers (Chrome, etc.).
+const runtimeAuthDomain =
+  typeof window !== 'undefined' && window.location?.host
+    ? window.location.host
+    : (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigImport.authDomain);
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigImport.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigImport.authDomain,
+  authDomain: runtimeAuthDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigImport.projectId,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigImport.storageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigImport.messagingSenderId,

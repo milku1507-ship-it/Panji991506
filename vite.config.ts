@@ -28,6 +28,20 @@ export default defineConfig(({mode}) => {
       watch: {
         ignored: ['**/.local/**', '**/node_modules/**', '**/.git/**'],
       },
+      proxy: {
+        // Proxy Firebase Auth handler so authDomain == app domain.
+        // This avoids cross-site storage partitioning that breaks signInWithRedirect.
+        '/__/auth': {
+          target: 'https://mila1507.firebaseapp.com',
+          changeOrigin: true,
+          secure: true,
+        },
+        '/__/firebase': {
+          target: 'https://mila1507.firebaseapp.com',
+          changeOrigin: true,
+          secure: true,
+        },
+      },
     },
   };
 });
