@@ -3,6 +3,8 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut, 
   onAuthStateChanged, 
   User,
@@ -97,7 +99,7 @@ export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Force network connection
-export { signInWithPopup, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject };
+export { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject };
 export type { User };
 
 // Error Handling Types

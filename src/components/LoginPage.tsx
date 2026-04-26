@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { auth, googleProvider, signInWithPopup } from '../lib/firebase';
+import { auth, googleProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from '../lib/firebase';
 import { toast } from 'sonner';
 import { ExternalLink, Info } from 'lucide-react';
 import { StoreSettings } from '../types';
@@ -20,6 +20,21 @@ export default function LoginPage({ settings }: LoginPageProps) {
       // Cross-origin access throws — that's a strong signal we're in an iframe
       setIsInIframe(true);
     }
+
+    // Surface any error from a previous signInWithRedirect attempt.
+    // Successful sign-ins are picked up automatically by onAuthStateChanged in App.tsx.
+    getRedirectResult(auth).catch((error: any) => {
+      console.error('[LoginPage] redirect result error:', error);
+      if (error?.code === 'auth/unauthorized-domain') {
+        toast.error('Domain ini belum diizinkan di Firebase.', {
+          description: 'Tambahkan domain ini ke Firebase Console → Authentication → Settings → Authorized domains.',
+        });
+      } else if (error?.code && error?.code !== 'auth/no-auth-event') {
+        toast.error('Login gagal saat redirect.', {
+          description: error?.message || error?.code,
+        });
+      }
+    });
   }, []);
 
   const handleOpenInNewTab = () => {
@@ -42,6 +57,7 @@ export default function LoginPage({ settings }: LoginPageProps) {
 
     setIsLoading(true);
     try {
+      // Try popup first — fastest UX when it works
       await signInWithPopup(auth, googleProvider);
       toast.success('Berhasil masuk!');
     } catch (error: any) {
@@ -53,19 +69,38 @@ export default function LoginPage({ settings }: LoginPageProps) {
 
       console.error('Login error:', error);
 
-      if (
+      // Browsers with strict COOP/COEP or third-party storage blocking can sever
+      // the popup ↔ opener relationship, which makes the popup complete but the
+      // app never receive the credential. Fall back to a full-page redirect.
+      const popupComm =
         error.code === 'auth/popup-blocked' ||
         error.code === 'auth/cancelled-popup-request' ||
-        error.code === 'auth/web-storage-unsupported'
-      ) {
-        // Browser blocked popup or storage — fall back to opening in a new tab
-        toast.error('Browser memblokir popup login.', {
-          description: 'Buka aplikasi di tab baru lalu coba lagi.',
-          action: { label: 'Buka Tab Baru', onClick: handleOpenInNewTab },
-        });
-      } else if (error.code === 'auth/unauthorized-domain') {
+        error.code === 'auth/web-storage-unsupported' ||
+        error.code === 'auth/internal-error' ||
+        /Cross-Origin-Opener-Policy|popup|window.closed/i.test(error?.message || '');
+
+      if (popupComm) {
+        try {
+          toast.info('Mengalihkan ke halaman login Google...');
+          await signInWithRedirect(auth, googleProvider);
+          // Browser navigates away here; nothing else to do.
+          return;
+        } catch (redirectErr: any) {
+          console.error('Redirect login error:', redirectErr);
+          toast.error('Gagal redirect ke login Google.', {
+            description: redirectErr?.message || redirectErr?.code,
+          });
+          return;
+        }
+      }
+
+      if (error.code === 'auth/unauthorized-domain') {
         toast.error('Domain ini belum diizinkan di Firebase.', {
-          description: 'Tambahkan domain Replit (.replit.dev / .replit.app) ke Authorized Domains di Firebase Console → Authentication → Settings.',
+          description: 'Tambahkan domain ini (mis. *.replit.app) ke Firebase Console → Authentication → Settings → Authorized domains.',
+        });
+      } else if (error.code === 'auth/operation-not-allowed') {
+        toast.error('Provider Google belum aktif di Firebase.', {
+          description: 'Aktifkan di Firebase Console → Authentication → Sign-in method → Google.',
         });
       } else if (error.code === 'auth/network-request-failed') {
         toast.error('Koneksi gagal. Silakan periksa internet Anda atau coba lagi.', {
