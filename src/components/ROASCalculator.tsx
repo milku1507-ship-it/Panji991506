@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Calculator, TrendingUp, AlertTriangle, Sparkles, Megaphone, Tag, PieChart, Lightbulb } from 'lucide-react';
+import { Calculator, TrendingUp, AlertTriangle, Sparkles, Megaphone, Tag, PieChart, Lightbulb, Package } from 'lucide-react';
 
 interface Props {
   products: Product[];
@@ -67,6 +67,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
   const [variantId, setVariantId] = React.useState<string>('');
   const [profitPctRaw, setProfitPctRaw] = React.useState<string>('');
   const [voucher, setVoucher] = React.useState<string>('0');
+  const [scaleMode, setScaleMode] = React.useState<'pcs' | 'order'>('order');
 
   // Load saved defaults per variant
   const loadDefaults = React.useCallback(() => {
@@ -109,15 +110,23 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
 
   const profitPct = Number(profitPctRaw) || 0;
   const voucherNum = Number(voucher) || 0;
+  const minOrder = Math.max(1, Number(variant?.min_order) || 1);
+  const qty = scaleMode === 'order' ? minOrder : 1;
 
   const result: ResultBlock | null = React.useMemo(() => {
     if (!product || !variant) return null;
-    const A = Number(variant.harga_jual) || 0;
-    const B = Math.max(0, voucherNum);
-    const E = calcHppPerPcs(variant, ingredients);
+    const hargaJualPcs = Number(variant.harga_jual) || 0;
+    const hppPcs = calcHppPerPcs(variant, ingredients);
+    const voucherPcs = Math.max(0, voucherNum);
+
+    // Scale per-pcs items by qty (min_order or 1).
+    // Nominal fees (F) stay per-order (admin/ongkir tetap), % fees (C) stay %.
+    const A = hargaJualPcs * qty;
+    const B = voucherPcs * qty;
+    const E = hppPcs * qty;
 
     let C = 0; // % fees
-    let F = 0; // nominal fees
+    let F = 0; // nominal fees (per order, NOT scaled)
     for (const fee of product.biaya_lain || []) {
       if (fee.tipe === 'persen') C += Number(fee.nilai) || 0;
       else if (fee.tipe === 'nominal') F += Number(fee.nilai) || 0;
@@ -138,8 +147,9 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
       M = K / 0.8;
     }
 
-    return { D, G, H, J, K, L, M, C, F, voucher: B, hpp: E };
-  }, [product, variant, voucherNum, profitPct, ingredients]);
+    // Keep hpp as per-pcs for the InfoBlock label clarity.
+    return { D, G, H, J, K, L, M, C, F, voucher: B, hpp: hppPcs };
+  }, [product, variant, voucherNum, profitPct, ingredients, qty]);
 
   const handleProfitChange = (v: string) => {
     setProfitPctRaw(v);
@@ -249,14 +259,62 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
       {product && variant && (
         <Card className="rounded-3xl border-none shadow-sm">
           <CardContent className="p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-violet-600">Langkah 2</span>
-              <span className="text-sm font-bold">Data Otomatis dari Produk</span>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-violet-600">Langkah 2</span>
+                <span className="text-sm font-bold">Data Otomatis dari Produk</span>
+              </div>
+
+              {minOrder > 1 && (
+                <div className="flex items-center gap-1 p-1 bg-violet-50 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setScaleMode('pcs')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                      scaleMode === 'pcs' ? 'bg-white text-violet-700 shadow-sm' : 'text-violet-500'
+                    }`}
+                  >
+                    Per pcs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScaleMode('order')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 ${
+                      scaleMode === 'order' ? 'bg-white text-violet-700 shadow-sm' : 'text-violet-500'
+                    }`}
+                  >
+                    <Package className="w-3 h-3" />
+                    Per Pesanan ({minOrder} pcs)
+                  </button>
+                </div>
+              )}
             </div>
 
+            {scaleMode === 'order' && minOrder > 1 && (
+              <div className="flex items-start gap-2 p-3 rounded-2xl bg-violet-50/60 text-violet-800 text-[11px] font-medium">
+                <Package className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Mode <strong>Per Pesanan</strong>: Harga Jual & HPP otomatis dikali {minOrder} pcs (sesuai minimal order varian).
+                  Biaya tipe nominal (admin/ongkir tetap) tidak dikalikan karena memang per-pesanan.
+                </span>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <InfoBlock icon={<Tag />} label="Harga Jual (A)" value={formatCurrency(variant.harga_jual || 0)} tone="violet" />
-              <InfoBlock icon={<PieChart />} label="HPP / pcs (E)" value={formatCurrency(result?.hpp || 0)} tone="rose" />
+              <InfoBlock
+                icon={<Tag />}
+                label={qty > 1 ? `Harga Jual × ${qty} (A)` : 'Harga Jual (A)'}
+                value={formatCurrency((variant.harga_jual || 0) * qty)}
+                tone="violet"
+                hint={qty > 1 ? `${formatCurrency(variant.harga_jual || 0)} / pcs` : undefined}
+              />
+              <InfoBlock
+                icon={<PieChart />}
+                label={qty > 1 ? `HPP × ${qty} (E)` : 'HPP / pcs (E)'}
+                value={formatCurrency((result?.hpp || 0) * qty)}
+                tone="rose"
+                hint={qty > 1 ? `${formatCurrency(result?.hpp || 0)} / pcs` : undefined}
+              />
               <InfoBlock
                 icon={<Megaphone />}
                 label="Admin Fee % (C)"
@@ -269,7 +327,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 label="Biaya Proses (F)"
                 value={formatCurrency(result?.F || 0)}
                 tone="emerald"
-                hint={(result?.F || 0) === 0 ? 'Belum ada biaya tipe nominal' : undefined}
+                hint={(result?.F || 0) === 0 ? 'Belum ada biaya tipe nominal' : 'per pesanan'}
               />
             </div>
 
@@ -327,6 +385,11 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 placeholder="0"
                 className="rounded-xl h-11"
               />
+              {qty > 1 && voucherNum > 0 && (
+                <p className="text-[11px] text-gray-400 font-medium">
+                  Total voucher per pesanan: {formatCurrency(voucherNum * qty)} ({qty} × {formatCurrency(voucherNum)})
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -338,7 +401,9 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
           <CardContent className="p-5 space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-violet-700">Hasil</span>
-              <span className="text-sm font-black text-[#1A1A2E]">Kalkulasi ROAS</span>
+              <span className="text-sm font-black text-[#1A1A2E]">
+                Kalkulasi ROAS {qty > 1 ? `(per pesanan ${qty} pcs)` : '(per pcs)'}
+              </span>
             </div>
 
             {result.H <= 0 ? (
