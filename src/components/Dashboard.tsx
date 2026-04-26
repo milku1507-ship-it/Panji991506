@@ -98,19 +98,14 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
       {/* E-Wallet Header Card */}
       <div className="relative overflow-hidden wallet-gradient rounded-[2.5rem] p-6 text-white shadow-2xl shadow-brand-200">
         <div className="relative z-10">
-          <div className="flex justify-between items-center mb-8">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full glass-card flex items-center justify-center">
-                <Wallet className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo Laba ({period})</p>
-                <h3 className="text-3xl font-black">{formatCurrency(netProfit, true)}</h3>
-              </div>
+          {/* Top row: wallet icon + period selector */}
+          <div className="flex justify-between items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-full glass-card flex items-center justify-center shrink-0">
+              <Wallet className="w-5 h-5" />
             </div>
             <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="w-[130px] bg-white/20 border-white/30 text-white text-xs font-bold rounded-2xl h-8">
-                <Calendar className="w-3 h-3 mr-1" />
+              <SelectTrigger className="w-auto max-w-[60%] bg-white/20 border-white/30 text-white text-xs font-bold rounded-full h-9 px-3 gap-1.5">
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-2xl">
@@ -119,6 +114,14 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
                 <SelectItem value="Semua Waktu">Semua Waktu</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Balance block — full width to avoid clipping for large numbers */}
+          <div className="mb-7">
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">Saldo Laba</p>
+            <h3 className="text-3xl sm:text-4xl font-black leading-tight break-words">
+              {formatCurrency(netProfit, true)}
+            </h3>
           </div>
 
           <div className="grid grid-cols-4 gap-2">
