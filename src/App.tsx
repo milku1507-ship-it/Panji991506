@@ -80,6 +80,11 @@ function AppContent() {
           receiptFooter: 'Terima kasih sudah berbelanja!',
           onboardingCompleted: false
         });
+        // Reset navigation state agar saat user lain login tidak terbawa
+        // ke sub-halaman lama (mis. Pengaturan Toko) yang bisa bikin app
+        // mental balik ke login karena state stale.
+        setActiveTab('dashboard');
+        setBackAction(null);
       }
 
       setUser(currentUser);
@@ -532,11 +537,14 @@ function AppContent() {
   // - if a sub-page has registered backAction, run it
   // - else if we're not on dashboard, go to dashboard
   // - else (on dashboard with no sub-page) the browser exits naturally
-  useBackHandler(!!backAction, () => {
+  // Only active when the user is logged in — on the login page we want the
+  // browser back button to behave normally (and avoid pushing history entries
+  // that could interfere with the auth popup/redirect flow).
+  useBackHandler(!!user && !!backAction, () => {
     backAction?.();
     setBackAction(null);
   });
-  useBackHandler(!backAction && activeTab !== 'dashboard', () => {
+  useBackHandler(!!user && !backAction && activeTab !== 'dashboard', () => {
     setActiveTab('dashboard');
   });
 
