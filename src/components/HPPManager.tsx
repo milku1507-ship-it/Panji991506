@@ -415,6 +415,81 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     setIsDeleteCategoryConfirmOpen(true);
   };
 
+  const handleCopyMaterials = async () => {
+    if (!activeHppVariant) return;
+    if (activeHppVariant.bahan.length === 0) {
+      toast.info('Belum ada bahan untuk disalin.');
+      return;
+    }
+
+    const lines: string[] = [];
+    const judul = `${selectedProduct?.nama || ''} - ${activeHppVariant.nama}`.trim();
+    lines.push(judul);
+    lines.push('');
+
+    const groups = ['Kulit Cireng', 'Bahan Isian', 'Packing', 'Overhead', 'Lainnya'];
+    let totalCost = 0;
+
+    for (const cat of groups) {
+      const catMaterials = activeHppVariant.bahan.filter(m => {
+        let mCat = m.kelompok;
+        if (mCat === 'Kulit') mCat = 'Kulit Cireng';
+        if (mCat === 'Isian') mCat = 'Bahan Isian';
+        return mCat === cat;
+      });
+      if (catMaterials.length === 0) continue;
+
+      lines.push(cat.toUpperCase());
+      for (const m of catMaterials) {
+        const ing = ingredients.find(i => i.id === m.ingredientId);
+        const name = ing ? ing.name : m.nama;
+        const unit = ing ? ing.unit : m.satuan;
+        const cost = getMaterialCost(m);
+        totalCost += cost;
+        lines.push(`- ${name} ${formatSmartUnit(m.qty, unit)} = ${formatCurrency(cost, false)}`);
+      }
+      lines.push('');
+    }
+
+    lines.push(`Total HPP Bahan: ${formatCurrency(totalCost, false)}`);
+
+    const text = lines.join('\n');
+
+    const fallbackCopy = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      document.body.removeChild(ta);
+      return ok;
+    };
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        toast.success('Daftar bahan disalin', { description: 'Tempel ke WhatsApp, catatan, atau Paste Otomatis.' });
+      } else if (fallbackCopy()) {
+        toast.success('Daftar bahan disalin');
+      } else {
+        toast.error('Gagal menyalin', { description: 'Browser tidak mengizinkan akses clipboard.' });
+      }
+    } catch (err) {
+      if (fallbackCopy()) {
+        toast.success('Daftar bahan disalin');
+      } else {
+        toast.error('Gagal menyalin', { description: 'Browser tidak mengizinkan akses clipboard.' });
+      }
+    }
+  };
+
   const confirmRemoveCategory = async () => {
     if (!categoryToDelete || !activeHppVariant || !selectedProductId) return;
     
@@ -1052,15 +1127,28 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Card className="lg:col-span-2 border-none shadow-sm rounded-3xl bg-white">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <div>
+              <CardHeader className="flex flex-row items-start justify-between pb-2 gap-2">
+                <div className="min-w-0 flex-1">
                   <CardTitle className="text-lg font-bold">Komposisi Bahan Baku</CardTitle>
-                  <CardDescription>{selectedProduct?.nama} › {activeHppVariant.nama}</CardDescription>
+                  <CardDescription className="truncate">{selectedProduct?.nama} › {activeHppVariant.nama}</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" className="rounded-xl border-brand-100 text-primary font-bold gap-1" onClick={handleAddMaterial}>
-                  <Plus className="w-4 h-4" />
-                  Tambah Bahan
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl border-brand-100 text-primary font-bold gap-1"
+                    onClick={handleCopyMaterials}
+                    title="Salin daftar bahan"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span className="hidden sm:inline">Salin</span>
+                  </Button>
+                  <Button variant="outline" size="sm" className="rounded-xl border-brand-100 text-primary font-bold gap-1" onClick={handleAddMaterial}>
+                    <Plus className="w-4 h-4" />
+                    <span className="hidden sm:inline">Tambah Bahan</span>
+                    <span className="sm:hidden">Tambah</span>
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
