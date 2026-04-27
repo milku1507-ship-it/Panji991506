@@ -389,7 +389,7 @@ export default function TransactionManager({ user, transactions, setTransactions
     return txToSave;
   };
 
-  const handleShopeeImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -682,7 +682,7 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       } catch (err) {
         console.error("[IMPORT FATAL] error:", err);
-        toast.error("Gagal membaca file Shopee. Pastikan format Excel asli.");
+        toast.error("Gagal membaca file Excel. Pastikan format file benar.");
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1195,17 +1195,17 @@ export default function TransactionManager({ user, transactions, setTransactions
                       type="file" 
                       accept=".xlsx, .xls" 
                       className="hidden" 
-                      id="shopee-import" 
-                      onChange={handleShopeeImport}
+                      id="excel-import" 
+                      onChange={handleExcelImport}
                     />
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => document.getElementById('shopee-import')?.click()}
+                      onClick={() => document.getElementById('excel-import')?.click()}
                       className="text-[10px] h-7 font-black text-primary hover:bg-brand-50 gap-1.5 px-2 rounded-lg border border-primary/20"
                     >
                       <ShoppingBag className="w-3 h-3 text-primary" />
-                      Import Shopee (XLS)
+                      Import Excel (XLS)
                     </Button>
                   </div>
                 </div>

@@ -183,7 +183,7 @@ export const SAMPLE_TRANSACTIONS: Transaction[] = [
   { 
     id: 't1', 
     tanggal: '2026-03-19', 
-    keterangan: 'Penarikan Shopee', 
+    keterangan: 'Penarikan Marketplace', 
     kategori: 'Penjualan', 
     jenis: 'Pemasukan', 
     nominal: 409688, 
@@ -202,8 +202,8 @@ export const SAMPLE_TRANSACTIONS: Transaction[] = [
     ]
   },
   { id: 't2', tanggal: '2026-03-23', keterangan: 'Tapioka', kategori: 'Bahan Baku', jenis: 'Pengeluaran', nominal: 100000, qty_total: 0, qty_beli: 2.5 },
-  { id: 't3', tanggal: '2026-03-23', keterangan: 'Penarikan Shopee', kategori: 'Penjualan', jenis: 'Pemasukan', nominal: 573244, qty_total: 450, qty_beli: 0 },
+  { id: 't3', tanggal: '2026-03-23', keterangan: 'Penarikan Marketplace', kategori: 'Penjualan', jenis: 'Pemasukan', nominal: 573244, qty_total: 450, qty_beli: 0 },
   { id: 't4', tanggal: '2026-03-02', keterangan: 'Thai tea', kategori: 'Operasional', jenis: 'Pengeluaran', nominal: 31000, qty_total: 0, qty_beli: 0 },
-  { id: 't5', tanggal: '2026-03-03', keterangan: 'Penarikan Shopee', kategori: 'Saldo sisa', jenis: 'Pemasukan', nominal: 215557, qty_total: 180, qty_beli: 0 },
+  { id: 't5', tanggal: '2026-03-03', keterangan: 'Penarikan Marketplace', kategori: 'Saldo sisa', jenis: 'Pemasukan', nominal: 215557, qty_total: 180, qty_beli: 0 },
   { id: 't6', tanggal: '2026-03-08', keterangan: 'Penjualan Cireng All Varian', kategori: 'Penjualan', jenis: 'Pemasukan', nominal: 150000, qty_total: 120, qty_beli: 0 },
 ];

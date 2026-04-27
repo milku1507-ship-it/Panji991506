@@ -1386,7 +1386,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           <form key={editingProduct?.id || 'new-product'} onSubmit={handleSaveProduct} className="space-y-4 py-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="sku" className="font-bold text-primary">SKU (Shopee)</Label>
+                <Label htmlFor="sku" className="font-bold text-primary">SKU</Label>
                 <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Contoh: CIR-IND-01" className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold h-12" />
               </div>
               <div className="space-y-2">
@@ -1416,7 +1416,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   <div key={index} className="flex items-center gap-2 bg-gray-50 p-3 rounded-2xl border border-gray-100 group relative">
                     <div className="flex-1 space-y-2">
                       <Input 
-                        placeholder="Nama Biaya (Contoh: Admin Shopee)" 
+                        placeholder="Nama Biaya (Contoh: Biaya Admin)" 
                         value={fee.nama} 
                         onChange={(e) => handleUpdateFee(index, 'nama', e.target.value)}
                         className="h-8 text-xs rounded-lg border-gray-200"

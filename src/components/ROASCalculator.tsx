@@ -437,7 +437,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <RoasCard label="ROAS Ideal Minimal (J)" value={result.J} hint="Sudah perhitungkan PPN 11%" highlight />
                   <RoasCard label="NET ROAS (K)" value={result.K} hint="Tanpa PPN" />
-                  <RoasCard label="ROAS Set Seller Center (L)" value={result.L} hint="Pengaman ÷ 0.8 untuk Shopee Ads" />
+                  <RoasCard label="ROAS Set Seller Center (L)" value={result.L} hint="Pengaman ÷ 0.8 untuk iklan marketplace" />
                   <RoasCard label="NET ROAS Set (M)" value={result.M} hint="Pengaman ÷ 0.8 NET" />
                 </div>
 
