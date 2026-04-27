@@ -83,6 +83,14 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
   };
 
   const handleGlobalBack = () => {
+    // Route through window.history.back() so the in-app back button
+    // and the device/browser back button share the same behavior.
+    // The BackStackProvider's popstate listener will pop the right handler.
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    // Fallback if no history is available
     if (onBack) {
       onBack();
     } else if (activeTab !== 'dashboard') {

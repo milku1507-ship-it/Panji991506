@@ -20,11 +20,14 @@ import LoginPage from './components/LoginPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 import { SettingsProvider } from './SettingsContext';
+import { BackStackProvider, useBackHandler } from './lib/backStack';
 
 export default function App() {
   return (
     <SettingsProvider>
-      <AppContent />
+      <BackStackProvider>
+        <AppContent />
+      </BackStackProvider>
     </SettingsProvider>
   );
 }
@@ -524,6 +527,18 @@ function AppContent() {
     setActiveTab(tab);
     setBackAction(null);
   };
+
+  // Wire device/browser back to in-app navigation:
+  // - if a sub-page has registered backAction, run it
+  // - else if we're not on dashboard, go to dashboard
+  // - else (on dashboard with no sub-page) the browser exits naturally
+  useBackHandler(!!backAction, () => {
+    backAction?.();
+    setBackAction(null);
+  });
+  useBackHandler(!backAction && activeTab !== 'dashboard', () => {
+    setActiveTab('dashboard');
+  });
 
   if (!isAuthReady) {
     return (

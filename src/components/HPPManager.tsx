@@ -40,6 +40,7 @@ import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFire
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
+import { useBackHandler } from '../lib/backStack';
 
 interface HPPManagerProps {
   user: User | null;
@@ -100,6 +101,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     if (view === 'detail') setView('variants');
     else if (view === 'variants') setView('products');
   }, [view]);
+
+  // Wire device/browser back button to mirror the in-app back navigation
+  // for the HPP drilldown: detail → variants → products.
+  useBackHandler(view === 'detail', () => setView('variants'));
+  useBackHandler(view === 'variants', () => setView('products'));
 
   React.useEffect(() => {
     if (view !== 'products' && onSetBack) {
