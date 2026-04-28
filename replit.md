@@ -29,3 +29,11 @@ Indonesian UMKM (small business) bookkeeping app: HPP, stock, transactions, fina
 - Dependencies installed and the dev workflow is healthy on port 5000.
 - Gemini calls go through Replit AI Integrations — no user-supplied key required.
 - Firebase Auth + Firestore + Storage are intentionally preserved; the entire data layer (real-time listeners, batches, storage uploads) is wired to the user's own Firebase project.
+
+## Konsistensi Transaksi ↔ Laporan
+- Single source of truth untuk semua perhitungan ada di `src/lib/transactionStats.ts` (`filterByDateRange`, `computeStats`, `isValidTransaction`, `getPresetRange`). Halaman Transaksi (`TransactionManager.tsx`) dan Laporan (`FinancialReport.tsx`) dilarang menghitung pemasukan/pengeluaran/saldo dengan rumus sendiri.
+- Filter periode bersama disediakan oleh `src/lib/dateFilterContext.tsx` (`DateFilterProvider` + `useDateFilter`). Default "Bulan Ini". Kedua halaman membaca state filter yang sama, jadi mengubah periode di salah satu halaman ikut mengubah halaman lain — angka selalu identik.
+- `computeStats` mendaftarkan hasil ke registry kecil dan emit `window` event `stats:mismatch` jika total Transaksi ≠ Laporan untuk range yang sama. `App.tsx` mendengarkan event itu dan menampilkan `toast.warning('Data tidak sinkron, periksa filter atau transaksi')` (cooldown 5 detik supaya tidak spam).
+- Validasi transaksi (`isValidTransaction`): wajib punya tanggal valid, jenis Pemasukan/Pengeluaran, dan nominal > 0. Data corrupt/null otomatis di-skip lewat `filterByDateRange`.
+- Real-time: data datang dari satu listener Firestore `onSnapshot` di `App.tsx` lalu di-pass ke kedua halaman, jadi tambah/edit/hapus langsung mereflect tanpa cache lama.
+- Debug log: `computeStats` mencetak `[STATS:Transaksi]` dan `[STATS:Laporan]` ke console (filter range, jumlah transaksi, total pemasukan/pengeluaran/saldo) sehingga bisa langsung dibandingkan.

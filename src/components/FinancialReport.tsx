@@ -12,53 +12,12 @@ import { Transaction, Product, Variant, HppMaterial } from '../types';
 import { CATEGORIES_LIST } from '../constants/data';
 import { cn } from '@/lib/utils';
 import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
-
-type RangePreset = 'Hari Ini' | 'Minggu Ini' | 'Bulan Ini' | 'Custom';
-
-const toISO = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-const parseTxDate = (raw: any): Date | null => {
-  if (!raw) return null;
-  const d = new Date(raw);
-  if (!isNaN(d.getTime())) return d;
-  const parts = String(raw).split('/');
-  if (parts.length === 3) {
-    const nd = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
-    if (!isNaN(nd.getTime())) return nd;
-  }
-  return null;
-};
-
-const getPresetRange = (preset: RangePreset): { start: string; end: string } => {
-  const now = new Date();
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let start = new Date(end);
-  if (preset === 'Hari Ini') {
-    // start = today
-  } else if (preset === 'Minggu Ini') {
-    const day = now.getDay();
-    const diff = day === 0 ? 6 : day - 1; // Monday as start
-    start = new Date(end);
-    start.setDate(end.getDate() - diff);
-  } else if (preset === 'Bulan Ini') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-  }
-  return { start: toISO(start), end: toISO(end) };
-};
-
-const formatRangeLabel = (start: string, end: string) => {
-  if (!start || !end) return 'Pilih Tanggal';
-  const fmt = (s: string) => {
-    const d = new Date(s);
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
-};
+import {
+  RangePreset,
+  filterByDateRange,
+  computeStats,
+} from '../lib/transactionStats';
+import { useDateFilter } from '../lib/dateFilterContext';
 
 interface FinancialReportProps {
   transactions: Transaction[];
@@ -66,61 +25,38 @@ interface FinancialReportProps {
 }
 
 export default function FinancialReport({ transactions, products }: FinancialReportProps) {
-  const initialRange = React.useMemo(() => getPresetRange('Bulan Ini'), []);
-  const [preset, setPreset] = React.useState<RangePreset>('Bulan Ini');
-  const [startDate, setStartDate] = React.useState<string>(initialRange.start);
-  const [endDate, setEndDate] = React.useState<string>(initialRange.end);
+  const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
 
-  const periodLabel = preset === 'Custom' ? formatRangeLabel(startDate, endDate) : preset;
+  const periodLabel = rangeLabel;
 
   const isIncome = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
   const isExpense = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
 
-  const filteredTransactions = React.useMemo(() => {
-    if (!startDate || !endDate) return transactions;
-    const s = new Date(startDate); s.setHours(0, 0, 0, 0);
-    const e = new Date(endDate); e.setHours(23, 59, 59, 999);
-    return transactions.filter(t => {
-      const d = parseTxDate(t.tanggal);
-      if (!d) return false;
-      return d.getTime() >= s.getTime() && d.getTime() <= e.getTime();
-    });
-  }, [transactions, startDate, endDate]);
+  // Single source of truth: pakai filter & rumus dari transactionStats.ts
+  const filteredTransactions = React.useMemo(
+    () => filterByDateRange(transactions, startDate, endDate),
+    [transactions, startDate, endDate]
+  );
 
-  const applyPreset = (p: RangePreset) => {
-    setPreset(p);
-    if (p !== 'Custom') {
-      const r = getPresetRange(p);
-      setStartDate(r.start);
-      setEndDate(r.end);
-      setPickerOpen(false);
-    }
+  const stats = React.useMemo(
+    () => computeStats(filteredTransactions, { start: startDate, end: endDate }, 'Laporan'),
+    [filteredTransactions, startDate, endDate]
+  );
+
+  const handlePreset = (p: RangePreset) => {
+    applyPreset(p);
+    if (p !== 'Custom') setPickerOpen(false);
   };
 
-  const onStartChange = (v: string) => {
-    setStartDate(v);
-    setPreset('Custom');
-  };
-  const onEndChange = (v: string) => {
-    setEndDate(v);
-    setPreset('Custom');
-  };
+  const onStartChange = (v: string) => setStartDate(v);
+  const onEndChange = (v: string) => setEndDate(v);
 
-  const totalIncome = filteredTransactions
-    .filter(isIncome)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
-
-  const totalExpense = filteredTransactions
-    .filter(isExpense)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
-
-  const netProfit = totalIncome - totalExpense;
+  const totalIncome = stats.totalPemasukan;
+  const totalExpense = stats.totalPengeluaran;
+  const netProfit = stats.saldo;
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
-
-  console.log('TOTAL PEMASUKAN (Laporan):', totalIncome);
-  console.log('DATA (Laporan):', filteredTransactions);
 
   // Category breakdown for Pie Chart
   const categoryData = filteredTransactions.reduce((acc: any[], t) => {
@@ -337,7 +273,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
                     {(['Hari Ini', 'Minggu Ini', 'Bulan Ini'] as RangePreset[]).map(p => (
                       <button
                         key={p}
-                        onClick={() => applyPreset(p)}
+                        onClick={() => handlePreset(p)}
                         className={cn(
                           'px-3 py-2 rounded-xl text-xs font-bold transition-colors',
                           preset === p

@@ -166,5 +166,52 @@ export const computeStats = (
     });
   }
 
+  // Daftarkan stats supaya bisa di-cross-check antar halaman.
+  registerStats(source, stats);
+
   return stats;
+};
+
+/**
+ * Sanity check antar halaman: daftar stats per "source" lalu emit event
+ * 'stats:mismatch' kalau total Transaksi !== Laporan dalam satu range
+ * yang sama. App.tsx menampilkan warning toast saat event ini muncul.
+ */
+const _statsRegistry: Record<string, TransactionStats> = {};
+
+const sameRange = (a: TransactionStats['range'], b: TransactionStats['range']) =>
+  a.start === b.start && a.end === b.end;
+
+export const areStatsEqual = (a: TransactionStats, b: TransactionStats): boolean => {
+  return (
+    a.count === b.count &&
+    a.totalPemasukan === b.totalPemasukan &&
+    a.totalPengeluaran === b.totalPengeluaran &&
+    a.saldo === b.saldo
+  );
+};
+
+const TRACKED_SOURCES = ['Transaksi', 'Laporan'];
+
+const registerStats = (source: string, stats: TransactionStats) => {
+  if (!TRACKED_SOURCES.includes(source)) return;
+  _statsRegistry[source] = stats;
+
+  // Bandingkan dengan source lain yang sudah tercatat.
+  for (const other of TRACKED_SOURCES) {
+    if (other === source) continue;
+    const otherStats = _statsRegistry[other];
+    if (!otherStats) continue;
+    if (!sameRange(otherStats.range, stats.range)) continue; // filter beda — wajar, jangan warning
+    if (areStatsEqual(otherStats, stats)) continue;
+
+    if (typeof window !== 'undefined') {
+      console.warn('[STATS:mismatch]', { [source]: stats, [other]: otherStats });
+      window.dispatchEvent(
+        new CustomEvent('stats:mismatch', {
+          detail: { sources: { [source]: stats, [other]: otherStats } },
+        })
+      );
+    }
+  }
 };

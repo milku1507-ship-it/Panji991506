@@ -21,18 +21,35 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 
 import { SettingsProvider } from './SettingsContext';
 import { BackStackProvider, useBackHandler } from './lib/backStack';
+import { DateFilterProvider } from './lib/dateFilterContext';
 
 export default function App() {
   return (
     <SettingsProvider>
       <BackStackProvider>
-        <AppContent />
+        <DateFilterProvider>
+          <AppContent />
+        </DateFilterProvider>
       </BackStackProvider>
     </SettingsProvider>
   );
 }
 
 function AppContent() {
+  // Warning kalau total Transaksi !== Laporan untuk filter yang sama.
+  // Pakai cooldown supaya tidak spam toast saat re-render beruntun.
+  React.useEffect(() => {
+    let lastShown = 0;
+    const onMismatch = () => {
+      const now = Date.now();
+      if (now - lastShown < 5000) return;
+      lastShown = now;
+      toast.warning('Data tidak sinkron, periksa filter atau transaksi');
+    };
+    window.addEventListener('stats:mismatch', onMismatch);
+    return () => window.removeEventListener('stats:mismatch', onMismatch);
+  }, []);
+
   const [user, setUser] = React.useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = React.useState(false);

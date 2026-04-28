@@ -40,6 +40,12 @@ import { getTxNominal, formatCompactNumber, formatCurrency } from '../lib/format
 import { User } from 'firebase/auth';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit } from '../lib/unitUtils';
+import {
+  RangePreset,
+  filterByDateRange,
+  computeStats,
+} from '../lib/transactionStats';
+import { useDateFilter } from '../lib/dateFilterContext';
 
 import * as XLSX from 'xlsx';
 
@@ -688,26 +694,43 @@ export default function TransactionManager({ user, transactions, setTransactions
     reader.readAsArrayBuffer(file);
   };
 
-  const filteredTransactions = transactions
-    .filter(t => {
-      const matchesSearch = t.keterangan.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesType = typeFilter === 'Semua' || t.jenis === typeFilter;
-      return matchesSearch && matchesType;
-    })
-    .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+  // === Filter periode bersama (sinkron dengan halaman Laporan) ===
+  const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const handlePreset = (p: RangePreset) => {
+    applyPreset(p);
+    if (p !== 'Custom') setPickerOpen(false);
+  };
 
-  const isIncome = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
-  const isExpense = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
+  // List transaksi dalam range periode aktif (single source of truth).
+  const periodTransactions = React.useMemo(
+    () => filterByDateRange(transactions, startDate, endDate),
+    [transactions, startDate, endDate]
+  );
 
-  const totalIncome = transactions
-    .filter(isIncome)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
+  // Stats Pemasukan/Pengeluaran/Saldo — pakai rumus dari transactionStats.ts
+  // sehingga IDENTIK 100% dengan halaman Laporan untuk filter yang sama.
+  const stats = React.useMemo(
+    () => computeStats(periodTransactions, { start: startDate, end: endDate }, 'Transaksi'),
+    [periodTransactions, startDate, endDate]
+  );
 
-  const totalExpense = transactions
-    .filter(isExpense)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
+  const totalIncome = stats.totalPemasukan;
+  const totalExpense = stats.totalPengeluaran;
+  const balance = stats.saldo;
 
-  const balance = totalIncome - totalExpense;
+  // Riwayat transaksi yang ditampilkan: filter periode + search + type.
+  const filteredTransactions = React.useMemo(
+    () =>
+      periodTransactions
+        .filter(t => {
+          const matchesSearch = (t.keterangan || '').toLowerCase().includes(searchTerm.toLowerCase());
+          const matchesType = typeFilter === 'Semua' || t.jenis === typeFilter;
+          return matchesSearch && matchesType;
+        })
+        .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime()),
+    [periodTransactions, searchTerm, typeFilter]
+  );
 
   // Handle category change and auto-type
   const handleCategoryChange = (catName: string) => {
@@ -1069,6 +1092,74 @@ export default function TransactionManager({ user, transactions, setTransactions
           <h2 className="text-3xl font-black text-[#1A1A2E]">Transaksi</h2>
           <p className="text-gray-500 font-medium">Catat pemasukan & pengeluaran.</p>
         </div>
+
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="outline"
+                className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-700 hover:text-primary"
+              >
+                <Calendar className="w-4 h-4 text-primary" />
+                {rangeLabel}
+              </Button>
+            }
+          />
+          <PopoverContent align="end" className="w-[320px] p-4">
+            <div className="space-y-3">
+              <div>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pilihan Cepat</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Hari Ini', 'Minggu Ini', 'Bulan Ini'] as RangePreset[]).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => handlePreset(p)}
+                      className={cn(
+                        'px-3 py-2 rounded-xl text-xs font-bold transition-colors',
+                        preset === p
+                          ? 'bg-primary text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Custom</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500">Mulai</label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      max={endDate || undefined}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500">Akhir</label>
+                    <Input
+                      type="date"
+                      value={endDate}
+                      min={startDate || undefined}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+              </div>
+              <Button
+                onClick={() => setPickerOpen(false)}
+                className="w-full rounded-xl font-bold"
+              >
+                Terapkan
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       {/* Wallet Balance Summary */}
@@ -1079,7 +1170,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <CreditCard className="w-6 h-6 md:w-7 md:h-7" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total Saldo</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total Saldo · {rangeLabel}</p>
             <h3 className="text-2xl md:text-4xl font-black truncate">{formatCurrency(balance, true)}</h3>
           </div>
         </div>
