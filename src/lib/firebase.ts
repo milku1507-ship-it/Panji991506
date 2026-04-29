@@ -44,14 +44,18 @@ import {
 } from 'firebase/storage';
 import firebaseConfigImport from '../../firebase-applet-config.json';
 
-// Use the app's own host as authDomain whenever possible. The server proxies
-// `/__/auth/*` and `/__/firebase/*` to mila1507.firebaseapp.com, so Firebase Auth
-// keeps working but storage stays on a single origin — fixes the
-// "missing initial state" error in storage-partitioned browsers (Chrome, etc.).
+// Use the Firebase-hosted auth domain (mila1507.firebaseapp.com) by default.
+// This URL is automatically whitelisted in the OAuth client Firebase auto-creates,
+// so login works on ANY deployment domain without having to add a new
+// "Authorized redirect URI" in Google Cloud Console for every Replit URL.
+// The page's domain still has to be listed in Firebase Console → Authentication →
+// Settings → Authorized domains, but that's a single, easy step.
+//
+// Set VITE_FIREBASE_AUTH_DOMAIN to the current host if you ever want to bring back
+// the old single-origin proxy behaviour (requires whitelisting the redirect URI in
+// Google Cloud Console too).
 const runtimeAuthDomain =
-  typeof window !== 'undefined' && window.location?.host
-    ? window.location.host
-    : (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigImport.authDomain);
+  import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigImport.authDomain;
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigImport.apiKey,
