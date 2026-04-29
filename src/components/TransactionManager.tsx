@@ -1110,7 +1110,7 @@ export default function TransactionManager({ user, transactions, setTransactions
               <div>
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pilihan Cepat</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['Hari Ini', 'Minggu Ini', 'Bulan Ini'] as RangePreset[]).map(p => (
+                  {(['Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Tahun Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
                     <button
                       key={p}
                       onClick={() => handlePreset(p)}

@@ -15,9 +15,22 @@ import { getTxNominal } from './formatUtils';
  *           saldo = total_pemasukan - total_pengeluaran
  */
 
-export type RangePreset = 'Hari Ini' | 'Minggu Ini' | 'Bulan Ini' | 'Custom';
+export type RangePreset =
+  | 'Hari Ini'
+  | 'Minggu Ini'
+  | 'Bulan Ini'
+  | 'Tahun Ini'
+  | 'Semua Waktu'
+  | 'Custom';
 
 export const DEFAULT_PRESET: RangePreset = 'Bulan Ini';
+
+/**
+ * Daftar preset untuk dropdown Dashboard (subset yang masuk akal di kartu ringkas).
+ * Halaman Transaksi/Laporan boleh tampilkan subset berbeda; semuanya tetap valid
+ * sebagai filter karena `getPresetRange` menangani semua varian.
+ */
+export const DASHBOARD_PRESETS: RangePreset[] = ['Bulan Ini', 'Tahun Ini', 'Semua Waktu'];
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -48,9 +61,17 @@ export const parseTxDate = (raw: any): Date | null => {
 
 /**
  * Hitung rentang tanggal preset.
- * Bulan Ini = tanggal 1 bulan ini sampai hari ini.
+ * - Hari Ini      = hari ini saja
+ * - Minggu Ini    = Senin minggu ini → hari ini
+ * - Bulan Ini     = tanggal 1 bulan ini → hari ini
+ * - Tahun Ini     = 1 Januari tahun ini → hari ini
+ * - Semua Waktu   = tidak ada filter (start='' end='') — `filterByDateRange`
+ *                   menafsirkan ini sebagai "semua transaksi valid"
+ * - Custom        = dipakai untuk rentang manual; getPresetRange tidak
+ *                   memutuskan apa-apa, cuma fallback ke hari ini
  */
 export const getPresetRange = (preset: RangePreset): { start: string; end: string } => {
+  if (preset === 'Semua Waktu') return { start: '', end: '' };
   const now = new Date();
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let start = new Date(todayMidnight);
@@ -63,6 +84,8 @@ export const getPresetRange = (preset: RangePreset): { start: string; end: strin
     start.setDate(todayMidnight.getDate() - diff);
   } else if (preset === 'Bulan Ini') {
     start = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else if (preset === 'Tahun Ini') {
+    start = new Date(now.getFullYear(), 0, 1);
   }
   return { start: toISO(start), end: toISO(todayMidnight) };
 };
@@ -191,7 +214,7 @@ export const areStatsEqual = (a: TransactionStats, b: TransactionStats): boolean
   );
 };
 
-const TRACKED_SOURCES = ['Transaksi', 'Laporan'];
+const TRACKED_SOURCES = ['Dashboard', 'Transaksi', 'Laporan'];
 
 const registerStats = (source: string, stats: TransactionStats) => {
   if (!TRACKED_SOURCES.includes(source)) return;

@@ -10,8 +10,15 @@ import { Ingredient, Transaction, StoreSettings } from '../types';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { formatSmartUnit } from '../lib/unitUtils';
-import { formatCompactNumber, formatCurrency, filterByPeriod, getTxNominal } from '../lib/formatUtils';
+import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useDateFilter } from '../lib/dateFilterContext';
+import {
+  filterByDateRange,
+  computeStats,
+  DASHBOARD_PRESETS,
+  RangePreset,
+} from '../lib/transactionStats';
 
 interface DashboardProps {
   user: User | null;
@@ -24,32 +31,32 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ user, ingredients, transactions, storeSettings, setActiveTab, onSeedData, onStartFresh }: DashboardProps) {
-  const [period, setPeriod] = React.useState('Semua Waktu');
+  // Filter periode bersama (single source of truth) — sama persis dengan
+  // halaman Transaksi & Laporan. Mengubah preset di sini ikut mengubah
+  // angka di halaman lain.
+  const { preset, startDate, endDate, applyPreset, rangeLabel } = useDateFilter();
 
   const filteredTransactions = React.useMemo(
-    () => filterByPeriod(transactions, period),
-    [transactions, period]
+    () => filterByDateRange(transactions, startDate, endDate),
+    [transactions, startDate, endDate]
   );
 
   const isIncome = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
   const isExpense = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
 
-  const totalRevenue = filteredTransactions
-    .filter(isIncome)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
+  // Hitung pakai fungsi pusat — wajib supaya identik dengan Transaksi & Laporan.
+  const stats = React.useMemo(
+    () => computeStats(filteredTransactions, { start: startDate, end: endDate }, 'Dashboard'),
+    [filteredTransactions, startDate, endDate]
+  );
 
-  const totalExpense = filteredTransactions
-    .filter(isExpense)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
-
-  const netProfit = totalRevenue - totalExpense;
+  const totalRevenue = stats.totalPemasukan;
+  const totalExpense = stats.totalPengeluaran;
+  const netProfit = stats.saldo;
   const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
   const incomeCount = filteredTransactions.filter(isIncome).length;
   const expenseCount = filteredTransactions.filter(isExpense).length;
-
-  console.log('TOTAL PEMASUKAN:', totalRevenue);
-  console.log('DATA:', filteredTransactions);
 
   const lowStockItems = ingredients.filter(i => i.currentStock <= i.minStock);
 
@@ -103,22 +110,32 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
             <div className="w-10 h-10 rounded-full glass-card flex items-center justify-center shrink-0">
               <Wallet className="w-5 h-5" />
             </div>
-            <Select value={period} onValueChange={setPeriod}>
+            <Select
+              value={DASHBOARD_PRESETS.includes(preset) ? preset : 'Custom'}
+              onValueChange={(v) => applyPreset(v as RangePreset)}
+            >
               <SelectTrigger className="w-auto max-w-[60%] bg-white/20 border-white/30 text-white text-xs font-bold rounded-full h-9 px-3 gap-1.5">
                 <Calendar className="w-3.5 h-3.5 shrink-0" />
-                <SelectValue />
+                <SelectValue>{rangeLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent className="rounded-2xl">
-                <SelectItem value="Bulan Ini">Bulan Ini</SelectItem>
-                <SelectItem value="Tahun Ini">Tahun Ini</SelectItem>
-                <SelectItem value="Semua Waktu">Semua Waktu</SelectItem>
+                {DASHBOARD_PRESETS.map((p) => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
+                ))}
+                {!DASHBOARD_PRESETS.includes(preset) && (
+                  <SelectItem value="Custom" disabled>
+                    {rangeLabel}
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>
 
           {/* Balance block — full width to avoid clipping for large numbers */}
           <div className="mb-7">
-            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">Saldo Laba</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">
+              Saldo Laba · {rangeLabel}
+            </p>
             <h3 className="text-3xl sm:text-4xl font-black leading-tight break-words">
               {formatCurrency(netProfit, true)}
             </h3>
