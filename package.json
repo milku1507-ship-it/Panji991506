@@ -33,6 +33,7 @@
     "p-retry": "^7.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-is": "^19.2.6",
     "recharts": "^3.8.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
