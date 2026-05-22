@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, Bell, Printer, Save, User, Lock, LogOut, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
@@ -41,18 +41,8 @@ const MENU_GROUPS = [
     ]
   },
   {
-    title: 'PENGATURAN',
-    items: [
-      { id: 'notifications', label: 'Notifikasi', icon: Bell },
-      { id: 'receipt-settings', label: 'Pengaturan Struk/Invoice', icon: Printer },
-      { id: 'backup', label: 'Backup & Restore Data', icon: Save },
-    ]
-  },
-  {
     title: 'AKUN',
     items: [
-      { id: 'profile', label: 'Profil Akun', icon: User },
-      { id: 'password', label: 'Ubah Password', icon: Lock },
       { id: 'logout', label: 'Keluar (Logout)', icon: LogOut, variant: 'danger' },
     ]
   }
