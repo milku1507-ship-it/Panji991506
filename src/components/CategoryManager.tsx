@@ -152,7 +152,7 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
             ) : (
               <>
                 <span className="font-bold text-gray-700">{item}</span>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1">
                   <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-500" onClick={() => {
                     setEditingItem({ field, value: item });
                     setEditValue(item);
