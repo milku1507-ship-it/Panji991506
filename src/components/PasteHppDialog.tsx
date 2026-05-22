@@ -48,18 +48,19 @@ interface PasteHppDialogProps {
 }
 
 const EXAMPLE_PLACEHOLDER = `Contoh:
-Nama Varian: Ayam Suwir Pedas
-Qty/Batch (pcs): 256
-Harga Jual/pcs: 14998
-Packing/pack: 86
+Nama Varian: Kaos Polos Hitam
+Qty/Batch (pcs): 12
+Harga Jual/pcs: 85000
+Packing/pack: 3000
 
-1. Kulit Cireng
-Tapioka: 2500 gram × Harga 10 = Rp 25.000
-Terigu: 150 gram × Harga 10 = Rp 1.500
+1. Material Utama
+Kain Cotton: 2 meter × Harga 25000 = Rp 50.000
+Benang: 1 pcs × Harga 2000 = Rp 2.000
 ...
 
-2. Isian
-Ayam: 1000 gram × Harga 34 = Rp 34.000
+2. Kemasan
+Plastik OPP: 1 pcs × Harga 500 = Rp 500
+Hangtag: 1 pcs × Harga 300 = Rp 300
 ...`;
 
 export default function PasteHppDialog({
@@ -208,7 +209,7 @@ export default function PasteHppDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'input'
-              ? `Tempel detail varian + bahan baku, AI akan mengisi semua untuk produk ${productName}.`
+              ? `Tempel detail varian + komponen biaya, AI akan mengisi semua untuk produk ${productName}.`
               : 'Periksa hasil parsing. Edit jika perlu, lalu konfirmasi untuk menyimpan.'}
           </DialogDescription>
         </DialogHeader>
@@ -228,7 +229,7 @@ export default function PasteHppDialog({
                 Tip: Sertakan baris seperti <span className="font-bold">"Nama Varian:"</span>,{' '}
                 <span className="font-bold">"Qty/Batch:"</span>,{' '}
                 <span className="font-bold">"Harga Jual/pcs:"</span>, dan{' '}
-                <span className="font-bold">"Packing/pack:"</span> di atas, lalu daftar bahan
+                <span className="font-bold">"Packing/pack:"</span> di atas, lalu daftar komponen
                 dipisah per kelompok bernomor.
               </p>
             </div>
@@ -283,7 +284,7 @@ export default function PasteHppDialog({
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Qty / Batch
+                  Qty / Produksi
                 </Label>
                 <Input
                   type="number"
@@ -324,10 +325,10 @@ export default function PasteHppDialog({
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-sm font-bold text-gray-700">
-                Bahan Baku ({parsed.bahan.length})
+                Komponen ({parsed.bahan.length})
               </p>
               <p className="text-sm font-black text-primary">
-                Total / batch: {formatCurrency(Math.round(totalPerBatch), true)}
+                Total / produksi: {formatCurrency(Math.round(totalPerBatch), true)}
               </p>
             </div>
 
@@ -354,7 +355,7 @@ export default function PasteHppDialog({
                               value={b.nama}
                               onChange={(e) => updateBahanField(idx, 'nama', e.target.value)}
                               className="rounded-lg h-9 font-bold flex-1 border-gray-200"
-                              placeholder="Nama bahan"
+                              placeholder="Nama komponen"
                             />
                             <Button
                               type="button"
@@ -362,7 +363,7 @@ export default function PasteHppDialog({
                               size="icon"
                               className="h-9 w-9 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
                               onClick={() => removeBahan(idx)}
-                              title="Hapus bahan"
+                              title="Hapus komponen"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -452,7 +453,7 @@ export default function PasteHppDialog({
                   )}
                 >
                   <p className="text-gray-400 font-bold text-sm">
-                    Tidak ada bahan baku ter-parse.
+                    Tidak ada komponen ter-parse.
                   </p>
                 </div>
               )}

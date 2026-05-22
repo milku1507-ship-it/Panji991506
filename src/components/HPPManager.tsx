@@ -1148,7 +1148,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <Card className="lg:col-span-2 border-none shadow-sm rounded-3xl bg-white">
               <CardHeader className="flex flex-row items-start justify-between pb-2 gap-2">
                 <div className="min-w-0 flex-1">
-                  <CardTitle className="text-lg font-bold">Komposisi Bahan Baku</CardTitle>
+                  <CardTitle className="text-lg font-bold">Rincian Komponen</CardTitle>
                   <CardDescription className="truncate">{selectedProduct?.nama} › {activeHppVariant.nama}</CardDescription>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1164,22 +1164,17 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   </Button>
                   <Button variant="outline" size="sm" className="rounded-xl border-brand-100 text-primary font-bold gap-1" onClick={handleAddMaterial}>
                     <Plus className="w-4 h-4" />
-                    <span className="hidden sm:inline">Tambah Bahan</span>
+                    <span className="hidden sm:inline">Tambah Komponen</span>
                     <span className="sm:hidden">Tambah</span>
                   </Button>
                 </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
-                  {['Kulit Cireng', 'Bahan Isian', 'Packing', 'Overhead', 'Lainnya'].map(cat => {
+                  {[...(settings?.kategori_hpp || []), 'Lainnya'].map(cat => {
                     const catMaterials = activeHppVariant.bahan
                       .map((m, originalIdx) => ({ ...m, originalIdx }))
-                      .filter(m => {
-                        let mCat = m.kelompok;
-                        if (mCat === 'Kulit') mCat = 'Kulit Cireng';
-                        if (mCat === 'Isian') mCat = 'Bahan Isian';
-                        return mCat === cat;
-                      });
+                      .filter(m => m.kelompok === cat);
                     
                     if (catMaterials.length === 0) return null;
 
@@ -1293,7 +1288,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   </h3>
                   <div className="mt-4 flex items-center gap-2">
                     <Badge className="bg-white/20 text-white border-none font-bold">
-                      {activeHppVariant.qty_batch} pcs / batch
+                      {activeHppVariant.qty_batch} pcs / produksi
                     </Badge>
                     {activeHppVariant.harga_jual < calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch) && (
                       <Badge className="bg-white text-red-600 border-none font-black animate-pulse">
@@ -1304,14 +1299,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 </div>
                 <CardContent className="p-6 space-y-4 font-medium">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-500 font-bold">Total HPP per Batch</span>
+                    <span className="text-gray-500 font-bold">Total HPP per Produksi</span>
                     <span className="font-black text-gray-900">
                       {formatCurrency(calculateBatchHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}
                     </span>
                   </div>
                   <div className="pt-2 border-t border-dashed border-gray-100 mt-2">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500 font-bold">Bahan Baku / pcs</span>
+                      <span className="text-gray-500 font-bold">Komponen / pcs</span>
                       <span className="font-black text-gray-900">
                         {formatCurrency(calculateMaterialsPerPcs(activeHppVariant.bahan, activeHppVariant.qty_batch), true)}
                       </span>
@@ -1400,16 +1395,16 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="sku" className="font-bold text-primary">SKU</Label>
-                <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Contoh: CIR-IND-01" className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold h-12" />
+                <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Contoh: PRD-001" className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold h-12" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="nama" className="font-bold">Nama Produk</Label>
-                <Input id="nama" name="nama" defaultValue={editingProduct?.nama || ''} placeholder="Contoh: Cireng Isi" required className="rounded-xl h-12" />
+                <Input id="nama" name="nama" defaultValue={editingProduct?.nama || ''} placeholder="Contoh: Kaos Polos" required className="rounded-xl h-12" />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="deskripsi" className="font-bold">Deskripsi (Opsional)</Label>
-              <Input id="deskripsi" name="deskripsi" defaultValue={editingProduct?.deskripsi || ''} placeholder="Contoh: Cireng goreng dengan berbagai isian" className="rounded-xl" />
+              <Input id="deskripsi" name="deskripsi" defaultValue={editingProduct?.deskripsi || ''} placeholder="Contoh: Produk dengan berbagai pilihan varian" className="rounded-xl" />
             </div>
 
             <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">
@@ -1509,8 +1504,8 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 <Input id="harga_jual" name="harga_jual" type="number" defaultValue={editingVariant?.harga_jual || 0} placeholder="1100" required className="rounded-xl" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="qty_batch" className="font-bold">Qty Batch</Label>
-                <Input id="qty_batch" name="qty_batch" type="number" defaultValue={editingVariant?.qty_batch || 145} required className="rounded-xl" />
+                <Label htmlFor="qty_batch" className="font-bold">Qty Produksi</Label>
+                <Input id="qty_batch" name="qty_batch" type="number" defaultValue={editingVariant?.qty_batch || 10} required className="rounded-xl" />
               </div>
             </div>
             <div className="space-y-2">
@@ -1570,8 +1565,8 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       }}>
         <DialogContent className="rounded-[2rem] border-none max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl font-black">Edit Bahan Baku</DialogTitle>
-            <DialogDescription>Sesuaikan rincian bahan untuk perhitungan HPP.</DialogDescription>
+            <DialogTitle className="text-xl font-black">Edit Komponen</DialogTitle>
+            <DialogDescription>Sesuaikan rincian komponen untuk perhitungan HPP.</DialogDescription>
           </DialogHeader>
           <form key={editingMaterial ? `mat-${editingMaterial.variantId}-${editingMaterial.index}` : 'new-material'} onSubmit={handleSaveMaterial} className="space-y-4 py-4">
             <div className="space-y-2">
@@ -1586,7 +1581,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       !editingMaterial?.material.nama && "text-muted-foreground"
                     )}
                   >
-                    {editingMaterial?.material.nama || "Pilih atau cari bahan..."}
+                    {editingMaterial?.material.nama || "Pilih atau cari komponen..."}
                     <div className="flex items-center gap-2">
                       <Search className="w-4 h-4 text-gray-400" />
                     </div>
@@ -1594,17 +1589,17 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 </PopoverTrigger>
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-2xl border-none shadow-2xl" align="start">
                   <Command className="rounded-2xl border-none">
-                    <CommandInput placeholder="Cari bahan baku..." className="h-12" />
+                    <CommandInput placeholder="Cari komponen..." className="h-12" />
                     <CommandList className="max-h-[300px] custom-scrollbar">
                       <CommandEmpty>
                         <div className="p-4 text-center">
-                          <p className="text-sm text-gray-500 mb-2">Bahan tidak ditemukan.</p>
+                          <p className="text-sm text-gray-500 mb-2">Komponen tidak ditemukan.</p>
                           <Button 
                             variant="link" 
                             className="text-primary font-bold h-auto p-0"
                             onClick={() => {
                               const input = document.querySelector('[cmdk-input]') as HTMLInputElement;
-                              const newName = input?.value || "Bahan Baru";
+                              const newName = input?.value || "Komponen Baru";
                               setEditingMaterial(prev => prev ? {
                                 ...prev,
                                 material: { ...prev.material, nama: newName }
@@ -1612,11 +1607,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                               setIsMaterialPopoverOpen(false);
                             }}
                           >
-                            + Tambah sebagai bahan baru
+                            + Tambah sebagai komponen baru
                           </Button>
                         </div>
                       </CommandEmpty>
-                      <CommandGroup heading="Bahan Baku Tersedia">
+                      <CommandGroup heading="Komponen Tersedia">
                         {ingredients.map((i) => (
                           <CommandItem
                             key={i.id}
@@ -1681,7 +1676,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   name="qty" 
                   type="number" 
                   step="0.0001" 
-                  placeholder="Jumlah untuk 1 batch"
+                  placeholder="Jumlah untuk 1 produksi"
                   value={editingMaterial ? fromBaseValue(editingMaterial.material.qty, editingMaterial.material.satuan) : 0}
                   onChange={(e) => {
                     const newVal = parseFloat(e.target.value) || 0;
@@ -1697,7 +1692,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   required 
                   className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold" 
                 />
-                <p className="text-[10px] text-gray-400 font-medium italic">Masukkan jumlah yang digunakan untuk {activeHppVariant?.qty_batch || 1} pcs (1 batch).</p>
+                <p className="text-[10px] text-gray-400 font-medium italic">Masukkan jumlah yang digunakan untuk {activeHppVariant?.qty_batch || 1} pcs (1 produksi).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="mat-satuan" className="font-bold">Satuan</Label>

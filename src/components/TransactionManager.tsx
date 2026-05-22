@@ -1358,7 +1358,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             {settings?.kategori_hpp.includes(newTx.kategori || '') && (
               <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold text-gray-400 uppercase">Pilih Bahan Baku / Packing</Label>
+                  <Label className="text-xs font-bold text-gray-400 uppercase">Pilih Komponen / Material</Label>
                   <Popover open={isMaterialPopoverOpen} onOpenChange={setIsMaterialPopoverOpen}>
                     <PopoverTrigger 
                       render={
@@ -1386,8 +1386,6 @@ export default function TransactionManager({ user, transactions, setTransactions
                                 // Dynamic filtering based on category
                                 const txCat = newTx.kategori || '';
                                 const ingCat = i.category || '';
-                                if (txCat === 'Packing') return ingCat === 'Packing';
-                                if (txCat === 'Bahan Baku') return ingCat === 'Kulit Cireng' || ingCat === 'Bahan Isian';
                                 return ingCat.toLowerCase().trim() === txCat.toLowerCase().trim();
                               })
                               .map((i) => (

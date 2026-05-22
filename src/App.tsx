@@ -387,8 +387,6 @@ function AppContent() {
       for (const m of uniqueMaterials) {
         // Normalize category name for consistency
         let mKelompok = m.kelompok || 'Lainnya';
-        if (mKelompok === 'Kulit') mKelompok = 'Kulit Cireng';
-        if (mKelompok === 'Isian') mKelompok = 'Bahan Isian';
 
         // Try to find by ID first, then by name to merge existing items
         let stockId = m.ingredientId;

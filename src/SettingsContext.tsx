@@ -10,9 +10,9 @@ interface SettingsContextType {
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export const DEFAULT_KATEGORI: KategoriSettings = {
-  kategori_hpp: ["Kulit Cireng", "Bahan Isian", "Packing", "Overhead"],
-  kategori_produk: ["Makanan", "Snack", "Minuman"],
-  satuan_unit: ["Gram", "Pcs", "Box", "Liter", "Kg", "Lembar"]
+  kategori_hpp: ["Material Utama", "Material Pendukung", "Kemasan", "Overhead"],
+  kategori_produk: ["Makanan", "Fashion", "Digital", "Jasa", "Lainnya"],
+  satuan_unit: ["Gram", "Pcs", "Box", "Liter", "Kg", "Lembar", "Meter", "Set"]
 };
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
