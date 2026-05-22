@@ -199,8 +199,20 @@ export const computeStats = (
  * Sanity check antar halaman: daftar stats per "source" lalu emit event
  * 'stats:mismatch' kalau total Transaksi !== Laporan dalam satu range
  * yang sama. App.tsx menampilkan warning toast saat event ini muncul.
+ *
+ * Catatan: perbandingan hanya dilakukan jika SEMUA sumber sudah diperbarui
+ * dalam window 800ms yang sama, untuk menghindari false-positive saat
+ * komponen re-render satu per satu setelah data Firestore tiba.
  */
-const _statsRegistry: Record<string, TransactionStats> = {};
+
+interface RegistryEntry {
+  stats: TransactionStats;
+  ts: number; // timestamp saat entry didaftarkan
+}
+
+const _statsRegistry: Record<string, RegistryEntry> = {};
+let _mismatchTimer: ReturnType<typeof setTimeout> | null = null;
+const FRESH_WINDOW_MS = 800; // semua sumber harus terupdate dalam window ini
 
 const sameRange = (a: TransactionStats['range'], b: TransactionStats['range']) =>
   a.start === b.start && a.end === b.end;
@@ -216,25 +228,48 @@ export const areStatsEqual = (a: TransactionStats, b: TransactionStats): boolean
 
 const TRACKED_SOURCES = ['Dashboard', 'Transaksi', 'Laporan'];
 
-const registerStats = (source: string, stats: TransactionStats) => {
-  if (!TRACKED_SOURCES.includes(source)) return;
-  _statsRegistry[source] = stats;
+const checkMismatch = () => {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
 
-  // Bandingkan dengan source lain yang sudah tercatat.
-  for (const other of TRACKED_SOURCES) {
-    if (other === source) continue;
-    const otherStats = _statsRegistry[other];
-    if (!otherStats) continue;
-    if (!sameRange(otherStats.range, stats.range)) continue; // filter beda — wajar, jangan warning
-    if (areStatsEqual(otherStats, stats)) continue;
+  // Kumpulkan entri yang fresh dalam window terakhir
+  const freshEntries = TRACKED_SOURCES
+    .map(s => ({ source: s, entry: _statsRegistry[s] }))
+    .filter(({ entry }) => entry && now - entry.ts <= FRESH_WINDOW_MS);
 
-    if (typeof window !== 'undefined') {
-      console.warn('[STATS:mismatch]', { [source]: stats, [other]: otherStats });
-      window.dispatchEvent(
-        new CustomEvent('stats:mismatch', {
-          detail: { sources: { [source]: stats, [other]: otherStats } },
-        })
-      );
+  if (freshEntries.length < 2) return; // belum cukup sumber untuk dibandingkan
+
+  // Pastikan semua yang ada memakai range yang sama
+  const firstRange = freshEntries[0].entry.stats.range;
+  const allSameRange = freshEntries.every(({ entry }) => sameRange(entry.stats.range, firstRange));
+  if (!allSameRange) return;
+
+  // Cari pasangan yang berbeda
+  for (let i = 0; i < freshEntries.length; i++) {
+    for (let j = i + 1; j < freshEntries.length; j++) {
+      const a = freshEntries[i];
+      const b = freshEntries[j];
+      if (!areStatsEqual(a.entry.stats, b.entry.stats)) {
+        console.warn('[STATS:mismatch]', { [a.source]: a.entry.stats, [b.source]: b.entry.stats });
+        window.dispatchEvent(
+          new CustomEvent('stats:mismatch', {
+            detail: { sources: { [a.source]: a.entry.stats, [b.source]: b.entry.stats } },
+          })
+        );
+        return; // cukup 1 event per batch
+      }
     }
   }
+};
+
+const registerStats = (source: string, stats: TransactionStats) => {
+  if (!TRACKED_SOURCES.includes(source)) return;
+  _statsRegistry[source] = { stats, ts: Date.now() };
+
+  // Debounce: tunda perbandingan sampai semua komponen selesai render
+  if (_mismatchTimer !== null) clearTimeout(_mismatchTimer);
+  _mismatchTimer = setTimeout(() => {
+    _mismatchTimer = null;
+    checkMismatch();
+  }, FRESH_WINDOW_MS);
 };

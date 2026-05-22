@@ -78,6 +78,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [productFees, setProductFees] = React.useState<AdditionalFee[]>([]);
   const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
   const [isPasteHppOpen, setIsPasteHppOpen] = React.useState(false);
+  const [selectedKelompok, setSelectedKelompok] = React.useState<string>('');
+
+  React.useEffect(() => {
+    if (editingMaterial) {
+      const kel = editingMaterial.material.kelompok;
+      const validKel = kel && (settings?.kategori_hpp.includes(kel) || kel === 'Lainnya') ? kel : (settings?.kategori_hpp[0] || 'Lainnya');
+      setSelectedKelompok(validKel);
+    }
+  }, [editingMaterial, settings?.kategori_hpp]);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
   const selectedVariant = selectedProduct?.varian.find(v => v.id === selectedVariantId);
@@ -362,15 +371,19 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
   const handleAddMaterial = () => {
     if (!activeHppVariant) return;
+    const defaultKelompok = settings?.kategori_hpp[0] || 'Lainnya';
     const newMaterial: HppMaterial = {
       id: 'mat_' + Math.random().toString(36).substr(2, 9),
       nama: '',
       satuan: 'gram',
       qty: 0,
       harga: 0,
-      kelompok: 'Lainnya'
+      kelompok: defaultKelompok
     };
+    const newIndex = activeHppVariant.bahan.length;
     setActiveHppVariant({ ...activeHppVariant, bahan: [...activeHppVariant.bahan, newMaterial] });
+    setEditingMaterial({ material: newMaterial, index: newIndex });
+    setIsMaterialModalOpen(true);
   };
 
   const handleRemoveMaterial = (index: number) => {
@@ -1544,7 +1557,17 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           </form>
         </DialogContent>
       </Dialog>
-      <Dialog open={isMaterialModalOpen} onOpenChange={setIsMaterialModalOpen}>
+      <Dialog open={isMaterialModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          // If closing without saving (cancel), remove the empty material that was just added
+          if (editingMaterial && !editingMaterial.material.nama && activeHppVariant) {
+            const cleaned = activeHppVariant.bahan.filter((_, i) => i !== editingMaterial.index);
+            setActiveHppVariant({ ...activeHppVariant, bahan: cleaned });
+          }
+          setEditingMaterial(null);
+        }
+        setIsMaterialModalOpen(open);
+      }}>
         <DialogContent className="rounded-[2rem] border-none max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">Edit Bahan Baku</DialogTitle>
@@ -1637,13 +1660,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <select 
                 id="mat-kelompok" 
                 name="kelompok" 
-                defaultValue={editingMaterial?.material.kelompok || (settings?.kategori_hpp[0] || 'Lainnya')}
+                value={selectedKelompok}
+                onChange={(e) => setSelectedKelompok(e.target.value)}
                 className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
               >
                 {settings?.kategori_hpp.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
-                {!settings?.kategori_hpp.includes(editingMaterial?.material.kelompok || '') && editingMaterial?.material.kelompok && (
+                {editingMaterial?.material.kelompok && !settings?.kategori_hpp.includes(editingMaterial.material.kelompok) && editingMaterial.material.kelompok !== 'Lainnya' && (
                   <option value={editingMaterial.material.kelompok}>{editingMaterial.material.kelompok}</option>
                 )}
                 <option value="Lainnya">Lainnya</option>
