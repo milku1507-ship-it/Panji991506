@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap } from 'lucide-react';
+import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
 import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee } from '../types';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -135,6 +136,39 @@ export default function TransactionManager({ user, transactions, setTransactions
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isRange, setIsRange] = React.useState(false);
+  const [quickEntryOpen, setQuickEntryOpen] = React.useState(false);
+
+  const saveQuickBatch = async (list: QuickEntryFields[]): Promise<{ saved: number; failed: number }> => {
+    let saved = 0;
+    let failed = 0;
+    for (const fields of list) {
+      try {
+        const txData: any = {
+          tanggal: fields.tanggal || new Date().toISOString().split('T')[0],
+          tanggal_akhir: null,
+          jenis: fields.jenis || 'Pengeluaran',
+          kategori: fields.kategori || 'Lainnya',
+          keterangan: fields.keterangan || '',
+          nominal: Number(fields.nominal) || 0,
+          qty_beli: Number(fields.qty_beli) || 0,
+          qty_total: 0,
+          penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
+        };
+        await processAndSaveTransaction(txData);
+        saved++;
+      } catch (err) {
+        console.error('[quick-entry] failed to save', err);
+        failed++;
+      }
+    }
+    if (saved > 0) {
+      toast.success(`${saved} transaksi tersimpan${failed > 0 ? `, ${failed} gagal` : ''} ✓`);
+      if (onSuccess) onSuccess();
+    } else if (failed > 0) {
+      toast.error('Gagal menyimpan transaksi');
+    }
+    return { saved, failed };
+  };
 
   // Derive selected product IDs from penjualan_detail to prevent double counting and state sync issues
   const selectedProductIds = React.useMemo(() => {
@@ -1130,9 +1164,19 @@ export default function TransactionManager({ user, transactions, setTransactions
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transaction Form */}
         <Card className="lg:col-span-1 border-none shadow-sm rounded-3xl bg-white">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold">Catat Transaksi</CardTitle>
-            <CardDescription>Input data keuangan baru</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-lg font-bold">Catat Transaksi</CardTitle>
+              <CardDescription>Input data keuangan baru</CardDescription>
+            </div>
+            <Button
+              onClick={() => setQuickEntryOpen(true)}
+              size="sm"
+              className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
+            >
+              <Zap className="w-4 h-4" />
+              Cepat
+            </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -1626,6 +1670,14 @@ export default function TransactionManager({ user, transactions, setTransactions
         </DialogContent>
       </Dialog>
 
+      <QuickEntryDialog
+        open={quickEntryOpen}
+        onOpenChange={setQuickEntryOpen}
+        products={products}
+        ingredients={ingredients}
+        categories={dynamicCategories}
+        onSaveBatch={saveQuickBatch}
+      />
     </div>
   );
 }
