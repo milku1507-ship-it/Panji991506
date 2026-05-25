@@ -46,6 +46,15 @@ export const toISO = (d: Date): string => {
  */
 export const parseTxDate = (raw: any): Date | null => {
   if (!raw) return null;
+  // Firestore Timestamp object — has .toDate() method
+  if (typeof raw === 'object' && typeof (raw as any).toDate === 'function') {
+    const d = (raw as any).toDate() as Date;
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // Plain Firestore Timestamp serialised as { seconds, nanoseconds }
+  if (typeof raw === 'object' && typeof (raw as any).seconds === 'number') {
+    return new Date((raw as any).seconds * 1000);
+  }
   if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
   const s = String(raw).trim();
   if (!s) return null;

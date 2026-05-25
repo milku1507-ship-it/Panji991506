@@ -83,7 +83,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   React.useEffect(() => {
     if (editingMaterial) {
       const kel = editingMaterial.material.kelompok;
-      const validKel = kel && (settings?.kategori_hpp.includes(kel) || kel === 'Lainnya') ? kel : (settings?.kategori_hpp[0] || 'Lainnya');
+      const validKel = kel && kel.trim() ? kel : (settings?.kategori_hpp[0] || 'Lainnya');
       setSelectedKelompok(validKel);
     }
   }, [editingMaterial, settings?.kategori_hpp]);
@@ -765,7 +765,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const qtyInput = Number(b.qty) || 0;
       const hargaInput = Number(b.harga_per_satuan) || 0;
       let kelompok = (b.kelompok || 'Lainnya').trim();
-      if (!validKategori.has(kelompok)) kelompok = 'Lainnya';
+      if (!kelompok) kelompok = 'Lainnya';
 
       const baseUnit = getBaseUnit(satuanInput);
       const qtyBase = toBaseValue(qtyInput, satuanInput);
@@ -1171,7 +1171,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
-                  {[...(settings?.kategori_hpp || []), 'Lainnya'].map(cat => {
+                  {(() => {
+                    const settingsCats = [...(settings?.kategori_hpp || []), 'Lainnya'];
+                    const legacyCats = activeHppVariant.bahan
+                      .map(m => m.kelompok)
+                      .filter((k): k is string => !!k && k.trim() !== '');
+                    const allCats = [...new Set([...settingsCats, ...legacyCats])];
+                    return allCats;
+                  })().map(cat => {
                     const catMaterials = activeHppVariant.bahan
                       .map((m, originalIdx) => ({ ...m, originalIdx }))
                       .filter(m => m.kelompok === cat);

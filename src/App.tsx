@@ -177,8 +177,15 @@ function AppContent() {
     // Sync Transactions
     const unsubTransactions = onSnapshot(collection(db, `users/${uid}/transaksi`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Transaction);
-      // Sort by date descending
-      const sorted = data.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+      // Sort by date descending — handle ISO strings, Firestore Timestamps, and plain objects
+      const safeMs = (raw: any): number => {
+        if (!raw) return 0;
+        if (typeof raw === 'object' && typeof raw.toDate === 'function') return raw.toDate().getTime();
+        if (typeof raw === 'object' && typeof raw.seconds === 'number') return raw.seconds * 1000;
+        const ms = new Date(raw).getTime();
+        return isNaN(ms) ? 0 : ms;
+      };
+      const sorted = data.sort((a, b) => safeMs(b.tanggal) - safeMs(a.tanggal));
       setTransactions(sorted);
     }, (error) => {
       console.error('Transactions sync error:', error);

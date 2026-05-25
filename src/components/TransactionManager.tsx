@@ -1603,9 +1603,22 @@ export default function TransactionManager({ user, transactions, setTransactions
                 </div>
               ))}
               {filteredTransactions.length === 0 && (
-                <div className="text-center py-12">
-                  <CreditCard className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-                  <p className="text-gray-400 font-bold">Tidak ada transaksi ditemukan</p>
+                <div className="text-center py-12 space-y-3">
+                  <CreditCard className="w-12 h-12 text-gray-200 mx-auto" />
+                  <p className="text-gray-500 font-bold">Tidak ada transaksi ditemukan</p>
+                  {transactions.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-gray-400">
+                        Ada {transactions.length} transaksi di luar periode ini.
+                      </p>
+                      <button
+                        onClick={() => applyPreset('Semua Waktu')}
+                        className="text-xs font-bold text-primary underline underline-offset-2 hover:text-primary/80"
+                      >
+                        Tampilkan semua waktu
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
