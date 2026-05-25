@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X } from 'lucide-react';
 import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
 import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee } from '../types';
 import { cn } from '@/lib/utils';
@@ -35,7 +35,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, setDoc, updateDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
 import { getTxNominal, formatCompactNumber, formatCurrency } from '../lib/formatUtils';
 import { User } from 'firebase/auth';
 import { useSettings } from '../SettingsContext';
@@ -137,6 +137,44 @@ export default function TransactionManager({ user, transactions, setTransactions
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isRange, setIsRange] = React.useState(false);
   const [quickEntryOpen, setQuickEntryOpen] = React.useState(false);
+  const [editingTxId, setEditingTxId] = React.useState<string | null>(null);
+  const formRef = React.useRef<HTMLDivElement>(null);
+
+  const EMPTY_TX = {
+    tanggal: new Date().toISOString().split('T')[0],
+    tanggal_akhir: null as null,
+    jenis: 'Pemasukan' as 'Pemasukan' | 'Pengeluaran',
+    kategori: 'Penjualan',
+    nominal: 0,
+    keterangan: '',
+    qty_total: 0,
+    qty_beli: 0,
+    penjualan_detail: [] as any[],
+  };
+
+  const startEditTx = (tx: Transaction) => {
+    setEditingTxId(tx.id);
+    setNewTx({
+      tanggal: (() => { const d = tx.tanggal; if (typeof d === 'string') return d.split('T')[0]; if (d && typeof (d as any).toDate === 'function') return (d as any).toDate().toISOString().split('T')[0]; return new Date().toISOString().split('T')[0]; })(),
+      tanggal_akhir: tx.tanggal_akhir || null,
+      jenis: tx.jenis,
+      kategori: tx.kategori,
+      nominal: tx.nominal,
+      keterangan: tx.keterangan,
+      qty_beli: tx.qty_beli || 0,
+      qty_total: tx.qty_total || 0,
+      penjualan_detail: tx.penjualan_detail || [],
+    });
+    setSelectedMaterialId((tx as any).materialId || '');
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+  };
+
+  const cancelEditTx = () => {
+    setEditingTxId(null);
+    setNewTx(EMPTY_TX);
+    setSelectedMaterialId('');
+    setIsRange(false);
+  };
 
   const saveQuickBatch = async (list: QuickEntryFields[]): Promise<{ saved: number; failed: number }> => {
     let saved = 0;
@@ -860,6 +898,40 @@ export default function TransactionManager({ user, transactions, setTransactions
       return; 
     }
 
+    // ── Edit mode: update existing transaction ──
+    if (editingTxId) {
+      isUpdatingRef.current = true;
+      setIsSaving(true);
+      try {
+        const existing = transactions.find(t => t.id === editingTxId);
+        if (!existing || !user) throw new Error('tx not found');
+        const updated = {
+          ...existing,
+          tanggal: newTx.tanggal,
+          tanggal_akhir: newTx.tanggal_akhir || null,
+          keterangan: newTx.keterangan,
+          kategori: newTx.kategori,
+          jenis: newTx.jenis,
+          nominal: newTx.nominal,
+          qty_beli: newTx.qty_beli || 0,
+          qty_total: newTx.qty_total || 0,
+          penjualan_detail: newTx.penjualan_detail || [],
+        };
+        await setDoc(doc(db, `users/${user.uid}/transaksi/${editingTxId}`), sanitizeData(updated));
+        toast.success('Transaksi diperbarui ✓');
+        cancelEditTx();
+        setSelectedTxIds([]);
+      } catch (error) {
+        console.error('[TransactionManager] Edit error:', error);
+        toast.error('Gagal memperbarui transaksi');
+      } finally {
+        setIsSaving(false);
+        isUpdatingRef.current = false;
+      }
+      return;
+    }
+
+    // ── Create mode ──
     console.log("[TransactionManager] Starting handleAddTransaction manual save...");
     isUpdatingRef.current = true;
     setIsSaving(true);
@@ -869,17 +941,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       toast.success('Transaksi disimpan ✓');
       
       // Reset State & UI
-      setNewTx({
-        tanggal: new Date().toISOString().split('T')[0],
-        tanggal_akhir: null,
-        nominal: 0,
-        keterangan: '',
-        kategori: 'Lainnya',
-        jenis: 'Pengeluaran',
-        qty_beli: 1,
-        qty_total: 0,
-        penjualan_detail: []
-      });
+      setNewTx(EMPTY_TX);
       setSelectedMaterialId('');
       setSelectedTxIds([]);
       setIsRange(false);
@@ -1163,20 +1225,41 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transaction Form */}
-        <Card className="lg:col-span-1 border-none shadow-sm rounded-3xl bg-white">
+        <Card ref={formRef} className={cn("lg:col-span-1 border-none shadow-sm rounded-3xl bg-white transition-all", editingTxId && "ring-2 ring-primary/40")}>
           <CardHeader className="flex flex-row items-start justify-between gap-2">
             <div>
-              <CardTitle className="text-lg font-bold">Catat Transaksi</CardTitle>
-              <CardDescription>Input data keuangan baru</CardDescription>
+              <CardTitle className="text-lg font-bold flex items-center gap-2">
+                {editingTxId ? (
+                  <>
+                    <Edit2 className="w-4 h-4 text-primary" />
+                    Edit Transaksi
+                  </>
+                ) : 'Catat Transaksi'}
+              </CardTitle>
+              <CardDescription>
+                {editingTxId ? 'Ubah data transaksi yang sudah ada' : 'Input data keuangan baru'}
+              </CardDescription>
             </div>
-            <Button
-              onClick={() => setQuickEntryOpen(true)}
-              size="sm"
-              className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
-            >
-              <Zap className="w-4 h-4" />
-              Cepat
-            </Button>
+            {editingTxId ? (
+              <Button
+                onClick={cancelEditTx}
+                size="sm"
+                variant="outline"
+                className="rounded-2xl gap-1.5 border-gray-200 text-gray-500 font-bold"
+              >
+                <X className="w-3.5 h-3.5" />
+                Batal
+              </Button>
+            ) : (
+              <Button
+                onClick={() => setQuickEntryOpen(true)}
+                size="sm"
+                className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
+              >
+                <Zap className="w-4 h-4" />
+                Cepat
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -1467,8 +1550,19 @@ export default function TransactionManager({ user, transactions, setTransactions
               disabled={isSaving}
               className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-brand-200 mt-4 active:scale-95 transition-all hover:shadow-xl"
             >
-              {isSaving ? 'Menyimpan...' : 'Simpan Transaksi'}
+              {isSaving
+                ? (editingTxId ? 'Menyimpan...' : 'Menyimpan...')
+                : editingTxId ? 'Simpan Perubahan' : 'Simpan Transaksi'}
             </Button>
+            {editingTxId && (
+              <Button
+                variant="ghost"
+                onClick={cancelEditTx}
+                className="w-full text-gray-400 font-bold rounded-2xl h-10"
+              >
+                Batal Edit
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -1572,7 +1666,15 @@ export default function TransactionManager({ user, transactions, setTransactions
                           })()}
                         </p>
                       )}
-                      <div className="mt-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="mt-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => startEditTx(t)}
+                          className="h-8 w-8 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
                         <Button 
                           variant="ghost" 
                           size="icon" 

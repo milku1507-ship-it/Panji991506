@@ -6,7 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { 
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
-  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search, Sparkles
+  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search, Sparkles,
+  GripVertical, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import { User } from 'firebase/auth';
@@ -36,7 +37,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 
-import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, setDoc, updateDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
@@ -79,6 +80,30 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
   const [isPasteHppOpen, setIsPasteHppOpen] = React.useState(false);
   const [selectedKelompok, setSelectedKelompok] = React.useState<string>('');
+  const [collapsedCategories, setCollapsedCategories] = React.useState<Set<string>>(new Set());
+
+  const toggleCollapse = (cat: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      return next;
+    });
+  };
+
+  const moveCategoryInSettings = async (cat: string, dir: 'up' | 'down') => {
+    if (!settings || !auth.currentUser) return;
+    const cats = [...settings.kategori_hpp];
+    const idx = cats.indexOf(cat);
+    if (idx < 0) return;
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= cats.length) return;
+    [cats[idx], cats[swap]] = [cats[swap], cats[idx]];
+    try {
+      await updateDoc(doc(db, `users/${auth.currentUser.uid}/settings/kategori`), sanitizeData({ kategori_hpp: cats }));
+    } catch (e) {
+      toast.error('Gagal mengubah urutan kategori');
+    }
+  };
 
   React.useEffect(() => {
     if (editingMaterial) {
@@ -1170,39 +1195,75 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
-                <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
+                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
                   {(() => {
                     const settingsCats = [...(settings?.kategori_hpp || []), 'Lainnya'];
                     const legacyCats = activeHppVariant.bahan
                       .map(m => m.kelompok)
                       .filter((k): k is string => !!k && k.trim() !== '');
-                    const allCats = [...new Set([...settingsCats, ...legacyCats])];
-                    return allCats;
-                  })().map(cat => {
+                    return [...new Set([...settingsCats, ...legacyCats])];
+                  })().map((cat, _, allCats) => {
                     const catMaterials = activeHppVariant.bahan
                       .map((m, originalIdx) => ({ ...m, originalIdx }))
                       .filter(m => m.kelompok === cat);
-                    
                     if (catMaterials.length === 0) return null;
 
+                    const isCollapsed = collapsedCategories.has(cat);
+                    const settingsCatList = settings?.kategori_hpp || [];
+                    const settingsIdx = settingsCatList.indexOf(cat);
+                    const isInSettings = settingsIdx >= 0;
+
                     return (
-                      <div key={cat} className="space-y-3">
-                        <div className="flex items-center gap-3 px-2 py-1">
-                          <div className="h-[2px] flex-1 bg-brand-100/50"></div>
-                          <Badge variant="outline" className="bg-brand-50 border-brand-200 text-primary font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-widest">
+                      <div key={cat} className="rounded-2xl border border-gray-100 bg-gray-50/50 overflow-hidden">
+                        {/* Category header — drawer handle */}
+                        <button
+                          type="button"
+                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-brand-50/60 transition-colors"
+                          onClick={() => toggleCollapse(cat)}
+                        >
+                          <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
+                          <Badge variant="outline" className="bg-white border-brand-200 text-primary font-black text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-widest">
                             {cat}
                           </Badge>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <span className="text-[10px] font-bold text-gray-400">{catMaterials.length} item</span>
+                          <div className="flex-1" />
+                          {/* Reorder buttons — only for categories in settings */}
+                          {isInSettings && (
+                            <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-6 w-6 rounded-lg text-gray-300 hover:text-primary hover:bg-brand-50"
+                                disabled={settingsIdx === 0}
+                                onClick={() => moveCategoryInSettings(cat, 'up')}
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-6 w-6 rounded-lg text-gray-300 hover:text-primary hover:bg-brand-50"
+                                disabled={settingsIdx === settingsCatList.length - 1}
+                                onClick={() => moveCategoryInSettings(cat, 'down')}
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
+                          <Button
+                            variant="ghost" size="icon"
                             className="h-6 w-6 rounded-full text-gray-300 hover:text-red-500 hover:bg-red-50"
-                            onClick={() => handleRemoveCategory(cat)}
+                            onClick={e => { e.stopPropagation(); handleRemoveCategory(cat); }}
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
-                          <div className="h-[2px] flex-1 bg-brand-100/50"></div>
-                        </div>
-                        <div className="grid grid-cols-1 gap-3">
+                          {isCollapsed
+                            ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                            : <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                          }
+                        </button>
+
+                        {/* Drawer body */}
+                        {!isCollapsed && (
+                        <div className="grid grid-cols-1 gap-2 px-3 pb-3">
                           {catMaterials.map((m) => {
                             const ingredient = ingredients.find(i => i.id === m.ingredientId);
                             const displayName = ingredient ? ingredient.name : m.nama;
@@ -1265,6 +1326,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                             );
                           })}
                         </div>
+                        )}
                       </div>
                     );
                   })}
