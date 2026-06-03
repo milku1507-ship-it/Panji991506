@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Send, Loader2, CheckCircle2, RefreshCw, Zap, X } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
@@ -52,6 +52,106 @@ function parseQty(token: string): { qty: number; unit: string } | null {
   return { qty, unit };
 }
 
+// ─── Date Helpers ─────────────────────────────────────────────────────────────
+
+function todayStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function offsetDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+const BULAN: Record<string, number> = {
+  jan: 1, januari: 1, feb: 2, februari: 2, mar: 3, maret: 3,
+  apr: 4, april: 4, mei: 5, jun: 6, juni: 6, jul: 7, juli: 7,
+  agu: 8, agustus: 8, sep: 9, september: 9, okt: 10, oktober: 10,
+  nov: 11, november: 11, des: 12, desember: 12,
+};
+
+/**
+ * Try to parse an inline date token from the beginning of the token list.
+ * Returns { date: 'YYYY-MM-DD', consumed: number } or null.
+ * Examples accepted:
+ *   kemarin → yesterday
+ *   lusa → day after tomorrow (treated as 2 days ago context, ignored — treated as relative)
+ *   tgl 1 / tanggal 1 → 1st of current month
+ *   tgl 1 juni / 1 juni → 1st of June current year
+ *   1/6 → 1 June current year
+ *   2025-06-01 / 01-06-2025 → literal
+ */
+function parseDateFromTokens(tokens: string[], defaultDate: string): { date: string; consumed: number } | null {
+  if (tokens.length === 0) return null;
+  const t0 = tokens[0].toLowerCase();
+
+  // Relative keywords
+  if (t0 === 'kemarin') return { date: offsetDate(-1), consumed: 1 };
+  if (t0 === 'kemarin2' || t0 === 'kemarinnya') return { date: offsetDate(-2), consumed: 1 };
+  if (t0 === 'hari' && tokens[1]?.toLowerCase() === 'ini') return { date: todayStr(), consumed: 2 };
+  if (t0 === 'hariini') return { date: todayStr(), consumed: 1 };
+
+  // ISO date: 2025-06-01
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t0)) {
+    return { date: t0, consumed: 1 };
+  }
+
+  // DD-MM-YYYY or DD/MM/YYYY
+  const dmy = t0.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    const d = dmy[1].padStart(2, '0'), m = dmy[2].padStart(2, '0'), y = dmy[3];
+    return { date: `${y}-${m}-${d}`, consumed: 1 };
+  }
+
+  // D/M → day/month current year
+  const dm = t0.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (dm) {
+    const year = new Date().getFullYear();
+    const d = dm[1].padStart(2, '0'), m = dm[2].padStart(2, '0');
+    return { date: `${year}-${m}-${d}`, consumed: 1 };
+  }
+
+  // "tgl X" or "tanggal X"
+  if ((t0 === 'tgl' || t0 === 'tanggal') && tokens[1]) {
+    const day = parseInt(tokens[1]);
+    if (!isNaN(day) && day >= 1 && day <= 31) {
+      // Check if next token is a month name
+      if (tokens[2]) {
+        const monthNum = BULAN[tokens[2].toLowerCase()];
+        if (monthNum) {
+          const year = new Date().getFullYear();
+          const d = String(day).padStart(2, '0'), m = String(monthNum).padStart(2, '0');
+          return { date: `${year}-${m}-${d}`, consumed: 3 };
+        }
+      }
+      // Just tgl X → day X of default date's month
+      const base = new Date(defaultDate);
+      base.setDate(day);
+      return { date: base.toISOString().split('T')[0], consumed: 2 };
+    }
+  }
+
+  // "X bulan" e.g. "1 juni"
+  if (/^\d{1,2}$/.test(t0) && tokens[1]) {
+    const day = parseInt(t0);
+    const monthNum = BULAN[tokens[1].toLowerCase()];
+    if (!isNaN(day) && day >= 1 && day <= 31 && monthNum) {
+      const year = new Date().getFullYear();
+      const d = String(day).padStart(2, '0'), m = String(monthNum).padStart(2, '0');
+      return { date: `${year}-${m}-${d}`, consumed: 2 };
+    }
+  }
+
+  return null;
+}
+
+function formatDateDisplay(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-');
+  const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  return `${parseInt(d)} ${months[parseInt(m) - 1]} ${y}`;
+}
+
 const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold'];
 const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'beli-beli', 'pembelian', 'bayar', 'bayarin'];
 const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; kategori: string }> = {
@@ -80,13 +180,22 @@ function parseLine(
   ingredients: Ingredient[],
   products: Product[],
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
-  today: string,
+  defaultDate: string,
 ): QuickEntryFields | null {
   const line = raw.trim();
   if (!line) return null;
 
-  const tokens = line.split(/\s+/);
+  let tokens = line.split(/\s+/);
   if (tokens.length === 0) return null;
+
+  // ── Try to extract inline date from the START of the line ──────────────────
+  let tanggal = defaultDate;
+  const dateResult = parseDateFromTokens(tokens, defaultDate);
+  if (dateResult) {
+    tanggal = dateResult.date;
+    tokens = tokens.slice(dateResult.consumed);
+    if (tokens.length === 0) return null;
+  }
 
   let jenis: 'Pemasukan' | 'Pengeluaran' = 'Pengeluaran';
   let kategori = 'Lainnya';
@@ -109,7 +218,7 @@ function parseLine(
   }
 
   // Check category keywords in whole line
-  const lineLower = line.toLowerCase();
+  const lineLower = tokens.join(' ').toLowerCase();
   for (const [kw, meta] of Object.entries(CATEGORY_KEYWORDS)) {
     if (lineLower.includes(kw)) {
       jenis = meta.jenis;
@@ -131,12 +240,10 @@ function parseLine(
       qty_beli = qtyParsed.qty;
       continue;
     }
-    // Otherwise it's part of the description
     descTokens.push(token);
   }
 
-  // Keterangan from description tokens
-  const keterangan = descTokens.join(' ').trim() || line;
+  const keterangan = descTokens.join(' ').trim() || tokens.join(' ');
 
   // Try to match ingredient → detect HPP category
   if (jenis === 'Pengeluaran' && kategori === 'Lainnya') {
@@ -147,12 +254,10 @@ function parseLine(
     });
     if (matched && matched.category) {
       kategori = matched.category;
-      // Auto-fill nominal from price * qty if not provided
       if (nominal === 0 && qty_beli > 0) {
         nominal = matched.price * qty_beli;
       }
     } else {
-      // Check if any category keyword from settings is in the description
       const matchedCat = categories.find(c =>
         c.type === 'Pengeluaran' && normalizedDesc.includes(c.name.toLowerCase())
       );
@@ -163,23 +268,17 @@ function parseLine(
   // Try to match product → penjualan_detail
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
     const normalizedDesc = keterangan.toLowerCase().trim();
-
     for (const prod of products) {
       const prodNama = prod.nama.toLowerCase();
       if (!normalizedDesc.includes(prodNama)) continue;
-
-      // Try to find a variant match
       const varianMatches: { varian_id: string; varian_nama: string; qty: number }[] = [];
       for (const v of prod.varian) {
-        const vNama = v.nama.toLowerCase();
-        if (normalizedDesc.includes(vNama)) {
+        if (normalizedDesc.includes(v.nama.toLowerCase())) {
           varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
         }
       }
-
       if (varianMatches.length > 0) {
         penjualan_detail = [{ produk_id: prod.id, produk_nama: prod.nama, varian: varianMatches }];
-        // Auto nominal from harga_jual if not set
         if (nominal === 0) {
           nominal = varianMatches.reduce((sum, v) => {
             const variant = prod.varian.find(pv => pv.id === v.varian_id);
@@ -192,7 +291,7 @@ function parseLine(
   }
 
   return {
-    tanggal: today,
+    tanggal,
     jenis,
     kategori,
     keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1),
@@ -231,12 +330,15 @@ function PreviewCard({ fields, raw, onRemove }: { fields: QuickEntryFields; raw:
       >
         <X className="w-3 h-3" />
       </button>
-      <div className="flex items-center gap-2 pr-6">
+      <div className="flex items-center gap-2 pr-6 flex-wrap">
         <span className={cn(
           'text-[10px] font-black px-2 py-0.5 rounded-full',
           fields.jenis === 'Pemasukan' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
         )}>{fields.jenis}</span>
         <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{fields.kategori}</span>
+        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+          <Calendar className="w-2.5 h-2.5" />{formatDateDisplay(fields.tanggal)}
+        </span>
       </div>
       <div className="text-xs space-y-0.5 text-[#1A1A2E]">
         <div className="flex justify-between gap-2">
@@ -280,6 +382,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [step, setStep] = React.useState<'input' | 'preview'>('input');
+  const [defaultDate, setDefaultDate] = React.useState(todayStr);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -287,13 +390,13 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       setInput('');
       setEntries([]);
       setStep('input');
+      setDefaultDate(todayStr());
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [open]);
 
   const handleParse = () => {
-    const today = new Date().toISOString().split('T')[0];
-    const results = parseAll(input, ingredients, products, categories, today);
+    const results = parseAll(input, ingredients, products, categories, defaultDate);
     const valid = results.filter(r => r.parsed !== null) as { raw: string; parsed: QuickEntryFields }[];
     if (valid.length === 0) return;
     setEntries(valid);
@@ -342,21 +445,37 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {step === 'input' && (
             <div className="space-y-3">
+              {/* Date picker */}
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-2xl px-3 py-2.5">
+                <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-tight">Tanggal Default</p>
+                  <p className="text-[10px] text-blue-400 leading-tight">Berlaku untuk semua baris (kecuali ada tanggal di teks)</p>
+                </div>
+                <input
+                  type="date"
+                  value={defaultDate}
+                  onChange={e => setDefaultDate(e.target.value)}
+                  max={todayStr()}
+                  className="text-xs font-bold text-blue-700 bg-transparent border-none outline-none cursor-pointer"
+                />
+              </div>
+
               <div className="bg-orange-50 border border-orange-100 rounded-2xl p-3 space-y-1.5 text-xs text-gray-600">
                 <p className="font-black text-orange-700 text-[11px] uppercase tracking-widest">Contoh format</p>
                 <div className="space-y-1 font-medium">
-                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → Pengeluaran Bahan Baku</p>
-                  <p>• <span className="font-black text-gray-800">jual cireng ori 50pcs 250000</span> → Pemasukan Penjualan</p>
-                  <p>• <span className="font-black text-gray-800">gaji karyawan 500rb</span> → Pengeluaran Gaji</p>
-                  <p>• <span className="font-black text-gray-800">listrik 150rb</span> → Pengeluaran Operasional</p>
-                  <p>• <span className="font-black text-gray-800">tabungan 200rb</span> → Pengeluaran Tabungan</p>
+                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → tgl default</p>
+                  <p>• <span className="font-black text-gray-800">kemarin jual cireng ori 50pcs 250000</span> → kemarin</p>
+                  <p>• <span className="font-black text-gray-800">tgl 1 gaji karyawan 500rb</span> → tgl 1 bulan ini</p>
+                  <p>• <span className="font-black text-gray-800">1/6 listrik 150rb</span> → 1 Juni</p>
+                  <p>• <span className="font-black text-gray-800">tabungan 200rb</span> → tgl default</p>
                 </div>
                 <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Pisahkan dengan Enter atau titik koma (;).</p>
               </div>
 
               <Textarea
                 ref={textareaRef}
-                placeholder={"beli tapioka 25kg 210000\njual cireng ori 50pcs\ngaji karyawan 500rb"}
+                placeholder={"beli tapioka 25kg 210000\nkemarin jual cireng ori 50pcs\ntgl 1 gaji karyawan 500rb"}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
