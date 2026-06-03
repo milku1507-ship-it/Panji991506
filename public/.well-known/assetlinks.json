@@ -5,4 +5,12 @@
     "package_name": "app.vercel.panji991506_m4rn.twa",
     "sha256_cert_fingerprints": ["CA:C8:E8:55:47:3B:30:83:6B:B8:D5:8C:95:61:9A:35:95:CD:49:25:55:DA:D8:CF:85:0C:1F:ED:13:B4:66:C0"]
   }
+},
+{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.vercel.panji991506_3dii.twa",
+    "sha256_cert_fingerprints": ["64:11:83:45:19:94:58:C0:78:09:CD:89:E2:14:E9:DA:4B:F0:72:1E:5F:26:3F:4F:28:60:40:B5:C4:AE:3B:BA"]
+  }
 }]
