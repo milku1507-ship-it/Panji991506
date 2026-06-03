@@ -1,0 +1,29 @@
+Sempurna! Kode JSON Anda sudah lengkap.
+Ini dia *prompt* yang sudah siap pakai. Anda tinggal menyalin (*copy*) seluruh teks di dalam kotak di bawah ini dan menempelkannya (*paste*) langsung ke kolom chat AI di Replit Anda:
+> **"Tolong bantu saya mengonfigurasi Digital Asset Links untuk verifikasi TWA (Trusted Web Activity) agar PWA saya bisa tampil full-screen tanpa URL bar di Android.**
+> **Lakukan langkah-langkah berikut secara otomatis:**
+>  1. **Cari direktori publik** yang digunakan untuk menyajikan file statis di proyek ini (misalnya folder public jika menggunakan framework, atau folder *root* utama jika HTML biasa).
+>  2. **Buat folder baru** bernama tepat .well-known di dalam direktori publik tersebut.
+>  3. **Buat file baru** bernama assetlinks.json di dalam folder .well-known tersebut.
+>  4. **Isi file assetlinks.json** tersebut dengan kode JSON di bawah ini:
+> ```json
+> [{
+>   "relation": ["delegate_permission/common.handle_all_urls"],
+>   "target": {
+>     "namespace": "android_app",
+>     "package_name": "app.vercel.panji991506_m4rn.twa",
+>     "sha256_cert_fingerprints": ["CA:C8:E8:55:47:3B:30:83:6B:B8:D5:8C:95:61:9A:35:95:CD:49:25:55:DA:D8:CF:85:0C:1F:ED:13:B4:66:C0"]
+>   }
+> }]
+> 
+> ```
+>  5. **Pastikan konfigurasi routing** aplikasi tidak memblokir akses ke file tersebut, sehingga file ini bisa diakses langsung melalui browser di jalur /.well-known/assetlinks.json.
+> **Tolong eksekusi pembuatan folder dan filenya sekarang, dan beri tahu saya jika sudah selesai agar saya bisa langsung melakukan commit dan deploy ke Vercel."**
+> 
+### 💡 Apa yang harus dilakukan selanjutnya?
+Setelah AI Replit membalas bahwa tugasnya sudah selesai:
+ 1. Lakukan **Commit & Push** di Replit agar perubahannya dikirim ke Vercel.
+ 2. Tunggu beberapa saat sampai Vercel selesai melakukan proses *deploy*.
+ 3. Buka link ini di browser untuk memastikan kodenya sudah terbaca oleh sistem:
+   👉 https://panji991506-m4m.vercel.app/.well-known/assetlinks.json (Ganti m4m menjadi m4rn jika link Vercel Anda yang benar menggunakan huruf 'r' dan 'n').
+Jika link tersebut sudah menampilkan kode JSON Anda, silakan *uninstall* aplikasi lama di HP Anda, *clear cache* browser, dan *install* ulang APK-nya!
