@@ -107,14 +107,12 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
   };
 
   const renderSection = (title: string, field: string, icon: React.ReactNode) => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-brand-50 rounded-lg text-primary shrink-0">
-            {icon}
-          </div>
-          <h3 className="font-black text-gray-800 text-sm md:text-base">{title}</h3>
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="p-2 bg-brand-50 rounded-lg text-primary shrink-0">
+          {icon}
         </div>
+        <h3 className="font-black text-gray-800 text-sm">{title}</h3>
       </div>
 
       <div className="flex gap-2">
@@ -122,45 +120,45 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
           placeholder={`Tambah ${title.toLowerCase()}...`} 
           value={newItemValue}
           onChange={(e) => setNewItemValue(e.target.value)}
-          className="rounded-xl"
+          className="rounded-xl min-w-0 flex-1"
           onKeyDown={(e) => e.key === 'Enter' && handleAddItem(field)}
         />
-        <Button onClick={() => handleAddItem(field)} disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl">
+        <Button onClick={() => handleAddItem(field)} disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl shrink-0 w-10 px-0">
           {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
         </Button>
       </div>
 
-      <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+      <div className="space-y-2">
         {settings[field as keyof typeof settings].map((item) => (
-          <div key={item} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all group">
+          <div key={item} className="flex items-center gap-2 p-3 bg-white border border-gray-100 rounded-2xl shadow-sm">
             {editingItem?.field === field && editingItem?.value === item ? (
-              <div className="flex items-center gap-2 flex-1 mr-2">
+              <>
                 <Input 
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
-                  className="h-8 rounded-lg"
+                  className="h-8 rounded-lg min-w-0 flex-1"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleUpdateItem(field, item)}
                 />
-                <Button size="icon" variant="ghost" disabled={isSaving} className="h-8 w-8 text-green-500" onClick={() => handleUpdateItem(field, item)}>
+                <Button size="icon" variant="ghost" disabled={isSaving} className="h-8 w-8 shrink-0 text-green-500" onClick={() => handleUpdateItem(field, item)}>
                   {isSaving ? <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => setEditingItem(null)}>
+                <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-red-500" onClick={() => setEditingItem(null)}>
                   <X className="w-4 h-4" />
                 </Button>
-              </div>
+              </>
             ) : (
               <>
-                <span className="font-bold text-gray-700">{item}</span>
-                <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-500" onClick={() => {
+                <span className="font-bold text-gray-700 flex-1 min-w-0 break-words text-sm">{item}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-400 hover:text-blue-600" onClick={() => {
                     setEditingItem({ field, value: item });
                     setEditValue(item);
                   }}>
-                    <Edit2 className="w-4 h-4" />
+                    <Edit2 className="w-3.5 h-3.5" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => handleDeleteItem(field, item)}>
-                    <Trash2 className="w-4 h-4" />
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-red-400 hover:text-red-600" onClick={() => handleDeleteItem(field, item)}>
+                    <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               </>
@@ -172,42 +170,39 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
   );
 
   return (
-    <Card className="border-none shadow-xl rounded-[2rem] md:rounded-[2.5rem] overflow-hidden bg-[#F8FAFC]">
-      <CardHeader className="bg-white border-b border-gray-100 p-5 md:p-8">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full -ml-1 h-9 w-9">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div className="p-2.5 bg-brand-50 rounded-xl text-primary shrink-0">
-              <Settings2 className="w-5 h-5 md:w-6 md:h-6" />
-            </div>
-          </div>
-          <div>
-            <CardTitle className="text-lg md:text-2xl font-black text-[#1A1A2E]">Kelola Kategori & Label</CardTitle>
-            <CardDescription className="font-bold text-gray-400 text-[10px] md:text-sm">Kustomisasi label untuk HPP, Produk, dan Satuan.</CardDescription>
-          </div>
+    <div className="space-y-4 pb-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full h-9 w-9 shrink-0">
+          <ArrowLeft className="w-5 h-5" />
+        </Button>
+        <div className="p-2 bg-brand-50 rounded-xl text-primary shrink-0">
+          <Settings2 className="w-5 h-5" />
         </div>
-      </CardHeader>
-      <CardContent className="p-5 md:p-8">
-        <Tabs defaultValue="hpp" className="space-y-6 md:space-y-8">
-          <TabsList className="bg-white p-1 rounded-xl md:rounded-2xl border border-gray-100 w-full flex h-11 md:h-14">
-            <TabsTrigger value="hpp" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">HPP</TabsTrigger>
-            <TabsTrigger value="produk" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">Produk</TabsTrigger>
-            <TabsTrigger value="unit" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">Satuan</TabsTrigger>
-          </TabsList>
+        <div className="min-w-0">
+          <h2 className="text-lg font-black text-[#1A1A2E] leading-tight">Kelola Kategori & Label</h2>
+          <p className="text-[11px] font-medium text-gray-400">Kustomisasi label untuk HPP, Produk, dan Satuan.</p>
+        </div>
+      </div>
 
-          <TabsContent value="hpp">
-            {renderSection('Kategori HPP', 'kategori_hpp', <Layers className="w-5 h-5" />)}
-          </TabsContent>
-          <TabsContent value="produk">
-            {renderSection('Kategori Produk', 'kategori_produk', <Package className="w-5 h-5" />)}
-          </TabsContent>
-          <TabsContent value="unit">
-            {renderSection('Satuan Unit', 'satuan_unit', <Ruler className="w-5 h-5" />)}
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+      {/* Tabs */}
+      <Tabs defaultValue="hpp" className="space-y-4">
+        <TabsList className="bg-white p-1 rounded-2xl border border-gray-100 w-full h-12">
+          <TabsTrigger value="hpp" className="rounded-xl font-black text-xs flex-1 data-active:bg-brand-50 data-active:text-primary">HPP</TabsTrigger>
+          <TabsTrigger value="produk" className="rounded-xl font-black text-xs flex-1 data-active:bg-brand-50 data-active:text-primary">Produk</TabsTrigger>
+          <TabsTrigger value="unit" className="rounded-xl font-black text-xs flex-1 data-active:bg-brand-50 data-active:text-primary">Satuan</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="hpp">
+          {renderSection('Kategori HPP', 'kategori_hpp', <Layers className="w-4 h-4" />)}
+        </TabsContent>
+        <TabsContent value="produk">
+          {renderSection('Kategori Produk', 'kategori_produk', <Package className="w-4 h-4" />)}
+        </TabsContent>
+        <TabsContent value="unit">
+          {renderSection('Satuan Unit', 'satuan_unit', <Ruler className="w-4 h-4" />)}
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
