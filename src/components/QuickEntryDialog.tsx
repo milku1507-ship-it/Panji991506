@@ -9,11 +9,13 @@ import { formatCurrency } from '../lib/formatUtils';
 
 export type QuickEntryFields = {
   tanggal: string;
+  tanggal_akhir: null;
   jenis: 'Pemasukan' | 'Pengeluaran';
   kategori: string;
   keterangan: string;
   nominal: number;
   qty_beli: number;
+  qty_total: number;
   penjualan_detail?: {
     produk_id: string;
     produk_nama: string;
@@ -30,7 +32,7 @@ interface Props {
   onSaveBatch: (list: QuickEntryFields[]) => Promise<{ saved: number; failed: number }>;
 }
 
-// ─── Parser ───────────────────────────────────────────────────────────────────
+// ─── Nominal Parser ───────────────────────────────────────────────────────────
 
 function parseNominal(token: string): number | null {
   const s = token.toLowerCase().replace(/[rp.\s]/g, '');
@@ -39,8 +41,8 @@ function parseNominal(token: string): number | null {
   const num = parseFloat(match[1].replace(',', '.'));
   const suffix = match[2] || '';
   if (suffix === 'rb' || suffix === 'ribu' || suffix === 'k') return Math.round(num * 1000);
-  if (suffix === 'jt' || suffix === 'juta') return Math.round(num * 1000000);
-  if (suffix === 'm' || suffix === 'miliar') return Math.round(num * 1000000000);
+  if (suffix === 'jt' || suffix === 'juta') return Math.round(num * 1_000_000);
+  if (suffix === 'm' || suffix === 'miliar') return Math.round(num * 1_000_000_000);
   return Math.round(num);
 }
 
@@ -72,77 +74,87 @@ const BULAN: Record<string, number> = {
 };
 
 /**
- * Try to parse an inline date token from the beginning of the token list.
- * Returns { date: 'YYYY-MM-DD', consumed: number } or null.
- * Examples accepted:
- *   kemarin → yesterday
- *   lusa → day after tomorrow (treated as 2 days ago context, ignored — treated as relative)
- *   tgl 1 / tanggal 1 → 1st of current month
- *   tgl 1 juni / 1 juni → 1st of June current year
- *   1/6 → 1 June current year
- *   2025-06-01 / 01-06-2025 → literal
+ * Scan ALL tokens for a date pattern (not just the beginning).
+ * Returns the parsed date and the indices of consumed tokens, or null if none found.
  */
-function parseDateFromTokens(tokens: string[], defaultDate: string): { date: string; consumed: number } | null {
-  if (tokens.length === 0) return null;
-  const t0 = tokens[0].toLowerCase();
+function extractDateFromTokens(
+  tokens: string[],
+  defaultDate: string,
+): { date: string; indices: number[] } | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const t0 = tokens[i].toLowerCase();
 
-  // Relative keywords
-  if (t0 === 'kemarin') return { date: offsetDate(-1), consumed: 1 };
-  if (t0 === 'kemarin2' || t0 === 'kemarinnya') return { date: offsetDate(-2), consumed: 1 };
-  if (t0 === 'hari' && tokens[1]?.toLowerCase() === 'ini') return { date: todayStr(), consumed: 2 };
-  if (t0 === 'hariini') return { date: todayStr(), consumed: 1 };
-
-  // ISO date: 2025-06-01
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t0)) {
-    return { date: t0, consumed: 1 };
-  }
-
-  // DD-MM-YYYY or DD/MM/YYYY
-  const dmy = t0.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) {
-    const d = dmy[1].padStart(2, '0'), m = dmy[2].padStart(2, '0'), y = dmy[3];
-    return { date: `${y}-${m}-${d}`, consumed: 1 };
-  }
-
-  // D/M → day/month current year
-  const dm = t0.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if (dm) {
-    const year = new Date().getFullYear();
-    const d = dm[1].padStart(2, '0'), m = dm[2].padStart(2, '0');
-    return { date: `${year}-${m}-${d}`, consumed: 1 };
-  }
-
-  // "tgl X" or "tanggal X"
-  if ((t0 === 'tgl' || t0 === 'tanggal') && tokens[1]) {
-    const day = parseInt(tokens[1]);
-    if (!isNaN(day) && day >= 1 && day <= 31) {
-      // Check if next token is a month name
-      if (tokens[2]) {
-        const monthNum = BULAN[tokens[2].toLowerCase()];
-        if (monthNum) {
-          const year = new Date().getFullYear();
-          const d = String(day).padStart(2, '0'), m = String(monthNum).padStart(2, '0');
-          return { date: `${year}-${m}-${d}`, consumed: 3 };
-        }
-      }
-      // Just tgl X → day X of default date's month
-      const base = new Date(defaultDate);
-      base.setDate(day);
-      return { date: base.toISOString().split('T')[0], consumed: 2 };
+    // Relative keywords
+    if (t0 === 'kemarin') return { date: offsetDate(-1), indices: [i] };
+    if (t0 === 'kemarin2' || t0 === 'kemarinnya') return { date: offsetDate(-2), indices: [i] };
+    if (t0 === 'hariini') return { date: todayStr(), indices: [i] };
+    if (t0 === 'hari' && tokens[i + 1]?.toLowerCase() === 'ini') {
+      return { date: todayStr(), indices: [i, i + 1] };
     }
-  }
 
-  // "X bulan" e.g. "1 juni"
-  if (/^\d{1,2}$/.test(t0) && tokens[1]) {
-    const day = parseInt(t0);
-    const monthNum = BULAN[tokens[1].toLowerCase()];
-    if (!isNaN(day) && day >= 1 && day <= 31 && monthNum) {
+    // ISO date: 2025-06-01
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t0)) {
+      return { date: t0, indices: [i] };
+    }
+
+    // DD-MM-YYYY or DD/MM/YYYY
+    const dmy = t0.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) {
+      const d = dmy[1].padStart(2, '0'), m = dmy[2].padStart(2, '0'), y = dmy[3];
+      return { date: `${y}-${m}-${d}`, indices: [i] };
+    }
+
+    // D/M → day/month current year
+    const dm = t0.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (dm) {
       const year = new Date().getFullYear();
-      const d = String(day).padStart(2, '0'), m = String(monthNum).padStart(2, '0');
-      return { date: `${year}-${m}-${d}`, consumed: 2 };
+      const d = dm[1].padStart(2, '0'), m = dm[2].padStart(2, '0');
+      return { date: `${year}-${m}-${d}`, indices: [i] };
+    }
+
+    // "tgl X" or "tanggal X"
+    if ((t0 === 'tgl' || t0 === 'tanggal') && tokens[i + 1]) {
+      const day = parseInt(tokens[i + 1]);
+      if (!isNaN(day) && day >= 1 && day <= 31) {
+        // Check if next token is a month name: tgl X Bulan [Tahun]
+        if (tokens[i + 2]) {
+          const monthNum = BULAN[tokens[i + 2].toLowerCase()];
+          if (monthNum) {
+            // Check for year too: tgl X Bulan YYYY
+            if (tokens[i + 3] && /^\d{4}$/.test(tokens[i + 3])) {
+              const y = tokens[i + 3];
+              const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
+              return { date: `${y}-${mo}-${d}`, indices: [i, i + 1, i + 2, i + 3] };
+            }
+            const year = new Date().getFullYear();
+            const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
+            return { date: `${year}-${mo}-${d}`, indices: [i, i + 1, i + 2] };
+          }
+        }
+        // Just tgl X → day X of default date's month/year
+        const base = new Date(defaultDate);
+        base.setDate(day);
+        return { date: base.toISOString().split('T')[0], indices: [i, i + 1] };
+      }
+    }
+
+    // "X Bulan" e.g. "1 juni" or "10 juni 2026"
+    if (/^\d{1,2}$/.test(t0) && tokens[i + 1]) {
+      const day = parseInt(t0);
+      const monthNum = BULAN[tokens[i + 1].toLowerCase()];
+      if (!isNaN(day) && day >= 1 && day <= 31 && monthNum) {
+        // Check for year: X Bulan YYYY
+        if (tokens[i + 2] && /^\d{4}$/.test(tokens[i + 2])) {
+          const y = tokens[i + 2];
+          const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
+          return { date: `${y}-${mo}-${d}`, indices: [i, i + 1, i + 2] };
+        }
+        const year = new Date().getFullYear();
+        const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
+        return { date: `${year}-${mo}-${d}`, indices: [i, i + 1] };
+      }
     }
   }
-
   return null;
 }
 
@@ -152,8 +164,12 @@ function formatDateDisplay(dateStr: string): string {
   return `${parseInt(d)} ${months[parseInt(m) - 1]} ${y}`;
 }
 
+// ─── Keyword Maps ─────────────────────────────────────────────────────────────
+
 const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold'];
-const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'beli-beli', 'pembelian', 'bayar', 'bayarin'];
+const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin'];
+
+/** Maps a keyword to a {jenis, kategori} pair. The kategori MUST match a valid category name in the system. */
 const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; kategori: string }> = {
   gaji: { jenis: 'Pengeluaran', kategori: 'Gaji' },
   upah: { jenis: 'Pengeluaran', kategori: 'Gaji' },
@@ -164,6 +180,7 @@ const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; ka
   operasional: { jenis: 'Pengeluaran', kategori: 'Operasional' },
   transportasi: { jenis: 'Pengeluaran', kategori: 'Operasional' },
   bensin: { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  sewa: { jenis: 'Pengeluaran', kategori: 'Operasional' },
   tabungan: { jenis: 'Pengeluaran', kategori: 'Tabungan' },
   nabung: { jenis: 'Pengeluaran', kategori: 'Tabungan' },
   iklan: { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
@@ -174,6 +191,23 @@ const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; ka
   packing: { jenis: 'Pengeluaran', kategori: 'Packing' },
   kemasan: { jenis: 'Pengeluaran', kategori: 'Packing' },
 };
+
+// ─── Validate category against the live category list ────────────────────────
+
+function resolveCategory(
+  kandidat: string,
+  jenis: 'Pemasukan' | 'Pengeluaran',
+  categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
+): string {
+  const valid = categories.filter(c => c.type === jenis).map(c => c.name);
+  if (valid.includes(kandidat)) return kandidat;
+  // Fuzzy: case-insensitive match
+  const ci = valid.find(v => v.toLowerCase() === kandidat.toLowerCase());
+  if (ci) return ci;
+  return 'Lainnya';
+}
+
+// ─── Core Line Parser ─────────────────────────────────────────────────────────
 
 function parseLine(
   raw: string,
@@ -188,36 +222,43 @@ function parseLine(
   let tokens = line.split(/\s+/);
   if (tokens.length === 0) return null;
 
-  // ── Try to extract inline date from the START of the line ──────────────────
+  // ── 1. Extract date from anywhere in the token list ───────────────────────
   let tanggal = defaultDate;
-  const dateResult = parseDateFromTokens(tokens, defaultDate);
+  const dateResult = extractDateFromTokens(tokens, defaultDate);
   if (dateResult) {
     tanggal = dateResult.date;
-    tokens = tokens.slice(dateResult.consumed);
+    // Remove date tokens (reverse order to keep indices valid)
+    const idxSet = new Set(dateResult.indices);
+    tokens = tokens.filter((_, idx) => !idxSet.has(idx));
     if (tokens.length === 0) return null;
   }
 
+  // ── 2. Detect action verb (jual / beli) at any position ──────────────────
   let jenis: 'Pemasukan' | 'Pengeluaran' = 'Pengeluaran';
   let kategori = 'Lainnya';
-  let nominal = 0;
-  let qty_beli = 0;
-  const descTokens: string[] = [];
-  let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
+  let actionIdx = -1;
 
-  // Check first token for action keyword
-  const firstLower = tokens[0].toLowerCase();
-  let startIdx = 0;
-
-  if (JUAL_KEYWORDS.some(k => firstLower === k || firstLower.startsWith(k))) {
-    jenis = 'Pemasukan';
-    kategori = 'Penjualan';
-    startIdx = 1;
-  } else if (BELI_KEYWORDS.some(k => firstLower === k || firstLower.startsWith(k))) {
-    jenis = 'Pengeluaran';
-    startIdx = 1;
+  for (let i = 0; i < tokens.length; i++) {
+    const tl = tokens[i].toLowerCase();
+    if (JUAL_KEYWORDS.some(k => tl === k || tl.startsWith(k))) {
+      jenis = 'Pemasukan';
+      kategori = 'Penjualan';
+      actionIdx = i;
+      break;
+    }
+    if (BELI_KEYWORDS.some(k => tl === k || tl.startsWith(k))) {
+      jenis = 'Pengeluaran';
+      actionIdx = i;
+      break;
+    }
   }
 
-  // Check category keywords in whole line
+  // Remove action verb token
+  if (actionIdx >= 0) {
+    tokens = tokens.filter((_, i) => i !== actionIdx);
+  }
+
+  // ── 3. Detect category keywords in remaining tokens ───────────────────────
   const lineLower = tokens.join(' ').toLowerCase();
   for (const [kw, meta] of Object.entries(CATEGORY_KEYWORDS)) {
     if (lineLower.includes(kw)) {
@@ -227,37 +268,70 @@ function parseLine(
     }
   }
 
-  // Now scan remaining tokens for nominal and qty
-  const remainingTokens = tokens.slice(startIdx);
-  for (const token of remainingTokens) {
-    const nom = parseNominal(token);
+  // Also check if any token matches a category name directly from the live list
+  if (kategori === 'Lainnya') {
+    for (const cat of categories) {
+      if (lineLower.includes(cat.name.toLowerCase())) {
+        jenis = cat.type;
+        kategori = cat.name;
+        break;
+      }
+    }
+  }
+
+  // ── 4. Scan tokens for nominal and qty; collect description tokens ─────────
+  let nominal = 0;
+  let qty_beli = 0;
+  const usedIndices = new Set<number>();
+  const descTokens: string[] = [];
+
+  // First pass: find nominal (largest number) and qty (number with unit)
+  for (let i = 0; i < tokens.length; i++) {
+    const nom = parseNominal(tokens[i]);
     if (nom !== null && nom > 0) {
-      nominal = nom;
+      // Prefer the largest plausible nominal (avoid picking qty as nominal)
+      if (nom > nominal) nominal = nom;
+      usedIndices.add(i);
       continue;
     }
-    const qtyParsed = parseQty(token);
-    if (qtyParsed && qty_beli === 0) {
-      qty_beli = qtyParsed.qty;
-      continue;
+    const qtyParsed = parseQty(tokens[i]);
+    if (qtyParsed && qtyParsed.qty > 0 && qtyParsed.qty < 100_000) {
+      // Only take first qty token; if already found, it could be nominal
+      if (qty_beli === 0 && qtyParsed.unit !== 'pcs') {
+        qty_beli = qtyParsed.qty;
+        usedIndices.add(i);
+        continue;
+      } else if (qty_beli === 0) {
+        // "pcs" unit: treat as qty only if there's already a different nominal token
+        qty_beli = qtyParsed.qty;
+        usedIndices.add(i);
+        continue;
+      }
     }
-    descTokens.push(token);
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    if (!usedIndices.has(i)) descTokens.push(tokens[i]);
   }
 
   const keterangan = descTokens.join(' ').trim() || tokens.join(' ');
 
-  // Try to match ingredient → detect HPP category
+  // ── 5. Match ingredient → auto-assign HPP category ────────────────────────
+  let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
+
   if (jenis === 'Pengeluaran' && kategori === 'Lainnya') {
     const normalizedDesc = keterangan.toLowerCase().trim();
-    const matched = ingredients.find(i => {
-      const iName = i.name.toLowerCase().trim();
-      return normalizedDesc.includes(iName) || iName.includes(normalizedDesc.split(' ')[0]);
+    const matchedIng = ingredients.find(ing => {
+      const n = ing.name.toLowerCase().trim();
+      return normalizedDesc.includes(n) || n.includes(normalizedDesc.split(' ')[0]);
     });
-    if (matched && matched.category) {
-      kategori = matched.category;
+    if (matchedIng && matchedIng.category) {
+      kategori = matchedIng.category;
       if (nominal === 0 && qty_beli > 0) {
-        nominal = matched.price * qty_beli;
+        nominal = matchedIng.price * qty_beli;
       }
     } else {
+      // Try matching category name from the dynamic list
       const matchedCat = categories.find(c =>
         c.type === 'Pengeluaran' && normalizedDesc.includes(c.name.toLowerCase())
       );
@@ -265,20 +339,23 @@ function parseLine(
     }
   }
 
-  // Try to match product → penjualan_detail
+  // ── 6. Match product → build penjualan_detail ─────────────────────────────
+  let qty_total = 0;
+
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
     const normalizedDesc = keterangan.toLowerCase().trim();
     for (const prod of products) {
-      const prodNama = prod.nama.toLowerCase();
-      if (!normalizedDesc.includes(prodNama)) continue;
+      if (!normalizedDesc.includes(prod.nama.toLowerCase())) continue;
       const varianMatches: { varian_id: string; varian_nama: string; qty: number }[] = [];
       for (const v of prod.varian) {
         if (normalizedDesc.includes(v.nama.toLowerCase())) {
-          varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
+          const qty = qty_beli || 1;
+          varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty });
         }
       }
       if (varianMatches.length > 0) {
         penjualan_detail = [{ produk_id: prod.id, produk_nama: prod.nama, varian: varianMatches }];
+        qty_total = varianMatches.reduce((s, v) => s + v.qty, 0);
         if (nominal === 0) {
           nominal = varianMatches.reduce((sum, v) => {
             const variant = prod.varian.find(pv => pv.id === v.varian_id);
@@ -290,16 +367,25 @@ function parseLine(
     }
   }
 
+  // ── 7. Validate category against the live list ────────────────────────────
+  kategori = resolveCategory(kategori, jenis, categories);
+
+  const rawKeterangan = keterangan.charAt(0).toUpperCase() + keterangan.slice(1);
+
   return {
     tanggal,
+    tanggal_akhir: null,
     jenis,
     kategori,
-    keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1),
+    keterangan: rawKeterangan,
     nominal,
     qty_beli,
+    qty_total,
     penjualan_detail,
   };
 }
+
+// ─── Parse All Lines ──────────────────────────────────────────────────────────
 
 function parseAll(
   text: string,
@@ -308,20 +394,19 @@ function parseAll(
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
   today: string,
 ): { raw: string; parsed: QuickEntryFields | null }[] {
-  // Split by newline or semicolon; preserve comma only inside non-numeric context
-  const lines = text.split(/\n|;/).flatMap(l => {
-    // If line has multiple comma-separated entries (heuristic: more than 1 amount)
-    const parts = l.split(',').map(p => p.trim()).filter(Boolean);
-    if (parts.length > 1 && parts.every(p => /\d/.test(p))) return parts;
-    return [l.trim()];
-  }).filter(Boolean);
+  // Strictly: 1 line = 1 transaction. Split ONLY on newline or semicolon.
+  // No comma-splitting — that would fabricate transactions the user didn't type.
+  const lines = text
+    .split(/\n|;/)
+    .map(l => l.trim())
+    .filter(Boolean);
 
   return lines.map(raw => ({ raw, parsed: parseLine(raw, ingredients, products, categories, today) }));
 }
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
 
-function PreviewCard({ fields, raw, onRemove }: { fields: QuickEntryFields; raw: string; onRemove: () => void }) {
+function PreviewCard({ fields, onRemove }: { fields: QuickEntryFields; raw: string; onRemove: () => void }) {
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-3 space-y-1.5 relative">
       <button
@@ -347,8 +432,14 @@ function PreviewCard({ fields, raw, onRemove }: { fields: QuickEntryFields; raw:
         </div>
         {fields.qty_beli > 0 && (
           <div className="flex justify-between">
-            <span className="text-gray-400">Qty</span>
+            <span className="text-gray-400">Qty Beli</span>
             <span className="font-bold">{fields.qty_beli}</span>
+          </div>
+        )}
+        {fields.qty_total > 0 && (
+          <div className="flex justify-between">
+            <span className="text-gray-400">Qty Jual</span>
+            <span className="font-bold">{fields.qty_total}</span>
           </div>
         )}
         <div className="flex justify-between">
@@ -446,18 +537,18 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
               <div className="bg-orange-50 border border-orange-100 rounded-2xl p-3 space-y-1.5 text-xs text-gray-600">
                 <p className="font-black text-orange-700 text-[11px] uppercase tracking-widest">Contoh format</p>
                 <div className="space-y-1 font-medium">
-                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → Pengeluaran, tgl hari ini</p>
-                  <p>• <span className="font-black text-gray-800">kemarin jual cireng ori 50pcs 250000</span> → Pemasukan, kemarin</p>
-                  <p>• <span className="font-black text-gray-800">tgl 1 gaji karyawan 500rb</span> → Pengeluaran, tgl 1</p>
-                  <p>• <span className="font-black text-gray-800">10/6 listrik 150rb</span> → Pengeluaran, 10 Juni</p>
-                  <p>• <span className="font-black text-gray-800">tabungan 200rb</span> → otomatis tgl hari ini</p>
+                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → Pengeluaran, hari ini</p>
+                  <p>• <span className="font-black text-gray-800">jual cireng ori 50pcs kemarin</span> → Pemasukan, kemarin</p>
+                  <p>• <span className="font-black text-gray-800">gaji karyawan 500rb tgl 1 juni</span> → Pengeluaran, 1 Juni</p>
+                  <p>• <span className="font-black text-gray-800">listrik 150rb 10/6</span> → Pengeluaran, 10 Juni</p>
+                  <p>• <span className="font-black text-gray-800">tabungan 200rb tgl 10 juni 2026</span> → tgl 10 Juni 2026</p>
                 </div>
-                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Tanggal dibaca otomatis dari teks — jika tidak ada, pakai hari ini.</p>
+                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Tanggal dibaca otomatis dari mana saja dalam teks — jika tidak ada, pakai hari ini.</p>
               </div>
 
               <Textarea
                 ref={textareaRef}
-                placeholder={"beli tapioka 25kg 210000\nkemarin jual cireng ori 50pcs\ntgl 1 gaji karyawan 500rb"}
+                placeholder={"beli tapioka 25kg 210000\njual cireng ori 50pcs tgl 10 juni 2026\ngaji karyawan 500rb kemarin"}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
