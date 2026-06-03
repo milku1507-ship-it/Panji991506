@@ -1,0 +1,18 @@
+​Prompt untuk Modifikasi Sistem Input Cepat
+​Tugas: Modifikasi Antarmuka (UI) dan Logika Parsing untuk fitur "Input Cepat" berdasarkan referensi Screenshot_2026-06-03-22-10-39-83.jpg. Tujuan utamanya adalah menyederhanakan UI dengan menghilangkan input tanggal manual dan sepenuhnya mengandalkan deteksi tanggal dari teks (Natural Language Processing / Regex).
+​1. Perubahan Antarmuka (UI / Front-End):
+​Hapus Elemen Tanggal: Hapus atau sembunyikan kotak/tab "TANGGAL DEFAULT" (kotak berwarna biru di bagian atas yang berisi dropdown kalender).
+​UI hanya boleh menyisakan bagian instruksi "CONTOH FORMAT", kotak teks untuk mengetik (text area), dan tombol "Parsing Otomatis".
+​2. Perubahan Logika Sistem (Back-End / NLP Parser):
+​Sistem harus memindai (scan) teks input pengguna untuk mencari entitas waktu dan menggunakannya sebagai tanggal transaksi.
+​Aturan Deteksi Tanggal (Regex / NLP):
+​Tanggal Lengkap Eksplisit: Jika mendeteksi pola seperti "tgl [DD] [Nama Bulan] [YYYY]" atau format angka seperti "DD/MM/YYYY".
+​Contoh: Input beli tapioka 25kg 210000 tgl 10 Juni 2026 wajib dikonversi otomatis menjadi Tanggal: 2026-06-10.
+​Tanggal Relatif: Mampu menerjemahkan kata kunci waktu ke penanggalan sistem.
+​Contoh: kemarin = H-1, hari ini = H, besok = H+1.
+​Tanggal Sebagian: Jika hanya menulis "tgl [DD]" atau "[DD]/[MM]".
+​Contoh: tgl 1 gaji karyawan otomatis menjadi tanggal 1 pada bulan dan tahun berjalan (current month & year).
+​Logika Fallback (Jaring Pengaman):
+​Jika dalam satu baris kalimat sistem tidak mendeteksi adanya teks tanggal, angka tanggal, atau kata keterangan waktu sama sekali (misal: user hanya mengetik tabungan 200rb), maka sistem secara otomatis (di background) menetapkan tanggal transaksi tersebut menggunakan tanggal hari ini (today/current date).
+​3. Kriteria Penerimaan (Acceptance Criteria):
+​User dapat memasukkan teks panjang multi-baris. Sistem mampu mengidentifikasi tanggal yang berbeda untuk setiap baris transaksi secara independen, murni berdasarkan teks yang dibaca pada baris tersebut.

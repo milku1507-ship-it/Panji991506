@@ -382,7 +382,6 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [step, setStep] = React.useState<'input' | 'preview'>('input');
-  const [defaultDate, setDefaultDate] = React.useState(todayStr);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -390,13 +389,12 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       setInput('');
       setEntries([]);
       setStep('input');
-      setDefaultDate(todayStr());
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [open]);
 
   const handleParse = () => {
-    const results = parseAll(input, ingredients, products, categories, defaultDate);
+    const results = parseAll(input, ingredients, products, categories, todayStr());
     const valid = results.filter(r => r.parsed !== null) as { raw: string; parsed: QuickEntryFields }[];
     if (valid.length === 0) return;
     setEntries(valid);
@@ -445,32 +443,16 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {step === 'input' && (
             <div className="space-y-3">
-              {/* Date picker */}
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-2xl px-3 py-2.5">
-                <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-tight">Tanggal Default</p>
-                  <p className="text-[10px] text-blue-400 leading-tight">Berlaku untuk semua baris (kecuali ada tanggal di teks)</p>
-                </div>
-                <input
-                  type="date"
-                  value={defaultDate}
-                  onChange={e => setDefaultDate(e.target.value)}
-                  max={todayStr()}
-                  className="text-xs font-bold text-blue-700 bg-transparent border-none outline-none cursor-pointer"
-                />
-              </div>
-
               <div className="bg-orange-50 border border-orange-100 rounded-2xl p-3 space-y-1.5 text-xs text-gray-600">
                 <p className="font-black text-orange-700 text-[11px] uppercase tracking-widest">Contoh format</p>
                 <div className="space-y-1 font-medium">
-                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → tgl default</p>
-                  <p>• <span className="font-black text-gray-800">kemarin jual cireng ori 50pcs 250000</span> → kemarin</p>
-                  <p>• <span className="font-black text-gray-800">tgl 1 gaji karyawan 500rb</span> → tgl 1 bulan ini</p>
-                  <p>• <span className="font-black text-gray-800">1/6 listrik 150rb</span> → 1 Juni</p>
-                  <p>• <span className="font-black text-gray-800">tabungan 200rb</span> → tgl default</p>
+                  <p>• <span className="font-black text-gray-800">beli tapioka 25kg 210000</span> → Pengeluaran, tgl hari ini</p>
+                  <p>• <span className="font-black text-gray-800">kemarin jual cireng ori 50pcs 250000</span> → Pemasukan, kemarin</p>
+                  <p>• <span className="font-black text-gray-800">tgl 1 gaji karyawan 500rb</span> → Pengeluaran, tgl 1</p>
+                  <p>• <span className="font-black text-gray-800">10/6 listrik 150rb</span> → Pengeluaran, 10 Juni</p>
+                  <p>• <span className="font-black text-gray-800">tabungan 200rb</span> → otomatis tgl hari ini</p>
                 </div>
-                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Pisahkan dengan Enter atau titik koma (;).</p>
+                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Tanggal dibaca otomatis dari teks — jika tidak ada, pakai hari ini.</p>
               </div>
 
               <Textarea
