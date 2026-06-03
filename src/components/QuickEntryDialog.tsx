@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
@@ -73,10 +73,6 @@ const BULAN: Record<string, number> = {
   nov: 11, november: 11, des: 12, desember: 12,
 };
 
-/**
- * Scan ALL tokens for a date pattern (not just the beginning).
- * Returns the parsed date and the indices of consumed tokens, or null if none found.
- */
 function extractDateFromTokens(
   tokens: string[],
   defaultDate: string,
@@ -84,27 +80,20 @@ function extractDateFromTokens(
   for (let i = 0; i < tokens.length; i++) {
     const t0 = tokens[i].toLowerCase();
 
-    // Relative keywords
     if (t0 === 'kemarin') return { date: offsetDate(-1), indices: [i] };
     if (t0 === 'kemarin2' || t0 === 'kemarinnya') return { date: offsetDate(-2), indices: [i] };
     if (t0 === 'hariini') return { date: todayStr(), indices: [i] };
     if (t0 === 'hari' && tokens[i + 1]?.toLowerCase() === 'ini') {
       return { date: todayStr(), indices: [i, i + 1] };
     }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t0)) return { date: t0, indices: [i] };
 
-    // ISO date: 2025-06-01
-    if (/^\d{4}-\d{2}-\d{2}$/.test(t0)) {
-      return { date: t0, indices: [i] };
-    }
-
-    // DD-MM-YYYY or DD/MM/YYYY
     const dmy = t0.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
     if (dmy) {
       const d = dmy[1].padStart(2, '0'), m = dmy[2].padStart(2, '0'), y = dmy[3];
       return { date: `${y}-${m}-${d}`, indices: [i] };
     }
 
-    // D/M → day/month current year
     const dm = t0.match(/^(\d{1,2})\/(\d{1,2})$/);
     if (dm) {
       const year = new Date().getFullYear();
@@ -112,15 +101,12 @@ function extractDateFromTokens(
       return { date: `${year}-${m}-${d}`, indices: [i] };
     }
 
-    // "tgl X" or "tanggal X"
     if ((t0 === 'tgl' || t0 === 'tanggal') && tokens[i + 1]) {
       const day = parseInt(tokens[i + 1]);
       if (!isNaN(day) && day >= 1 && day <= 31) {
-        // Check if next token is a month name: tgl X Bulan [Tahun]
         if (tokens[i + 2]) {
           const monthNum = BULAN[tokens[i + 2].toLowerCase()];
           if (monthNum) {
-            // Check for year too: tgl X Bulan YYYY
             if (tokens[i + 3] && /^\d{4}$/.test(tokens[i + 3])) {
               const y = tokens[i + 3];
               const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
@@ -131,19 +117,16 @@ function extractDateFromTokens(
             return { date: `${year}-${mo}-${d}`, indices: [i, i + 1, i + 2] };
           }
         }
-        // Just tgl X → day X of default date's month/year
         const base = new Date(defaultDate);
         base.setDate(day);
         return { date: base.toISOString().split('T')[0], indices: [i, i + 1] };
       }
     }
 
-    // "X Bulan" e.g. "1 juni" or "10 juni 2026"
     if (/^\d{1,2}$/.test(t0) && tokens[i + 1]) {
       const day = parseInt(t0);
       const monthNum = BULAN[tokens[i + 1].toLowerCase()];
       if (!isNaN(day) && day >= 1 && day <= 31 && monthNum) {
-        // Check for year: X Bulan YYYY
         if (tokens[i + 2] && /^\d{4}$/.test(tokens[i + 2])) {
           const y = tokens[i + 2];
           const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
@@ -169,7 +152,6 @@ function formatDateDisplay(dateStr: string): string {
 const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold'];
 const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin'];
 
-/** Maps a keyword to a {jenis, kategori} pair. The kategori MUST match a valid category name in the system. */
 const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; kategori: string }> = {
   gaji: { jenis: 'Pengeluaran', kategori: 'Gaji' },
   upah: { jenis: 'Pengeluaran', kategori: 'Gaji' },
@@ -192,8 +174,6 @@ const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; ka
   kemasan: { jenis: 'Pengeluaran', kategori: 'Packing' },
 };
 
-// ─── Validate category against the live category list ────────────────────────
-
 function resolveCategory(
   kandidat: string,
   jenis: 'Pemasukan' | 'Pengeluaran',
@@ -201,7 +181,6 @@ function resolveCategory(
 ): string {
   const valid = categories.filter(c => c.type === jenis).map(c => c.name);
   if (valid.includes(kandidat)) return kandidat;
-  // Fuzzy: case-insensitive match
   const ci = valid.find(v => v.toLowerCase() === kandidat.toLowerCase());
   if (ci) return ci;
   return 'Lainnya';
@@ -218,22 +197,18 @@ function parseLine(
 ): QuickEntryFields | null {
   const line = raw.trim();
   if (!line) return null;
-
   let tokens = line.split(/\s+/);
   if (tokens.length === 0) return null;
 
-  // ── 1. Extract date from anywhere in the token list ───────────────────────
   let tanggal = defaultDate;
   const dateResult = extractDateFromTokens(tokens, defaultDate);
   if (dateResult) {
     tanggal = dateResult.date;
-    // Remove date tokens (reverse order to keep indices valid)
     const idxSet = new Set(dateResult.indices);
     tokens = tokens.filter((_, idx) => !idxSet.has(idx));
     if (tokens.length === 0) return null;
   }
 
-  // ── 2. Detect action verb (jual / beli) at any position ──────────────────
   let jenis: 'Pemasukan' | 'Pengeluaran' = 'Pengeluaran';
   let kategori = 'Lainnya';
   let actionIdx = -1;
@@ -241,151 +216,77 @@ function parseLine(
   for (let i = 0; i < tokens.length; i++) {
     const tl = tokens[i].toLowerCase();
     if (JUAL_KEYWORDS.some(k => tl === k || tl.startsWith(k))) {
-      jenis = 'Pemasukan';
-      kategori = 'Penjualan';
-      actionIdx = i;
-      break;
+      jenis = 'Pemasukan'; kategori = 'Penjualan'; actionIdx = i; break;
     }
     if (BELI_KEYWORDS.some(k => tl === k || tl.startsWith(k))) {
-      jenis = 'Pengeluaran';
-      actionIdx = i;
-      break;
+      jenis = 'Pengeluaran'; actionIdx = i; break;
     }
   }
+  if (actionIdx >= 0) tokens = tokens.filter((_, i) => i !== actionIdx);
 
-  // Remove action verb token
-  if (actionIdx >= 0) {
-    tokens = tokens.filter((_, i) => i !== actionIdx);
-  }
-
-  // ── 3. Detect category keywords in remaining tokens ───────────────────────
   const lineLower = tokens.join(' ').toLowerCase();
   for (const [kw, meta] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (lineLower.includes(kw)) {
-      jenis = meta.jenis;
-      kategori = meta.kategori;
-      break;
-    }
+    if (lineLower.includes(kw)) { jenis = meta.jenis; kategori = meta.kategori; break; }
   }
-
-  // Also check if any token matches a category name directly from the live list
   if (kategori === 'Lainnya') {
     for (const cat of categories) {
-      if (lineLower.includes(cat.name.toLowerCase())) {
-        jenis = cat.type;
-        kategori = cat.name;
-        break;
-      }
+      if (lineLower.includes(cat.name.toLowerCase())) { jenis = cat.type; kategori = cat.name; break; }
     }
   }
 
-  // ── 4. Scan tokens for nominal and qty; collect description tokens ─────────
   let nominal = 0;
   let qty_beli = 0;
   const usedIndices = new Set<number>();
   const descTokens: string[] = [];
 
-  // First pass: find nominal (largest number) and qty (number with unit)
   for (let i = 0; i < tokens.length; i++) {
     const nom = parseNominal(tokens[i]);
-    if (nom !== null && nom > 0) {
-      // Prefer the largest plausible nominal (avoid picking qty as nominal)
-      if (nom > nominal) nominal = nom;
-      usedIndices.add(i);
-      continue;
-    }
+    if (nom !== null && nom > 0) { if (nom > nominal) nominal = nom; usedIndices.add(i); continue; }
     const qtyParsed = parseQty(tokens[i]);
-    if (qtyParsed && qtyParsed.qty > 0 && qtyParsed.qty < 100_000) {
-      // Only take first qty token; if already found, it could be nominal
-      if (qty_beli === 0 && qtyParsed.unit !== 'pcs') {
-        qty_beli = qtyParsed.qty;
-        usedIndices.add(i);
-        continue;
-      } else if (qty_beli === 0) {
-        // "pcs" unit: treat as qty only if there's already a different nominal token
-        qty_beli = qtyParsed.qty;
-        usedIndices.add(i);
-        continue;
-      }
+    if (qtyParsed && qtyParsed.qty > 0 && qtyParsed.qty < 100_000 && qty_beli === 0) {
+      qty_beli = qtyParsed.qty; usedIndices.add(i); continue;
     }
   }
-
   for (let i = 0; i < tokens.length; i++) {
     if (!usedIndices.has(i)) descTokens.push(tokens[i]);
   }
 
   const keterangan = descTokens.join(' ').trim() || tokens.join(' ');
-
-  // ── 5. Match ingredient → auto-assign HPP category ────────────────────────
   let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
 
   if (jenis === 'Pengeluaran' && kategori === 'Lainnya') {
-    const normalizedDesc = keterangan.toLowerCase().trim();
-    const matchedIng = ingredients.find(ing => {
-      const n = ing.name.toLowerCase().trim();
-      return normalizedDesc.includes(n) || n.includes(normalizedDesc.split(' ')[0]);
-    });
-    if (matchedIng && matchedIng.category) {
+    const nd = keterangan.toLowerCase().trim();
+    const matchedIng = ingredients.find(i => { const n = i.name.toLowerCase().trim(); return nd.includes(n) || n.includes(nd.split(' ')[0]); });
+    if (matchedIng?.category) {
       kategori = matchedIng.category;
-      if (nominal === 0 && qty_beli > 0) {
-        nominal = matchedIng.price * qty_beli;
-      }
+      if (nominal === 0 && qty_beli > 0) nominal = matchedIng.price * qty_beli;
     } else {
-      // Try matching category name from the dynamic list
-      const matchedCat = categories.find(c =>
-        c.type === 'Pengeluaran' && normalizedDesc.includes(c.name.toLowerCase())
-      );
+      const matchedCat = categories.find(c => c.type === 'Pengeluaran' && nd.includes(c.name.toLowerCase()));
       if (matchedCat) kategori = matchedCat.name;
     }
   }
 
-  // ── 6. Match product → build penjualan_detail ─────────────────────────────
   let qty_total = 0;
-
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
-    const normalizedDesc = keterangan.toLowerCase().trim();
+    const nd = keterangan.toLowerCase().trim();
     for (const prod of products) {
-      if (!normalizedDesc.includes(prod.nama.toLowerCase())) continue;
+      if (!nd.includes(prod.nama.toLowerCase())) continue;
       const varianMatches: { varian_id: string; varian_nama: string; qty: number }[] = [];
       for (const v of prod.varian) {
-        if (normalizedDesc.includes(v.nama.toLowerCase())) {
-          const qty = qty_beli || 1;
-          varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty });
-        }
+        if (nd.includes(v.nama.toLowerCase())) varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
       }
       if (varianMatches.length > 0) {
         penjualan_detail = [{ produk_id: prod.id, produk_nama: prod.nama, varian: varianMatches }];
         qty_total = varianMatches.reduce((s, v) => s + v.qty, 0);
-        if (nominal === 0) {
-          nominal = varianMatches.reduce((sum, v) => {
-            const variant = prod.varian.find(pv => pv.id === v.varian_id);
-            return sum + (variant?.harga_jual || 0) * v.qty;
-          }, 0);
-        }
+        if (nominal === 0) nominal = varianMatches.reduce((sum, v) => { const variant = prod.varian.find(pv => pv.id === v.varian_id); return sum + (variant?.harga_jual || 0) * v.qty; }, 0);
       }
       break;
     }
   }
 
-  // ── 7. Validate category against the live list ────────────────────────────
   kategori = resolveCategory(kategori, jenis, categories);
-
-  const rawKeterangan = keterangan.charAt(0).toUpperCase() + keterangan.slice(1);
-
-  return {
-    tanggal,
-    tanggal_akhir: null,
-    jenis,
-    kategori,
-    keterangan: rawKeterangan,
-    nominal,
-    qty_beli,
-    qty_total,
-    penjualan_detail,
-  };
+  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli, qty_total, penjualan_detail };
 }
-
-// ─── Parse All Lines ──────────────────────────────────────────────────────────
 
 function parseAll(
   text: string,
@@ -394,74 +295,329 @@ function parseAll(
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
   today: string,
 ): { raw: string; parsed: QuickEntryFields | null }[] {
-  // Strictly: 1 line = 1 transaction. Split ONLY on newline or semicolon.
-  // No comma-splitting — that would fabricate transactions the user didn't type.
-  const lines = text
-    .split(/\n|;/)
-    .map(l => l.trim())
-    .filter(Boolean);
-
+  const lines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
   return lines.map(raw => ({ raw, parsed: parseLine(raw, ingredients, products, categories, today) }));
 }
 
-// ─── Preview Card ─────────────────────────────────────────────────────────────
+// ─── Inline Edit Card ─────────────────────────────────────────────────────────
 
-function PreviewCard({ fields, onRemove }: { fields: QuickEntryFields; raw: string; onRemove: () => void }) {
+type FocusField = 'tanggal' | 'jenis' | 'kategori' | 'keterangan' | 'nominal' | 'qty_beli' | null;
+
+interface EditCardProps {
+  fields: QuickEntryFields;
+  raw: string;
+  categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[];
+  onUpdate: (updated: QuickEntryFields) => void;
+  onRemove: () => void;
+}
+
+function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps) {
+  const [editing, setEditing] = React.useState(false);
+  const [focusField, setFocusField] = React.useState<FocusField>(null);
+  const [draft, setDraft] = React.useState<QuickEntryFields>(fields);
+
+  const dateRef = React.useRef<HTMLInputElement>(null);
+  const jenisRef = React.useRef<HTMLButtonElement>(null);
+  const kategoriRef = React.useRef<HTMLSelectElement>(null);
+  const keteranganRef = React.useRef<HTMLInputElement>(null);
+  const nominalRef = React.useRef<HTMLInputElement>(null);
+  const qtyRef = React.useRef<HTMLInputElement>(null);
+
+  // Sync draft when fields change from outside
+  React.useEffect(() => { setDraft(fields); }, [fields]);
+
+  const openEdit = (focus: FocusField = null) => {
+    setDraft(fields);
+    setFocusField(focus);
+    setEditing(true);
+  };
+
+  React.useEffect(() => {
+    if (!editing) return;
+    const timer = setTimeout(() => {
+      if (focusField === 'tanggal') dateRef.current?.showPicker?.() || dateRef.current?.focus();
+      else if (focusField === 'jenis') jenisRef.current?.focus();
+      else if (focusField === 'kategori') kategoriRef.current?.focus();
+      else if (focusField === 'keterangan') keteranganRef.current?.focus();
+      else if (focusField === 'nominal') { nominalRef.current?.focus(); nominalRef.current?.select(); }
+      else if (focusField === 'qty_beli') { qtyRef.current?.focus(); qtyRef.current?.select(); }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [editing, focusField]);
+
+  const handleConfirm = () => {
+    onUpdate(draft);
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setDraft(fields);
+    setEditing(false);
+  };
+
+  const setJenis = (j: 'Pemasukan' | 'Pengeluaran') => {
+    const validCats = categories.filter(c => c.type === j);
+    const catStillValid = validCats.some(c => c.name === draft.kategori);
+    setDraft(prev => ({
+      ...prev,
+      jenis: j,
+      kategori: catStillValid ? prev.kategori : (validCats[0]?.name || 'Lainnya'),
+    }));
+  };
+
+  const validCategories = categories.filter(c => c.type === draft.jenis);
+
+  // ── View mode ──────────────────────────────────────────────────────────────
+  if (!editing) {
+    return (
+      <div className="bg-white border border-gray-100 rounded-2xl p-3 space-y-1.5 relative group">
+        <button
+          onClick={onRemove}
+          className="absolute top-2 right-2 w-5 h-5 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors z-10"
+        >
+          <X className="w-3 h-3" />
+        </button>
+
+        <div className="flex items-center gap-2 pr-6 flex-wrap">
+          {/* Jenis badge — click to edit */}
+          <button
+            onClick={() => openEdit('jenis')}
+            className={cn(
+              'text-[10px] font-black px-2 py-0.5 rounded-full transition-all active:scale-95 cursor-pointer ring-offset-0',
+              fields.jenis === 'Pemasukan'
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-red-100 text-red-700 hover:bg-red-200'
+            )}
+          >
+            {fields.jenis}
+          </button>
+
+          {/* Kategori badge — click to edit */}
+          <button
+            onClick={() => openEdit('kategori')}
+            className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full hover:bg-gray-200 transition-all active:scale-95 cursor-pointer"
+          >
+            {fields.kategori}
+          </button>
+
+          {/* Tanggal badge — click to edit */}
+          <button
+            onClick={() => openEdit('tanggal')}
+            className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full hover:bg-blue-100 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+          >
+            <Calendar className="w-2.5 h-2.5" />
+            {formatDateDisplay(fields.tanggal)}
+          </button>
+
+          {/* Edit pencil — opens generic edit */}
+          <button
+            onClick={() => openEdit('keterangan')}
+            className="text-[10px] font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded-full hover:bg-orange-50 hover:text-orange-500 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5 ml-auto"
+          >
+            <Pencil className="w-2.5 h-2.5" />
+          </button>
+        </div>
+
+        <div className="text-xs space-y-0.5 text-[#1A1A2E]">
+          <div className="flex justify-between gap-2">
+            <span className="text-gray-400 shrink-0">Keterangan</span>
+            <span className="font-bold text-right">{fields.keterangan}</span>
+          </div>
+          {fields.qty_beli > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-400">Qty Beli</span>
+              <span className="font-bold">{fields.qty_beli}</span>
+            </div>
+          )}
+          {fields.qty_total > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-400">Qty Jual</span>
+              <span className="font-bold">{fields.qty_total}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-gray-400">Nominal</span>
+            <span className={cn('font-black', fields.nominal > 0 ? 'text-primary' : 'text-orange-500')}>
+              {fields.nominal > 0 ? formatCurrency(fields.nominal, true) : '⚠ Belum diisi'}
+            </span>
+          </div>
+          {fields.penjualan_detail && fields.penjualan_detail.length > 0 && (
+            <div className="pt-1 border-t border-dashed border-gray-100">
+              <p className="text-[10px] font-black uppercase text-gray-400 mb-0.5">Detail Penjualan</p>
+              {fields.penjualan_detail.map((pd, i) => (
+                <div key={i} className="text-[11px]">
+                  <span className="font-bold">{pd.produk_nama}</span>
+                  {pd.varian.map((v, j) => (
+                    <span key={j} className="text-gray-500"> — {v.varian_nama} {v.qty}pcs</span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Edit mode ──────────────────────────────────────────────────────────────
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-3 space-y-1.5 relative">
-      <button
-        onClick={onRemove}
-        className="absolute top-2 right-2 w-5 h-5 rounded-full bg-gray-100 hover:bg-red-100 flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors"
-      >
-        <X className="w-3 h-3" />
-      </button>
-      <div className="flex items-center gap-2 pr-6 flex-wrap">
-        <span className={cn(
-          'text-[10px] font-black px-2 py-0.5 rounded-full',
-          fields.jenis === 'Pemasukan' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-        )}>{fields.jenis}</span>
-        <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{fields.kategori}</span>
-        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1">
-          <Calendar className="w-2.5 h-2.5" />{formatDateDisplay(fields.tanggal)}
-        </span>
-      </div>
-      <div className="text-xs space-y-0.5 text-[#1A1A2E]">
-        <div className="flex justify-between gap-2">
-          <span className="text-gray-400 shrink-0">Keterangan</span>
-          <span className="font-bold text-right">{fields.keterangan}</span>
+    <div className="bg-white border-2 border-orange-200 rounded-2xl p-3 space-y-3 shadow-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-black uppercase tracking-widest text-orange-500">Edit Transaksi</span>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleCancel}
+            className="text-[10px] font-bold text-gray-400 hover:text-red-500 px-2 py-1 rounded-xl hover:bg-red-50 transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="text-[10px] font-black text-white bg-orange-500 hover:bg-orange-600 px-3 py-1 rounded-xl transition-colors flex items-center gap-1"
+          >
+            <Check className="w-3 h-3" /> Selesai
+          </button>
         </div>
-        {fields.qty_beli > 0 && (
-          <div className="flex justify-between">
-            <span className="text-gray-400">Qty Beli</span>
-            <span className="font-bold">{fields.qty_beli}</span>
-          </div>
-        )}
-        {fields.qty_total > 0 && (
-          <div className="flex justify-between">
-            <span className="text-gray-400">Qty Jual</span>
-            <span className="font-bold">{fields.qty_total}</span>
-          </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-gray-400">Nominal</span>
-          <span className={cn('font-black', fields.nominal > 0 ? 'text-primary' : 'text-orange-500')}>
-            {fields.nominal > 0 ? formatCurrency(fields.nominal, true) : '⚠ Belum diisi'}
-          </span>
+      </div>
+
+      {/* Tanggal */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tanggal</label>
+        <input
+          ref={dateRef}
+          type="date"
+          value={draft.tanggal}
+          onChange={e => setDraft(prev => ({ ...prev, tanggal: e.target.value }))}
+          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+        />
+      </div>
+
+      {/* Jenis */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Jenis</label>
+        <div className="flex gap-2">
+          <button
+            ref={jenisRef}
+            onClick={() => setJenis('Pemasukan')}
+            className={cn(
+              'flex-1 h-8 rounded-xl text-xs font-black transition-all border',
+              draft.jenis === 'Pemasukan'
+                ? 'bg-green-500 text-white border-green-500'
+                : 'bg-white text-gray-400 border-gray-200 hover:border-green-300'
+            )}
+          >
+            Pemasukan
+          </button>
+          <button
+            onClick={() => setJenis('Pengeluaran')}
+            className={cn(
+              'flex-1 h-8 rounded-xl text-xs font-black transition-all border',
+              draft.jenis === 'Pengeluaran'
+                ? 'bg-red-500 text-white border-red-500'
+                : 'bg-white text-gray-400 border-gray-200 hover:border-red-300'
+            )}
+          >
+            Pengeluaran
+          </button>
         </div>
-        {fields.penjualan_detail && fields.penjualan_detail.length > 0 && (
-          <div className="pt-1 border-t border-dashed border-gray-100">
-            <p className="text-[10px] font-black uppercase text-gray-400 mb-0.5">Detail Penjualan</p>
-            {fields.penjualan_detail.map((pd, i) => (
-              <div key={i} className="text-[11px]">
-                <span className="font-bold">{pd.produk_nama}</span>
-                {pd.varian.map((v, j) => (
-                  <span key={j} className="text-gray-500"> — {v.varian_nama} {v.qty}pcs</span>
-                ))}
-              </div>
-            ))}
-          </div>
+      </div>
+
+      {/* Kategori */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Kategori</label>
+        <select
+          ref={kategoriRef}
+          value={draft.kategori}
+          onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value }))}
+          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
+        >
+          {validCategories.map(cat => (
+            <option key={cat.name} value={cat.name}>{cat.name}</option>
+          ))}
+          {!validCategories.some(c => c.name === 'Lainnya') && (
+            <option value="Lainnya">Lainnya</option>
+          )}
+        </select>
+      </div>
+
+      {/* Keterangan */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Keterangan</label>
+        <input
+          ref={keteranganRef}
+          type="text"
+          value={draft.keterangan}
+          onChange={e => setDraft(prev => ({ ...prev, keterangan: e.target.value }))}
+          placeholder="Keterangan transaksi..."
+          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+        />
+      </div>
+
+      {/* Nominal */}
+      <div className="space-y-1">
+        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nominal (Rp)</label>
+        <input
+          ref={nominalRef}
+          type="number"
+          min="0"
+          value={draft.nominal || ''}
+          onChange={e => setDraft(prev => ({ ...prev, nominal: Number(e.target.value) || 0 }))}
+          placeholder="0"
+          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+        />
+        {draft.nominal > 0 && (
+          <p className="text-[10px] text-gray-400 pl-1">{formatCurrency(draft.nominal, true)}</p>
         )}
       </div>
+
+      {/* Qty Beli — show for Pengeluaran */}
+      {draft.jenis === 'Pengeluaran' && (
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Beli</label>
+          <input
+            ref={qtyRef}
+            type="number"
+            min="0"
+            step="any"
+            value={draft.qty_beli || ''}
+            onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
+            placeholder="0"
+            className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+          />
+        </div>
+      )}
+
+      {/* Qty Jual — show for Pemasukan */}
+      {draft.jenis === 'Pemasukan' && draft.kategori === 'Penjualan' && (
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Jual</label>
+          <input
+            ref={qtyRef}
+            type="number"
+            min="0"
+            value={draft.qty_total || ''}
+            onChange={e => setDraft(prev => ({ ...prev, qty_total: Number(e.target.value) || 0 }))}
+            placeholder="0"
+            className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+          />
+        </div>
+      )}
+
+      {/* Penjualan detail summary */}
+      {draft.penjualan_detail && draft.penjualan_detail.length > 0 && (
+        <div className="bg-gray-50 rounded-xl p-2 space-y-0.5">
+          <p className="text-[10px] font-black uppercase text-gray-400 mb-1">Detail Produk</p>
+          {draft.penjualan_detail.map((pd, i) => (
+            <div key={i} className="text-[11px]">
+              <span className="font-bold">{pd.produk_nama}</span>
+              {pd.varian.map((v, j) => (
+                <span key={j} className="text-gray-500"> — {v.varian_nama} {v.qty}pcs</span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -496,6 +652,10 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     const next = entries.filter((_, i) => i !== idx);
     if (next.length === 0) setStep('input');
     else setEntries(next);
+  };
+
+  const updateEntry = (idx: number, updated: QuickEntryFields) => {
+    setEntries(prev => prev.map((e, i) => i === idx ? { ...e, parsed: updated } : e));
   };
 
   const handleSave = async () => {
@@ -543,7 +703,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
                   <p>• <span className="font-black text-gray-800">listrik 150rb 10/6</span> → Pengeluaran, 10 Juni</p>
                   <p>• <span className="font-black text-gray-800">tabungan 200rb tgl 10 juni 2026</span> → tgl 10 Juni 2026</p>
                 </div>
-                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Tanggal dibaca otomatis dari mana saja dalam teks — jika tidak ada, pakai hari ini.</p>
+                <p className="text-[10px] text-gray-400 pt-1">Satu baris = satu transaksi. Tap badge untuk edit sebelum simpan.</p>
               </div>
 
               <Textarea
@@ -571,25 +731,30 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
           {step === 'preview' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-black uppercase tracking-widest text-gray-400">
-                  {entries.length} Transaksi Terdeteksi
-                </p>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-gray-400">
+                    {entries.length} Transaksi Terdeteksi
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Tap badge untuk mengedit sebelum simpan</p>
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setStep('input')}
                   className="rounded-xl gap-1.5 text-xs font-bold text-gray-500 h-7"
                 >
-                  <RefreshCw className="w-3 h-3" /> Edit
+                  <RefreshCw className="w-3 h-3" /> Edit Teks
                 </Button>
               </div>
 
               <div className="space-y-2">
                 {entries.map((e, i) => (
-                  <PreviewCard
+                  <EditCard
                     key={i}
                     fields={e.parsed}
                     raw={e.raw}
+                    categories={categories}
+                    onUpdate={(updated) => updateEntry(i, updated)}
                     onRemove={() => removeEntry(i)}
                   />
                 ))}
