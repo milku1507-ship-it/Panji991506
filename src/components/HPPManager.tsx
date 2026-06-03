@@ -53,7 +53,7 @@ interface HPPManagerProps {
   onDeleteFromStock: (materialName: string) => Promise<void>;
 }
 
-type ViewState = 'products' | 'variants' | 'detail';
+type ViewState = 'products' | 'variants' | 'detail' | 'category';
 
 export default function HPPManager({ user, products, setProducts, ingredients, setIngredients, onSetBack, onDeleteFromStock }: HPPManagerProps) {
   const { settings } = useSettings();
@@ -80,14 +80,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
   const [isPasteHppOpen, setIsPasteHppOpen] = React.useState(false);
   const [selectedKelompok, setSelectedKelompok] = React.useState<string>('');
-  const [collapsedCategories, setCollapsedCategories] = React.useState<Set<string>>(new Set());
+  const [selectedCategory, setSelectedCategory] = React.useState<string | null>(null);
 
-  const toggleCollapse = (cat: string) => {
-    setCollapsedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat); else next.add(cat);
-      return next;
-    });
+  const handleViewCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    setView('category');
   };
 
   const moveCategoryInSettings = async (cat: string, dir: 'up' | 'down') => {
@@ -132,12 +129,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   };
 
   const handleBack = React.useCallback(() => {
-    if (view === 'detail') setView('variants');
+    if (view === 'category') setView('detail');
+    else if (view === 'detail') setView('variants');
     else if (view === 'variants') setView('products');
   }, [view]);
 
   // Wire device/browser back button to mirror the in-app back navigation
-  // for the HPP drilldown: detail → variants → products.
+  // for the HPP drilldown: category → detail → variants → products.
+  useBackHandler(view === 'category', () => setView('detail'));
   useBackHandler(view === 'detail', () => setView('variants'));
   useBackHandler(view === 'variants', () => setView('products'));
 
@@ -1002,10 +1001,16 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           <button onClick={() => setView('variants')} className="hover:text-primary transition-colors shrink-0 max-w-[100px] truncate">{selectedProduct?.nama}</button>
         </>
       )}
-      {view === 'detail' && (
+      {(view === 'detail' || view === 'category') && (
         <>
           <ChevronRight className="w-3 h-3 shrink-0" />
-          <span className="text-[#1A1A2E] shrink-0 max-w-[100px] truncate">{activeHppVariant?.nama}</span>
+          <button onClick={() => setView('detail')} className={view === 'detail' ? 'text-[#1A1A2E] shrink-0 max-w-[100px] truncate' : 'hover:text-primary transition-colors shrink-0 max-w-[100px] truncate'}>{activeHppVariant?.nama}</button>
+        </>
+      )}
+      {view === 'category' && (
+        <>
+          <ChevronRight className="w-3 h-3 shrink-0" />
+          <span className="text-[#1A1A2E] shrink-0 max-w-[120px] truncate">{selectedCategory}</span>
         </>
       )}
     </div>
@@ -1195,139 +1200,37 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
-                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
+                <div className="space-y-2">
                   {(() => {
                     const settingsCats = [...(settings?.kategori_hpp || []), 'Lainnya'];
                     const legacyCats = activeHppVariant.bahan
                       .map(m => m.kelompok)
                       .filter((k): k is string => !!k && k.trim() !== '');
                     return [...new Set([...settingsCats, ...legacyCats])];
-                  })().map((cat, _, allCats) => {
+                  })().map((cat) => {
                     const catMaterials = activeHppVariant.bahan
                       .map((m, originalIdx) => ({ ...m, originalIdx }))
                       .filter(m => m.kelompok === cat);
                     if (catMaterials.length === 0) return null;
 
-                    const isCollapsed = collapsedCategories.has(cat);
-                    const settingsCatList = settings?.kategori_hpp || [];
-                    const settingsIdx = settingsCatList.indexOf(cat);
-                    const isInSettings = settingsIdx >= 0;
+                    const catTotal = catMaterials.reduce((acc, m) => acc + getMaterialCost(m), 0);
 
                     return (
-                      <div key={cat} className="rounded-2xl border border-gray-100 bg-gray-50/50 overflow-hidden">
-                        {/* Category header — drawer handle */}
-                        <button
-                          type="button"
-                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-brand-50/60 transition-colors"
-                          onClick={() => toggleCollapse(cat)}
-                        >
-                          <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
-                          <Badge variant="outline" className="bg-white border-brand-200 text-primary font-black text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-widest">
-                            {cat}
-                          </Badge>
-                          <span className="text-[10px] font-bold text-gray-400">{catMaterials.length} item</span>
-                          <div className="flex-1" />
-                          {/* Reorder buttons — only for categories in settings */}
-                          {isInSettings && (
-                            <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
-                              <Button
-                                variant="ghost" size="icon"
-                                className="h-6 w-6 rounded-lg text-gray-300 hover:text-primary hover:bg-brand-50"
-                                disabled={settingsIdx === 0}
-                                onClick={() => moveCategoryInSettings(cat, 'up')}
-                              >
-                                <ChevronUp className="w-3 h-3" />
-                              </Button>
-                              <Button
-                                variant="ghost" size="icon"
-                                className="h-6 w-6 rounded-lg text-gray-300 hover:text-primary hover:bg-brand-50"
-                                disabled={settingsIdx === settingsCatList.length - 1}
-                                onClick={() => moveCategoryInSettings(cat, 'down')}
-                              >
-                                <ChevronDown className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          )}
-                          <Button
-                            variant="ghost" size="icon"
-                            className="h-6 w-6 rounded-full text-gray-300 hover:text-red-500 hover:bg-red-50"
-                            onClick={e => { e.stopPropagation(); handleRemoveCategory(cat); }}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                          {isCollapsed
-                            ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
-                            : <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
-                          }
-                        </button>
-
-                        {/* Drawer body */}
-                        {!isCollapsed && (
-                        <div className="grid grid-cols-1 gap-2 px-3 pb-3">
-                          {catMaterials.map((m) => {
-                            const ingredient = ingredients.find(i => i.id === m.ingredientId);
-                            const displayName = ingredient ? ingredient.name : m.nama;
-                            const displayCat = ingredient ? ingredient.category : m.kelompok;
-                            const displayPrice = ingredient ? ingredient.price : m.harga;
-                            const displayUnit = ingredient ? ingredient.unit : m.satuan;
-                            
-                            return (
-                              <div key={m.originalIdx} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm group hover:border-brand-200 transition-all">
-                                <div className="flex justify-between items-start">
-                                  <div className="min-w-0 flex-1">
-                                    <h4 className="font-black text-[#1A1A2E] truncate pr-2">{displayName}</h4>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <Badge className="bg-brand-50 text-primary border-none text-[9px] font-bold uppercase">
-                                        {displayCat}
-                                      </Badge>
-                                      <span className="text-[10px] font-bold text-gray-400">
-                                        {formatSmartUnit(m.qty, displayUnit)}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="text-right shrink-0">
-                                    <p className="text-sm font-black text-primary">
-                                      {formatCurrency(getMaterialCost(m), true)}
-                                    </p>
-                                    <div className="flex gap-1 mt-2 justify-end">
-                                      <Button 
-                                        variant="ghost" 
-                                        size="icon" 
-                                        className="h-7 w-7 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50"
-                                        onClick={() => {
-                                          setEditingMaterial({ 
-                                            variantId: activeHppVariant.id, 
-                                            index: m.originalIdx, 
-                                            material: {
-                                              ...m,
-                                              nama: displayName,
-                                              kelompok: displayCat,
-                                              harga: displayPrice,
-                                              satuan: displayUnit
-                                            } 
-                                          });
-                                          setIsMaterialModalOpen(true);
-                                        }}
-                                      >
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </Button>
-                                      <Button 
-                                        variant="ghost" 
-                                        size="icon" 
-                                        className="h-7 w-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                        onClick={() => handleRemoveMaterial(m.originalIdx)}
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
+                      <button
+                        key={cat}
+                        type="button"
+                        className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3.5 hover:border-brand-200 hover:shadow-sm active:scale-[0.99] transition-all text-left"
+                        onClick={() => handleViewCategory(cat)}
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
+                          <Package className="w-4 h-4 text-primary" />
                         </div>
-                        )}
-                      </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-[#1A1A2E] uppercase text-sm tracking-wide truncate">{cat}</p>
+                          <p className="text-[11px] font-bold text-gray-400 mt-0.5">{catMaterials.length} item · {formatCurrency(catTotal, true)}</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                      </button>
                     );
                   })}
                   {activeHppVariant.bahan.length === 0 && (
@@ -1449,6 +1352,130 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           </div>
         </div>
       )}
+
+      {/* VIEW: CATEGORY DETAIL */}
+      {view === 'category' && activeHppVariant && selectedCategory && (() => {
+        const catMaterials = activeHppVariant.bahan
+          .map((m, originalIdx) => ({ ...m, originalIdx }))
+          .filter(m => m.kelompok === selectedCategory);
+        const catTotal = catMaterials.reduce((acc, m) => acc + getMaterialCost(m), 0);
+
+        return (
+          <div className="space-y-4">
+            {/* Category summary card */}
+            <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
+              <div className="orange-gradient p-5 text-white">
+                <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">{selectedCategory}</p>
+                <h3 className="text-2xl font-black mt-1">{formatCurrency(catTotal, true)}</h3>
+                <p className="text-xs opacity-70 mt-1">{catMaterials.length} item dalam kategori ini</p>
+              </div>
+            </Card>
+
+            {/* Item list */}
+            <Card className="border-none shadow-sm rounded-3xl bg-white">
+              <CardHeader className="flex flex-row items-start justify-between pb-2 gap-2">
+                <div>
+                  <CardTitle className="text-base font-bold">Daftar Item</CardTitle>
+                  <CardDescription>{selectedProduct?.nama} › {activeHppVariant.nama} › {selectedCategory}</CardDescription>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50"
+                    title={`Hapus semua item di ${selectedCategory}`}
+                    onClick={() => { handleRemoveCategory(selectedCategory); }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="orange-gradient text-white font-bold rounded-xl gap-1 h-8 px-3"
+                    onClick={handleAddMaterial}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="text-xs">Tambah</span>
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 sm:p-6">
+                <div className="space-y-3">
+                  {catMaterials.length === 0 && (
+                    <div className="text-center py-10 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-100">
+                      <Package className="w-10 h-10 text-gray-200 mx-auto mb-2" />
+                      <p className="text-gray-400 font-bold text-sm">Belum ada item di kategori ini.</p>
+                      <Button variant="link" className="text-primary font-bold text-sm" onClick={handleAddMaterial}>
+                        Tambah sekarang
+                      </Button>
+                    </div>
+                  )}
+                  {catMaterials.map((m) => {
+                    const ingredient = ingredients.find(i => i.id === m.ingredientId);
+                    const displayName = ingredient ? ingredient.name : m.nama;
+                    const displayCat = ingredient ? ingredient.category : m.kelompok;
+                    const displayPrice = ingredient ? ingredient.price : m.harga;
+                    const displayUnit = ingredient ? ingredient.unit : m.satuan;
+
+                    return (
+                      <div key={m.originalIdx} className="bg-gray-50 border border-gray-100 rounded-2xl p-4 hover:border-brand-200 transition-all">
+                        <div className="flex justify-between items-start">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-black text-[#1A1A2E] truncate pr-2">{displayName}</h4>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <Badge className="bg-white text-primary border border-brand-100 text-[9px] font-bold uppercase">
+                                {displayCat}
+                              </Badge>
+                              <span className="text-[10px] font-bold text-gray-400">
+                                {formatSmartUnit(m.qty, displayUnit)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-black text-primary">
+                              {formatCurrency(getMaterialCost(m), true)}
+                            </p>
+                            <div className="flex gap-1 mt-2 justify-end">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+                                onClick={() => {
+                                  setEditingMaterial({
+                                    variantId: activeHppVariant.id,
+                                    index: m.originalIdx,
+                                    material: {
+                                      ...m,
+                                      nama: displayName,
+                                      kelompok: displayCat,
+                                      harga: displayPrice,
+                                      satuan: displayUnit,
+                                    },
+                                  });
+                                  setIsMaterialModalOpen(true);
+                                }}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                onClick={() => handleRemoveMaterial(m.originalIdx)}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
 
       {/* MODALS */}
       <Dialog open={isProductModalOpen} onOpenChange={(open) => {
