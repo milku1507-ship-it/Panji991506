@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { StoreSettings } from '../types';
 import { toast } from 'sonner';
-import { Store, Upload, Save, ArrowLeft, Settings2 } from 'lucide-react';
+import { Store, Upload, ArrowLeft, Settings2 } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 
 import { auth } from '../lib/firebase';
@@ -166,24 +166,6 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="font-bold text-gray-700">Nomor Telepon/WhatsApp</Label>
-                <Input
-                  value={localSettings.phone || ''}
-                  onChange={e => setLocalSettings(prev => ({ ...prev, phone: e.target.value }))}
-                  placeholder="Contoh: 08123456789"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="font-bold text-gray-700">Alamat Toko</Label>
-                <textarea
-                  value={localSettings.address || ''}
-                  onChange={e => setLocalSettings(prev => ({ ...prev, address: e.target.value }))}
-                  placeholder="Masukkan alamat lengkap toko"
-                  className="w-full min-h-[100px] p-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-primary focus:outline-none text-sm font-medium"
-                />
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -223,61 +205,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
           </CardContent>
         </Card>
 
-        {/* C. PENGATURAN STRUK */}
-        <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
-          <CardHeader className="bg-white border-b border-gray-50">
-            <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Save className="w-5 h-5 text-primary" />
-              Pengaturan Struk
-            </CardTitle>
-            <CardDescription>Atur tampilan struk belanja</CardDescription>
-          </CardHeader>
-          <CardContent className="p-6 space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                <div className="space-y-0.5">
-                  <Label className="font-bold text-gray-700">Logo di Struk</Label>
-                  <p className="text-xs text-gray-500">Tampilkan logo toko pada struk</p>
-                </div>
-                <Switch
-                  checked={localSettings.showLogoOnReceipt}
-                  onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showLogoOnReceipt: checked }))}
-                />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                <div className="space-y-0.5">
-                  <Label className="font-bold text-gray-700">Nama Toko di Struk</Label>
-                  <p className="text-xs text-gray-500">Tampilkan nama toko pada struk</p>
-                </div>
-                <Switch
-                  checked={localSettings.showNameOnReceipt}
-                  onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showNameOnReceipt: checked }))}
-                />
-              </div>
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                <div className="space-y-0.5">
-                  <Label className="font-bold text-gray-700">Alamat di Struk</Label>
-                  <p className="text-xs text-gray-500">Tampilkan alamat toko pada struk</p>
-                </div>
-                <Switch
-                  checked={localSettings.showAddressOnReceipt}
-                  onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showAddressOnReceipt: checked }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="font-bold text-gray-700">Pesan Footer Struk</Label>
-                <Input
-                  value={localSettings.receiptFooter || ''}
-                  onChange={e => setLocalSettings(prev => ({ ...prev, receiptFooter: e.target.value }))}
-                  placeholder="Contoh: Terima kasih sudah berbelanja!"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* D. KELOLA KATEGORI */}
+        {/* C. KELOLA KATEGORI */}
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
             <CardTitle className="text-xl font-black flex items-center gap-2">
