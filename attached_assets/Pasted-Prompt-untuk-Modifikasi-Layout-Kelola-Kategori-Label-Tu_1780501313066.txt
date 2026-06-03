@@ -1,0 +1,17 @@
+Prompt untuk Modifikasi Layout "Kelola Kategori & Label"
+​Tugas: Perbaiki bug layout (elemen terpotong) dan ubah struktur UI menjadi mode Accordion (Laci yang bisa diekspansi) berdasarkan referensi gambar Screenshot_2026-06-03-22-37-15-22.jpg.
+​1. Identifikasi Masalah Saat Ini (Bug Fixes):
+​Horizontal Overflow: Terdapat masalah tata letak (kemungkinan penggunaan flexbox atau kolom yang tidak tepat) yang menyebabkan elemen di sisi kanan layar keluar dari batas (off-screen). Input teks "Tambah katego..." dan tombol merah di sebelahnya terpotong di tepi kanan layar.
+​Overlapping FAB: Konten daftar kategori di bagian bawah tertutup oleh Floating Action Button (FAB) "BAYAR" dan Bottom Navigation Bar.
+​2. Perubahan Desain Utama (Implementasi Mode Laci / Accordion):
+​Hapus Layout Kolom Ganda: Tinggalkan desain side-by-side saat ini (di mana tab "HPP, Produk, Satuan" berada di sebelah kiri dan daftarnya di sebelah kanan).
+​Ubah Menjadi Vertical Accordion: Buat tampilan menjadi satu kolom penuh (full width). Jadikan kategori utama ("HPP", "Produk", "Satuan") sebagai header accordion atau laci vertikal.
+​Interaksi Laci:
+​Saat header laci (misal: "Kategori HPP") diklik, laci akan membuka (expand ke bawah).
+​Isi di dalam laci yang terbuka harus mencakup:
+​Input field "Tambah kategori" beserta tombol submit/tambahnya (pastikan lebarnya responsif, misalnya width: 100% dengan padding yang aman).
+​Daftar list item ("Material Utama", "Material Pendukung", dst.) lengkap dengan icon edit (pensil) dan delete (tempat sampah) di posisi rata kanan (trailing).
+​Laci lain otomatis tertutup (collapse) jika satu laci dibuka agar tampilan tetap rapi.
+​3. Penyesuaian Ruang & Presisi (Spacing & Safe Area):
+​Padding Kanan-Kiri: Terapkan horizontal padding yang konsisten (misal: 16dp atau 24dp) pada wadah utama (main container) agar tidak ada elemen yang menempel atau melewati batas layar.
+​Bottom Safe Area: Tambahkan padding-bottom yang cukup besar (misal: 80dp - 100dp) pada bagian bawah ScrollView / wadah daftar. Ini penting agar ketika user menggulir ke paling bawah, item terakhir tidak terhalang oleh icon "+ BAYAR" yang melayang.
