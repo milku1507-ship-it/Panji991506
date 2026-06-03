@@ -1,0 +1,19 @@
+Aplikasi ini memiliki dua mode pencatatan: komponen "Input Manual" (berupa form UI) dan komponen "Input Cepat" (berupa text area untuk natural language). Kamu sudah memiliki akses ke seluruh codebase dan mengetahui skema data dari "Input Manual".
+​Tugas Utama:
+Refaktor dan perbarui fungsi parsing/logic pada komponen "Input Cepat" agar fitur, parameter, dan hasil output datanya 100% sama persis dengan payload data yang dihasilkan oleh "Input Manual".
+​Instruksi Eksekusi Wajib (Strict Rules):
+​1. Replikasi Parameter Data:
+​Periksa fungsi dan state yang digunakan pada form "Input Manual".
+​Pastikan output dari parser "Input Cepat" menghasilkan objek/JSON dengan key yang sama persis (misalnya: harus ada entitas untuk tanggal, kategori, jenis, nama barang, jumlah, nominal, dll, sesuai yang ada di manual).
+​2. Logika Deteksi Tanggal Dinamis (Wajib):
+​Sama seperti "Input Manual" yang memiliki input tanggal, "Input Cepat" juga wajib mendeteksi tanggal dari dalam teks.
+​Jika user mengetikkan tanggal di dalam kalimat (contoh: "... tgl 10 Juni 2026"), sistem harus mengekstraknya dan memasukkannya ke dalam parameter tanggal transaksi.
+​Jika tidak ada teks tanggal di baris tersebut, gunakan fallback tanggal sistem hari ini.
+​3. Pemetaan Kategori dan Jenis:
+​Baca daftar Kategori (seperti "Bahan Baku", "Penjualan", dll) dan Jenis ("Pemasukan"/"Pengeluaran") yang ada di sistem "Input Manual".
+​Pastikan AI/Regex parser pada "Input Cepat" memetakan hasil bacaannya HANYA ke daftar kategori yang valid tersebut.
+​4. Aturan Pemrosesan Transaksi (Sangat Penting):
+​1 Baris = 1 Transaksi: Setiap baris teks baru (newline) harus diproses sebagai satu entitas transaksi yang independen.
+​JANGAN TAMBAHKAN SUB TOTAL: Format output hanya boleh berupa daftar rincian transaksi murni per baris. Jangan pernah membuat data fiktif atau menjumlahkan angka-angka sisa untuk dijadikan "sub total" atau transaksi tambahan di luar teks yang diketik.
+​Tujuan Akhir:
+Setelah teks dari "Input Cepat" diproses, data tersebut harus bisa langsung dikirim ke fungsi save atau API endpoint yang sama persis dengan yang digunakan oleh tombol "Simpan" pada "Input Manual" tanpa ada error ketidaksesuaian format. Tolong kerjakan refaktor ini sekarang.
