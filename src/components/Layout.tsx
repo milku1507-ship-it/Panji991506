@@ -292,7 +292,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
             >
               <Plus className="w-8 h-8" />
             </button>
-            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-primary uppercase">Bayar</span>
+            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-primary uppercase">Input</span>
           </div>
 
           {NAV_ITEMS.filter(i => i.id !== 'hpp').slice(2, 4).map((item) => (
