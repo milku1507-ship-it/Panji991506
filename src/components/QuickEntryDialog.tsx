@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
@@ -361,12 +361,13 @@ type FocusField = 'tanggal' | 'jenis' | 'kategori' | 'keterangan' | 'nominal' | 
 interface EditCardProps {
   fields: QuickEntryFields;
   raw: string;
+  products: Product[];
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[];
   onUpdate: (updated: QuickEntryFields) => void;
   onRemove: () => void;
 }
 
-function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps) {
+function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: EditCardProps) {
   const [editing, setEditing] = React.useState(false);
   const [focusField, setFocusField] = React.useState<FocusField>(null);
   const [draft, setDraft] = React.useState<QuickEntryFields>(fields);
@@ -378,7 +379,6 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
   const nominalRef = React.useRef<HTMLInputElement>(null);
   const qtyRef = React.useRef<HTMLInputElement>(null);
 
-  // Sync draft when fields change from outside
   React.useEffect(() => { setDraft(fields); }, [fields]);
 
   const openEdit = (focus: FocusField = null) => {
@@ -400,15 +400,83 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
     return () => clearTimeout(timer);
   }, [editing, focusField]);
 
-  const handleConfirm = () => {
-    onUpdate(draft);
-    setEditing(false);
+  // Auto-compute nominal + qty_total from penjualan_detail (same as manual form useEffect)
+  React.useEffect(() => {
+    if (draft.kategori !== 'Penjualan') return;
+    const detail = draft.penjualan_detail || [];
+    if (detail.length === 0) return;
+
+    let subtotal = 0;
+    let totalQty = 0;
+    const involvedProductIds = new Set<string>();
+
+    detail.forEach(pd => {
+      involvedProductIds.add(pd.produk_id);
+      const product = products.find(p => p.id === pd.produk_id);
+      pd.varian.forEach(v => {
+        if (v.qty > 0) {
+          totalQty += v.qty;
+          const variant = product?.varian.find(pv => pv.id === v.varian_id);
+          subtotal += (variant?.harga_jual || 0) * v.qty;
+        }
+      });
+    });
+
+    const feesByName = new Map<string, { tipe: string; nilai: number }>();
+    involvedProductIds.forEach(pid => {
+      const prod = products.find(p => p.id === pid);
+      prod?.biaya_lain?.forEach(fee => {
+        if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, fee);
+      });
+    });
+    let totalFees = 0;
+    feesByName.forEach(fee => {
+      totalFees += fee.tipe === 'persen' ? subtotal * (fee.nilai / 100) : fee.nilai;
+    });
+
+    const autoKet = detail.filter(pd => pd.varian.some(v => v.qty > 0)).map(pd => pd.produk_nama).join(', ')
+      || detail.map(pd => pd.produk_nama).join(', ');
+
+    setDraft(prev => ({
+      ...prev,
+      nominal: subtotal - totalFees,
+      qty_total: totalQty,
+      qty_beli: 0,
+      keterangan: autoKet || prev.keterangan,
+    }));
+  }, [draft.penjualan_detail, draft.kategori, products]);
+
+  const toggleDraftProduct = (productId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    setDraft(prev => {
+      const isSelected = prev.penjualan_detail?.some(pd => pd.produk_id === productId);
+      if (isSelected) {
+        return { ...prev, penjualan_detail: prev.penjualan_detail?.filter(pd => pd.produk_id !== productId) };
+      }
+      const newDetail = {
+        produk_id: product.id,
+        produk_nama: product.nama,
+        varian: product.varian.map(v => ({ varian_id: v.id, varian_nama: v.nama, qty: 0 })),
+      };
+      return { ...prev, penjualan_detail: [...(prev.penjualan_detail || []), newDetail] };
+    });
   };
 
-  const handleCancel = () => {
-    setDraft(fields);
-    setEditing(false);
+  const changeVariantQty = (productId: string, variantId: string, qty: number) => {
+    setDraft(prev => ({
+      ...prev,
+      penjualan_detail: prev.penjualan_detail?.map(pd =>
+        pd.produk_id !== productId ? pd : {
+          ...pd,
+          varian: pd.varian.map(v => v.varian_id === variantId ? { ...v, qty } : v),
+        }
+      ),
+    }));
   };
+
+  const handleConfirm = () => { onUpdate(draft); setEditing(false); };
+  const handleCancel = () => { setDraft(fields); setEditing(false); };
 
   const setJenis = (j: 'Pemasukan' | 'Pengeluaran') => {
     const validCats = categories.filter(c => c.type === j);
@@ -417,10 +485,12 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
       ...prev,
       jenis: j,
       kategori: catStillValid ? prev.kategori : (validCats[0]?.name || 'Lainnya'),
+      penjualan_detail: j === 'Pengeluaran' ? [] : prev.penjualan_detail,
     }));
   };
 
   const validCategories = categories.filter(c => c.type === draft.jenis);
+  const isPenjualan = draft.kategori === 'Penjualan';
 
   // ── View mode ──────────────────────────────────────────────────────────────
   if (!editing) {
@@ -434,28 +504,19 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
         </button>
 
         <div className="flex items-center gap-2 pr-6 flex-wrap">
-          {/* Jenis badge — click to edit */}
           <button
             onClick={() => openEdit('jenis')}
             className={cn(
-              'text-[10px] font-black px-2 py-0.5 rounded-full transition-all active:scale-95 cursor-pointer ring-offset-0',
-              fields.jenis === 'Pemasukan'
-                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                : 'bg-red-100 text-red-700 hover:bg-red-200'
+              'text-[10px] font-black px-2 py-0.5 rounded-full transition-all active:scale-95 cursor-pointer',
+              fields.jenis === 'Pemasukan' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
             )}
-          >
-            {fields.jenis}
-          </button>
+          >{fields.jenis}</button>
 
-          {/* Kategori badge — click to edit */}
           <button
             onClick={() => openEdit('kategori')}
             className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full hover:bg-gray-200 transition-all active:scale-95 cursor-pointer"
-          >
-            {fields.kategori}
-          </button>
+          >{fields.kategori}</button>
 
-          {/* Tanggal badge — click to edit */}
           <button
             onClick={() => openEdit('tanggal')}
             className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full hover:bg-blue-100 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
@@ -464,13 +525,10 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
             {formatDateDisplay(fields.tanggal)}
           </button>
 
-          {/* Edit pencil — opens generic edit */}
           <button
             onClick={() => openEdit('keterangan')}
             className="text-[10px] font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded-full hover:bg-orange-50 hover:text-orange-500 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5 ml-auto"
-          >
-            <Pencil className="w-2.5 h-2.5" />
-          </button>
+          ><Pencil className="w-2.5 h-2.5" /></button>
         </div>
 
         <div className="text-xs space-y-0.5 text-[#1A1A2E]">
@@ -502,7 +560,7 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
               {fields.penjualan_detail.map((pd, i) => (
                 <div key={i} className="text-[11px]">
                   <span className="font-bold">{pd.produk_nama}</span>
-                  {pd.varian.map((v, j) => (
+                  {pd.varian.filter(v => v.qty > 0).map((v, j) => (
                     <span key={j} className="text-gray-500"> — {v.varian_nama} {v.qty}pcs</span>
                   ))}
                 </div>
@@ -521,16 +579,10 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-black uppercase tracking-widest text-orange-500">Edit Transaksi</span>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleCancel}
-            className="text-[10px] font-bold text-gray-400 hover:text-red-500 px-2 py-1 rounded-xl hover:bg-red-50 transition-colors"
-          >
+          <button onClick={handleCancel} className="text-[10px] font-bold text-gray-400 hover:text-red-500 px-2 py-1 rounded-xl hover:bg-red-50 transition-colors">
             Batal
           </button>
-          <button
-            onClick={handleConfirm}
-            className="text-[10px] font-black text-white bg-orange-500 hover:bg-orange-600 px-3 py-1 rounded-xl transition-colors flex items-center gap-1"
-          >
+          <button onClick={handleConfirm} className="text-[10px] font-black text-white bg-orange-500 hover:bg-orange-600 px-3 py-1 rounded-xl transition-colors flex items-center gap-1">
             <Check className="w-3 h-3" /> Selesai
           </button>
         </div>
@@ -548,130 +600,166 @@ function EditCard({ fields, raw, categories, onUpdate, onRemove }: EditCardProps
         />
       </div>
 
-      {/* Jenis */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Jenis</label>
-        <div className="flex gap-2">
-          <button
-            ref={jenisRef}
-            onClick={() => setJenis('Pemasukan')}
-            className={cn(
-              'flex-1 h-8 rounded-xl text-xs font-black transition-all border',
-              draft.jenis === 'Pemasukan'
-                ? 'bg-green-500 text-white border-green-500'
-                : 'bg-white text-gray-400 border-gray-200 hover:border-green-300'
-            )}
-          >
-            Pemasukan
-          </button>
-          <button
-            onClick={() => setJenis('Pengeluaran')}
-            className={cn(
-              'flex-1 h-8 rounded-xl text-xs font-black transition-all border',
-              draft.jenis === 'Pengeluaran'
-                ? 'bg-red-500 text-white border-red-500'
-                : 'bg-white text-gray-400 border-gray-200 hover:border-red-300'
-            )}
-          >
-            Pengeluaran
-          </button>
-        </div>
-      </div>
-
-      {/* Kategori */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Kategori</label>
-        <select
-          ref={kategoriRef}
-          value={draft.kategori}
-          onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value }))}
-          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
-        >
-          {validCategories.map(cat => (
-            <option key={cat.name} value={cat.name}>{cat.name}</option>
-          ))}
-          {!validCategories.some(c => c.name === 'Lainnya') && (
-            <option value="Lainnya">Lainnya</option>
-          )}
-        </select>
-      </div>
-
-      {/* Keterangan */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Keterangan</label>
-        <input
-          ref={keteranganRef}
-          type="text"
-          value={draft.keterangan}
-          onChange={e => setDraft(prev => ({ ...prev, keterangan: e.target.value }))}
-          placeholder="Keterangan transaksi..."
-          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
-        />
-      </div>
-
-      {/* Nominal */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nominal (Rp)</label>
-        <input
-          ref={nominalRef}
-          type="number"
-          min="0"
-          value={draft.nominal || ''}
-          onChange={e => setDraft(prev => ({ ...prev, nominal: Number(e.target.value) || 0 }))}
-          placeholder="0"
-          className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
-        />
-        {draft.nominal > 0 && (
-          <p className="text-[10px] text-gray-400 pl-1">{formatCurrency(draft.nominal, true)}</p>
-        )}
-      </div>
-
-      {/* Qty Beli — show for Pengeluaran */}
-      {draft.jenis === 'Pengeluaran' && (
+      {/* Jenis + Kategori */}
+      <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Beli</label>
-          <input
-            ref={qtyRef}
-            type="number"
-            min="0"
-            step="any"
-            value={draft.qty_beli || ''}
-            onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
-            placeholder="0"
-            className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
-          />
+          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Jenis</label>
+          <div className="flex gap-1">
+            <button
+              ref={jenisRef}
+              onClick={() => setJenis('Pemasukan')}
+              className={cn('flex-1 h-8 rounded-xl text-[10px] font-black transition-all border',
+                draft.jenis === 'Pemasukan' ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-400 border-gray-200 hover:border-green-300'
+              )}
+            >Masuk</button>
+            <button
+              onClick={() => setJenis('Pengeluaran')}
+              className={cn('flex-1 h-8 rounded-xl text-[10px] font-black transition-all border',
+                draft.jenis === 'Pengeluaran' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-400 border-gray-200 hover:border-red-300'
+              )}
+            >Keluar</button>
+          </div>
         </div>
-      )}
-
-      {/* Qty Jual — show for Pemasukan */}
-      {draft.jenis === 'Pemasukan' && draft.kategori === 'Penjualan' && (
         <div className="space-y-1">
-          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Jual</label>
-          <input
-            ref={qtyRef}
-            type="number"
-            min="0"
-            value={draft.qty_total || ''}
-            onChange={e => setDraft(prev => ({ ...prev, qty_total: Number(e.target.value) || 0 }))}
-            placeholder="0"
-            className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
-          />
+          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Kategori</label>
+          <select
+            ref={kategoriRef}
+            value={draft.kategori}
+            onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value, penjualan_detail: e.target.value !== 'Penjualan' ? [] : prev.penjualan_detail }))}
+            className="w-full h-8 rounded-xl border border-gray-200 px-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
+          >
+            {validCategories.map(cat => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
+            {!validCategories.some(c => c.name === 'Lainnya') && <option value="Lainnya">Lainnya</option>}
+          </select>
         </div>
-      )}
+      </div>
 
-      {/* Penjualan detail summary */}
-      {draft.penjualan_detail && draft.penjualan_detail.length > 0 && (
-        <div className="bg-gray-50 rounded-xl p-2 space-y-0.5">
-          <p className="text-[10px] font-black uppercase text-gray-400 mb-1">Detail Produk</p>
-          {draft.penjualan_detail.map((pd, i) => (
-            <div key={i} className="text-[11px]">
-              <span className="font-bold">{pd.produk_nama}</span>
-              {pd.varian.map((v, j) => (
-                <span key={j} className="text-gray-500"> — {v.varian_nama} {v.qty}pcs</span>
-              ))}
+      {isPenjualan ? (
+        <>
+          {/* Langkah 1: Pilih Produk */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Langkah 1: Pilih Produk</label>
+            <div className="flex flex-wrap gap-1.5">
+              {products.map(prod => {
+                const isSelected = draft.penjualan_detail?.some(pd => pd.produk_id === prod.id);
+                return (
+                  <button
+                    key={prod.id}
+                    onClick={() => toggleDraftProduct(prod.id)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-full text-xs font-bold border transition-all active:scale-95',
+                      isSelected ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-600 border-gray-200 hover:border-red-300'
+                    )}
+                  >{prod.nama}</button>
+                );
+              })}
             </div>
-          ))}
-        </div>
+          </div>
+
+          {/* Langkah 2: Qty per Varian */}
+          {draft.penjualan_detail && draft.penjualan_detail.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Langkah 2: Isi Qty per Varian</label>
+              <div className="space-y-2">
+                {draft.penjualan_detail.map(pd => (
+                  <div key={pd.produk_id} className="bg-gray-50 rounded-xl p-2.5 space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 text-primary" />
+                      <span className="text-xs font-black text-gray-700">{pd.produk_nama}</span>
+                    </div>
+                    {pd.varian.map(v => (
+                      <div key={v.varian_id} className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-500 flex-1 truncate">{v.varian_nama}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            min="0"
+                            value={v.qty || ''}
+                            onChange={e => changeVariantQty(pd.produk_id, v.varian_id, Number(e.target.value) || 0)}
+                            placeholder="0"
+                            className="w-16 h-8 rounded-lg border border-gray-200 px-2 text-sm font-bold text-right focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+                          />
+                          <span className="text-[10px] text-gray-400 w-5">pcs</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-computed nominal summary */}
+          <div className={cn(
+            'rounded-xl p-2.5 flex items-center justify-between',
+            draft.nominal > 0 ? 'bg-green-50' : 'bg-orange-50'
+          )}>
+            <span className="text-xs font-bold text-gray-500">Total Pendapatan</span>
+            <span className={cn('text-sm font-black', draft.nominal > 0 ? 'text-green-700' : 'text-orange-500')}>
+              {draft.nominal > 0 ? formatCurrency(draft.nominal, true) : '—'}
+            </span>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Keterangan */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Keterangan</label>
+            <input
+              ref={keteranganRef}
+              type="text"
+              value={draft.keterangan}
+              onChange={e => setDraft(prev => ({ ...prev, keterangan: e.target.value }))}
+              placeholder="Keterangan transaksi..."
+              className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+            />
+          </div>
+
+          {/* Nominal */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nominal (Rp)</label>
+            <input
+              ref={nominalRef}
+              type="number"
+              min="0"
+              value={draft.nominal || ''}
+              onChange={e => setDraft(prev => ({ ...prev, nominal: Number(e.target.value) || 0 }))}
+              placeholder="0"
+              className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+            />
+            {draft.nominal > 0 && <p className="text-[10px] text-gray-400 pl-1">{formatCurrency(draft.nominal, true)}</p>}
+          </div>
+
+          {/* Qty Beli (Pengeluaran) */}
+          {draft.jenis === 'Pengeluaran' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Beli</label>
+              <input
+                ref={qtyRef}
+                type="number" min="0" step="any"
+                value={draft.qty_beli || ''}
+                onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
+                placeholder="0"
+                className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+              />
+            </div>
+          )}
+
+          {/* Qty Jual (Pemasukan non-Penjualan) */}
+          {draft.jenis === 'Pemasukan' && draft.kategori !== 'Penjualan' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty</label>
+              <input
+                ref={qtyRef}
+                type="number" min="0"
+                value={draft.qty_total || ''}
+                onChange={e => setDraft(prev => ({ ...prev, qty_total: Number(e.target.value) || 0 }))}
+                placeholder="0"
+                className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -808,6 +896,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
                     key={i}
                     fields={e.parsed}
                     raw={e.raw}
+                    products={products}
                     categories={categories}
                     onUpdate={(updated) => updateEntry(i, updated)}
                     onRemove={() => removeEntry(i)}
