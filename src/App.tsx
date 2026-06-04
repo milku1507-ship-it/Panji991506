@@ -484,13 +484,56 @@ function AppContent() {
 
     try {
       await deleteDoc(doc(db, `users/${user.uid}/stok/${existingIng.id}`));
-      // After deletion, the local state will be updated by the onSnapshot listener if the sync is 100% reactive,
-      // but we can also manually filter it out for immediate UI feedback.
       setIngredients(prev => prev.filter(i => i.id !== existingIng.id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${existingIng.id}`);
     }
   }, [user, ingredients]);
+
+  /**
+   * Delete a stock ingredient by ID AND remove the matching bahan entry from every
+   * HPP product variant so that syncHppToStock cannot re-create the item.
+   * This is the correct handler for the StockManager "Hapus" action.
+   */
+  const deleteIngredientWithHppCleanup = React.useCallback(async (ingredientId: string) => {
+    if (!user) return;
+
+    const ing = ingredients.find(i => i.id === ingredientId);
+    if (!ing) return;
+
+    const ingNameNorm = ing.name.toLowerCase().trim();
+    const batch = writeBatch(db);
+
+    // 1. Delete from stock
+    batch.delete(doc(db, `users/${user.uid}/stok/${ingredientId}`));
+
+    // 2. If this ingredient came from HPP, remove it from every variant's bahan[]
+    //    so that the automatic sync won't immediately re-create it.
+    let productsChanged = false;
+    const updatedProducts = products.map(p => {
+      let variantChanged = false;
+      const updatedVarian = p.varian.map(v => {
+        const newBahan = v.bahan.filter(b => b.nama.toLowerCase().trim() !== ingNameNorm);
+        if (newBahan.length !== v.bahan.length) { variantChanged = true; }
+        return { ...v, bahan: newBahan };
+      });
+      if (variantChanged) {
+        productsChanged = true;
+        const updated = { ...p, varian: updatedVarian };
+        batch.set(doc(db, `users/${user.uid}/hpp/${p.id}`), sanitizeData(updated));
+        return updated;
+      }
+      return p;
+    });
+
+    try {
+      await batch.commit();
+      setIngredients(prev => prev.filter(i => i.id !== ingredientId));
+      if (productsChanged) setProducts(updatedProducts);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${ingredientId}`);
+    }
+  }, [user, ingredients, products]);
 
   const handleResetStockQty = () => {
     try {
@@ -611,7 +654,8 @@ function AppContent() {
             ingredients={ingredients} 
             setIngredients={setIngredients} 
             transactions={transactions}
-            onResetQty={handleResetStockQty} 
+            onResetQty={handleResetStockQty}
+            onDeleteIngredient={deleteIngredientWithHppCleanup}
           />
         );
       case 'transactions':

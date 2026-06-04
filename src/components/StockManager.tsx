@@ -32,9 +32,10 @@ interface StockManagerProps {
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
   transactions: Transaction[];
   onResetQty?: () => Promise<void> | void;
+  onDeleteIngredient?: (ingredientId: string) => Promise<void>;
 }
 
-export default function StockManager({ user, ingredients, setIngredients, transactions, onResetQty }: StockManagerProps) {
+export default function StockManager({ user, ingredients, setIngredients, transactions, onResetQty, onDeleteIngredient }: StockManagerProps) {
   const { settings } = useSettings();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [filterCategory, setFilterCategory] = React.useState('Semua');
@@ -146,22 +147,32 @@ export default function StockManager({ user, ingredients, setIngredients, transa
 
   const handleDeleteIngredient = async () => {
     if (!deletingIngredientId) return;
-    
-    // OPTIMISTIC UI: Close dialog & clear state immediately
+
+    // Optimistic UI: close dialog immediately
     setIsDeleteDialogOpen(false);
     const ingredientIdToDelete = deletingIngredientId;
     setDeletingIngredientId(null);
 
-    if (user) {
+    if (onDeleteIngredient) {
+      // Delegate to parent — removes from stock AND from HPP bahan[] atomically,
+      // so syncHppToStock cannot re-create the deleted item.
+      try {
+        await onDeleteIngredient(ingredientIdToDelete);
+        toast.success("Bahan berhasil dihapus");
+      } catch {
+        toast.error("Gagal menghapus. Coba lagi.");
+      }
+    } else if (user) {
+      // Fallback (should not happen in normal usage)
       deleteDoc(doc(db, `users/${user.uid}/stok/${ingredientIdToDelete}`)).catch(error => {
         handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${ingredientIdToDelete}`);
         toast.error("Gagal menghapus di penyimpanan awan");
       });
+      toast.success("Bahan berhasil dihapus");
     } else {
       setIngredients(prev => prev.filter(i => i.id !== ingredientIdToDelete));
+      toast.success("Bahan berhasil dihapus");
     }
-
-    toast.success("Bahan berhasil dihapus");
   };
 
   return (
