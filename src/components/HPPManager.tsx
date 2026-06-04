@@ -711,7 +711,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             ...v,
             bahan: v.bahan.map(b =>
               b.nama.toLowerCase().trim() === normalizedNama
-                ? { ...b, harga, satuan, ingredientId }
+                ? { ...b, nama, kelompok, harga, satuan, ingredientId }
                 : b
             )
           };
@@ -722,17 +722,22 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       setProducts(syncedProducts);
       setActiveHppVariant(updatedActiveVariant);
 
-      // Batch write all modified hpp documents to Firestore
-      if (user && modifiedProductIds.size > 0) {
+      // Batch write: always save current product + all other affected products.
+      // selectedProductId was intentionally excluded from modifiedProductIds so we
+      // add it here unconditionally — without this, the edited bahan would never
+      // be persisted to Firestore when the edited variant is the only one that
+      // uses this ingredient.
+      if (user) {
         const hppBatch = writeBatch(db);
-        for (const pid of modifiedProductIds) {
+        const allAffectedIds = new Set([selectedProductId, ...modifiedProductIds]);
+        for (const pid of allAffectedIds) {
           const updatedProd = syncedProducts.find(p => p.id === pid);
           if (updatedProd) {
             hppBatch.set(doc(db, `users/${user.uid}/hpp/${pid}`), sanitizeData(updatedProd));
           }
         }
         await hppBatch.commit();
-        console.log(`[HPPManager] Propagated price to ${modifiedProductIds.size} other product(s).`);
+        console.log(`[HPPManager] Saved HPP for ${allAffectedIds.size} product(s) (current + ${modifiedProductIds.size} others).`);
       }
 
       setIsMaterialModalOpen(false);
