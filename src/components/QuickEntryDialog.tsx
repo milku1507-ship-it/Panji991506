@@ -186,6 +186,33 @@ function resolveCategory(
   return 'Lainnya';
 }
 
+// ─── Fuzzy Product Matching ───────────────────────────────────────────────────
+
+function normWords(s: string): string[] {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+}
+
+function wordOverlapScore(descWords: string[], refWords: string[]): number {
+  let score = 0;
+  for (const rw of refWords) {
+    if (descWords.some(dw => dw === rw || dw.startsWith(rw) || rw.startsWith(dw))) score++;
+  }
+  return score;
+}
+
+function fuzzyMatchProduct(
+  descWords: string[],
+  products: Product[],
+): { product: Product; score: number } | null {
+  let best: { product: Product; score: number } | null = null;
+  for (const prod of products) {
+    const prodWords = normWords(prod.nama);
+    const score = wordOverlapScore(descWords, prodWords);
+    if (score > 0 && (!best || score > best.score)) best = { product: prod, score };
+  }
+  return best;
+}
+
 // ─── Core Line Parser ─────────────────────────────────────────────────────────
 
 function parseLine(
@@ -251,9 +278,10 @@ function parseLine(
     if (!usedIndices.has(i)) descTokens.push(tokens[i]);
   }
 
-  const keterangan = descTokens.join(' ').trim() || tokens.join(' ');
+  let keterangan = descTokens.join(' ').trim() || tokens.join(' ');
   let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
 
+  // ── Pengeluaran: ingredient / category matching ──────────────────────────
   if (jenis === 'Pengeluaran' && kategori === 'Lainnya') {
     const nd = keterangan.toLowerCase().trim();
     const matchedIng = ingredients.find(i => { const n = i.name.toLowerCase().trim(); return nd.includes(n) || n.includes(nd.split(' ')[0]); });
@@ -266,21 +294,46 @@ function parseLine(
     }
   }
 
+  // ── Pemasukan: fuzzy product matching ───────────────────────────────────
   let qty_total = 0;
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
-    const nd = keterangan.toLowerCase().trim();
-    for (const prod of products) {
-      if (!nd.includes(prod.nama.toLowerCase())) continue;
+    const descWords = normWords(keterangan);
+    const bestMatch = fuzzyMatchProduct(descWords, products);
+
+    if (bestMatch) {
+      const prod = bestMatch.product;
+
+      // Match variants by word overlap; fall back to first variant if none identified
       const varianMatches: { varian_id: string; varian_nama: string; qty: number }[] = [];
       for (const v of prod.varian) {
-        if (nd.includes(v.nama.toLowerCase())) varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
+        const vWords = normWords(v.nama);
+        if (wordOverlapScore(descWords, vWords) > 0) {
+          varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
+        }
       }
+      if (varianMatches.length === 0 && prod.varian.length > 0) {
+        const v = prod.varian[0];
+        varianMatches.push({ varian_id: v.id, varian_nama: v.nama, qty: qty_beli || 1 });
+      }
+
       if (varianMatches.length > 0) {
         penjualan_detail = [{ produk_id: prod.id, produk_nama: prod.nama, varian: varianMatches }];
         qty_total = varianMatches.reduce((s, v) => s + v.qty, 0);
-        if (nominal === 0) nominal = varianMatches.reduce((sum, v) => { const variant = prod.varian.find(pv => pv.id === v.varian_id); return sum + (variant?.harga_jual || 0) * v.qty; }, 0);
+        if (nominal === 0) {
+          nominal = varianMatches.reduce((sum, vm) => {
+            const variant = prod.varian.find(pv => pv.id === vm.varian_id);
+            return sum + (variant?.harga_jual || 0) * vm.qty;
+          }, 0);
+        }
+        // Update keterangan to the official product name + variant (if specific)
+        const varLabel = varianMatches.length === 1 && normWords(varianMatches[0].varian_nama).some(w => !normWords(prod.nama).includes(w))
+          ? ` - ${varianMatches[0].varian_nama}`
+          : '';
+        keterangan = prod.nama + varLabel;
       }
-      break;
+    } else {
+      // No matching product → fallback, keep keterangan as typed
+      kategori = 'Lainnya';
     }
   }
 
