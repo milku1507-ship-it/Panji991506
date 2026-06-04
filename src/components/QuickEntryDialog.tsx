@@ -338,7 +338,9 @@ function parseLine(
   }
 
   kategori = resolveCategory(kategori, jenis, categories);
-  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli, qty_total, penjualan_detail };
+  // qty_beli = 0 untuk Penjualan (sama persis dengan form manual); qty digunakan di varian saja
+  const finalQtyBeli = (jenis === 'Pemasukan' && penjualan_detail && penjualan_detail.length > 0) ? 0 : qty_beli;
+  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli: finalQtyBeli, qty_total, penjualan_detail };
 }
 
 function parseAll(

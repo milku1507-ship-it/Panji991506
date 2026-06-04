@@ -181,7 +181,6 @@ export default function TransactionManager({ user, transactions, setTransactions
     let failed = 0;
     for (const fields of list) {
       try {
-        // Derive qty_total from penjualan_detail if available, otherwise use the field directly
         const derivedQtyTotal = Array.isArray(fields.penjualan_detail) && fields.penjualan_detail.length > 0
           ? fields.penjualan_detail.reduce((sum, pd) => sum + pd.varian.reduce((s, v) => s + (v.qty || 0), 0), 0)
           : (Number(fields.qty_total) || 0);
@@ -197,6 +196,54 @@ export default function TransactionManager({ user, transactions, setTransactions
           qty_total: derivedQtyTotal,
           penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
         };
+
+        // Penjualan: hitung subtotal, biaya, dan nominal bersih
+        // persis seperti useEffect di form manual (qty × harga_jual, lalu potong biaya_lain)
+        if (fields.kategori === 'Penjualan' && Array.isArray(fields.penjualan_detail) && fields.penjualan_detail.length > 0) {
+          const qtyByVariantId = new Map<string, number>();
+          const involvedProductIds = new Set<string>();
+
+          fields.penjualan_detail.forEach(pd => {
+            involvedProductIds.add(pd.produk_id);
+            pd.varian.forEach(v => {
+              qtyByVariantId.set(v.varian_id, (qtyByVariantId.get(v.varian_id) || 0) + v.qty);
+            });
+          });
+
+          // Hitung subtotal dari harga_jual × qty tiap varian
+          let subtotal = 0;
+          qtyByVariantId.forEach((qty, variantId) => {
+            for (const p of products) {
+              const variant = p.varian.find(v => v.id === variantId);
+              if (variant) { subtotal += qty * variant.harga_jual; break; }
+            }
+          });
+
+          // Jika user eksplisit ketik nominal, pakai itu sebagai gross subtotal
+          if (Number(fields.nominal) > 0) subtotal = Number(fields.nominal);
+
+          // Hitung biaya_lain (pajak/komisi) persis seperti form manual
+          const feesByName = new Map<string, AdditionalFee>();
+          involvedProductIds.forEach(pid => {
+            const prod = products.find(p => p.id === pid);
+            prod?.biaya_lain?.forEach(fee => {
+              if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, fee);
+            });
+          });
+
+          let totalFees = 0;
+          feesByName.forEach(fee => {
+            totalFees += fee.tipe === 'persen' ? subtotal * (fee.nilai / 100) : fee.nilai;
+          });
+
+          txData.subtotal = subtotal;
+          txData.total_penjualan = subtotal;
+          txData.total_biaya = totalFees;
+          txData.nominal = subtotal - totalFees;
+          txData.qty_total = derivedQtyTotal;
+          txData.qty_beli = 0; // qty_beli selalu 0 untuk Penjualan, sama dengan form manual
+        }
+
         await processAndSaveTransaction(txData);
         saved++;
       } catch (err) {
