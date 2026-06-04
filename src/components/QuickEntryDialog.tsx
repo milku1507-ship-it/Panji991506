@@ -48,6 +48,12 @@ function parseNominal(token: string): number | null {
   return Math.round(num);
 }
 
+const UNIT_WORDS = new Set([
+  'kg','gram','gr','g','ons','liter','lt','l','ml','pcs','biji','buah',
+  'paket','pak','lembar','unit','porsi','bungkus','botol','kaleng','sak',
+  'bal','lusin','kodi','roll','meter','m','cm',
+]);
+
 function parseQty(token: string): { qty: number; unit: string } | null {
   const match = token.match(/^([\d]+(?:[.,][\d]+)?)\s*(kg|gram|gr|g|ons|liter|lt|l|ml|pcs|biji|buah|paket|pak|lembar|unit|porsi|bungkus|botol|kaleng|sak|bal|lusin|kodi|roll|meter|m|cm)?$/i);
   if (!match) return null;
@@ -270,8 +276,26 @@ function parseLine(
   const descTokens: string[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
+    // ① Look-ahead: bare number immediately followed by a standalone unit word
+    //    e.g. "1 liter", "25 kg" — consume BOTH tokens as qty.
+    //    Must run before parseNominal so "1" isn't grabbed as Rp 1.
+    if (qty_beli === 0 && i + 1 < tokens.length) {
+      const bareNum = tokens[i].match(/^[\d]+(?:[.,][\d]+)?$/);
+      const nextLower = tokens[i + 1].toLowerCase();
+      if (bareNum && UNIT_WORDS.has(nextLower) && !usedIndices.has(i + 1)) {
+        qty_beli = parseFloat(tokens[i].replace(',', '.'));
+        usedIndices.add(i);
+        usedIndices.add(i + 1);
+        continue;
+      }
+    }
+    // ② Nominal — runs before single-token qty so a bare "21000" (no unit) is
+    //    treated as a price, not qty=21000 (parseQty allows a missing unit).
     const nom = parseNominal(tokens[i]);
     if (nom !== null && nom > 0) { if (nom > nominal) nominal = nom; usedIndices.add(i); continue; }
+    // ③ Number+unit fused in one token (e.g. "1kg", "2liter").
+    //    parseNominal returns null for these (suffix not in rb/k/jt/…), so they
+    //    safely reach this branch.
     const qtyParsed = parseQty(tokens[i]);
     if (qtyParsed && qtyParsed.qty > 0 && qtyParsed.qty < 100_000 && qty_beli === 0) {
       qty_beli = qtyParsed.qty; usedIndices.add(i); continue;
