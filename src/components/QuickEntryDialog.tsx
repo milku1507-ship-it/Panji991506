@@ -16,6 +16,7 @@ export type QuickEntryFields = {
   nominal: number;
   qty_beli: number;
   qty_total: number;
+  materialId?: string;
   penjualan_detail?: {
     produk_id: string;
     produk_nama: string;
@@ -29,6 +30,7 @@ interface Props {
   products: Product[];
   ingredients: Ingredient[];
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[];
+  hppCategories: string[];
   onSaveBatch: (list: QuickEntryFields[]) => Promise<{ saved: number; failed: number }>;
 }
 
@@ -221,6 +223,7 @@ function parseLine(
   products: Product[],
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
   defaultDate: string,
+  hppCategories: string[] = [],
 ): QuickEntryFields | null {
   const line = raw.trim();
   if (!line) return null;
@@ -282,15 +285,45 @@ function parseLine(
   let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
 
   // ── Pengeluaran: ingredient / category matching ──────────────────────────
-  if (jenis === 'Pengeluaran' && kategori === 'Lainnya') {
+  let materialId: string | undefined = undefined;
+  if (jenis === 'Pengeluaran') {
     const nd = keterangan.toLowerCase().trim();
-    const matchedIng = ingredients.find(i => { const n = i.name.toLowerCase().trim(); return nd.includes(n) || n.includes(nd.split(' ')[0]); });
-    if (matchedIng?.category) {
-      kategori = matchedIng.category;
-      if (nominal === 0 && qty_beli > 0) nominal = matchedIng.price * qty_beli;
-    } else {
+    // Try matching an ingredient by name
+    const matchedIng = ingredients.find(i => {
+      const n = i.name.toLowerCase().trim();
+      return nd.includes(n) || n.includes(nd.split(' ')[0]);
+    });
+    if (matchedIng) {
+      materialId = matchedIng.id;
+      // Resolve category from ingredient if still "Lainnya"
+      if (kategori === 'Lainnya' && matchedIng.category) {
+        kategori = matchedIng.category;
+      }
+      // Auto-compute nominal from qty_beli × ingredient price (same as manual form)
+      if (nominal === 0 && qty_beli > 0) {
+        nominal = matchedIng.price * qty_beli;
+      }
+      // Auto-set keterangan if not meaningful
+      if (!keterangan || keterangan.toLowerCase() === matchedIng.name.toLowerCase()) {
+        keterangan = `Beli ${matchedIng.name}`;
+      }
+    } else if (kategori === 'Lainnya') {
       const matchedCat = categories.find(c => c.type === 'Pengeluaran' && nd.includes(c.name.toLowerCase()));
       if (matchedCat) kategori = matchedCat.name;
+    }
+    // If category is an HPP category and still no materialId, try matching by category-filtered ingredients
+    if (!materialId && hppCategories.includes(kategori)) {
+      const ingInCat = ingredients.filter(i => i.category?.toLowerCase().trim() === kategori.toLowerCase().trim());
+      const nd2 = keterangan.toLowerCase().trim();
+      const fallback = ingInCat.find(i => {
+        const n = i.name.toLowerCase().trim();
+        return nd2.includes(n) || n.includes(nd2.split(' ')[0]);
+      });
+      if (fallback) {
+        materialId = fallback.id;
+        if (nominal === 0 && qty_beli > 0) nominal = fallback.price * qty_beli;
+        keterangan = `Beli ${fallback.name}`;
+      }
     }
   }
 
@@ -340,7 +373,7 @@ function parseLine(
   kategori = resolveCategory(kategori, jenis, categories);
   // qty_beli = 0 untuk Penjualan (sama persis dengan form manual); qty digunakan di varian saja
   const finalQtyBeli = (jenis === 'Pemasukan' && penjualan_detail && penjualan_detail.length > 0) ? 0 : qty_beli;
-  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli: finalQtyBeli, qty_total, penjualan_detail };
+  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli: finalQtyBeli, qty_total, materialId, penjualan_detail };
 }
 
 function parseAll(
@@ -349,9 +382,10 @@ function parseAll(
   products: Product[],
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
   today: string,
+  hppCategories: string[] = [],
 ): { raw: string; parsed: QuickEntryFields | null }[] {
   const lines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
-  return lines.map(raw => ({ raw, parsed: parseLine(raw, ingredients, products, categories, today) }));
+  return lines.map(raw => ({ raw, parsed: parseLine(raw, ingredients, products, categories, today, hppCategories) }));
 }
 
 // ─── Inline Edit Card ─────────────────────────────────────────────────────────
@@ -362,15 +396,18 @@ interface EditCardProps {
   fields: QuickEntryFields;
   raw: string;
   products: Product[];
+  ingredients: Ingredient[];
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[];
+  hppCategories: string[];
   onUpdate: (updated: QuickEntryFields) => void;
   onRemove: () => void;
 }
 
-function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: EditCardProps) {
+function EditCard({ fields, raw, products, ingredients, categories, hppCategories, onUpdate, onRemove }: EditCardProps) {
   const [editing, setEditing] = React.useState(false);
   const [focusField, setFocusField] = React.useState<FocusField>(null);
   const [draft, setDraft] = React.useState<QuickEntryFields>(fields);
+  const [materialSearch, setMaterialSearch] = React.useState('');
 
   const dateRef = React.useRef<HTMLInputElement>(null);
   const jenisRef = React.useRef<HTMLButtonElement>(null);
@@ -383,9 +420,23 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
 
   const openEdit = (focus: FocusField = null) => {
     setDraft(fields);
+    setMaterialSearch('');
     setFocusField(focus);
     setEditing(true);
   };
+
+  // ── Auto-nominal for HPP categories: qty_beli × material.price (same as manual form) ──
+  React.useEffect(() => {
+    const isHppCat = hppCategories.includes(draft.kategori);
+    if (!isHppCat || !draft.materialId) return;
+    const material = ingredients.find(i => i.id === draft.materialId);
+    if (!material) return;
+    setDraft(prev => ({
+      ...prev,
+      nominal: (prev.qty_beli || 0) * material.price,
+      keterangan: prev.keterangan || `Beli ${material.name}`,
+    }));
+  }, [draft.materialId, draft.qty_beli, draft.kategori, ingredients, hppCategories]);
 
   React.useEffect(() => {
     if (!editing) return;
@@ -486,8 +537,18 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
       jenis: j,
       kategori: catStillValid ? prev.kategori : (validCats[0]?.name || 'Lainnya'),
       penjualan_detail: j === 'Pengeluaran' ? [] : prev.penjualan_detail,
+      materialId: j === 'Pemasukan' ? undefined : prev.materialId,
     }));
   };
+
+  const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
+  const isHppCategory = hppCategories.includes(draft.kategori);
+  const filteredIngredients = ingredients.filter(i =>
+    i.category?.toLowerCase().trim() === draft.kategori.toLowerCase().trim()
+  );
+  const displayIngredients = materialSearch.trim()
+    ? filteredIngredients.filter(i => i.name.toLowerCase().includes(materialSearch.toLowerCase()))
+    : filteredIngredients;
 
   const validCategories = categories.filter(c => c.type === draft.jenis);
   const isPenjualan = draft.kategori === 'Penjualan';
@@ -625,7 +686,12 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
           <select
             ref={kategoriRef}
             value={draft.kategori}
-            onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value, penjualan_detail: e.target.value !== 'Penjualan' ? [] : prev.penjualan_detail }))}
+            onChange={e => setDraft(prev => ({
+              ...prev,
+              kategori: e.target.value,
+              penjualan_detail: e.target.value !== 'Penjualan' ? [] : prev.penjualan_detail,
+              materialId: undefined,
+            }))}
             className="w-full h-8 rounded-xl border border-gray-200 px-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
           >
             {validCategories.map(cat => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
@@ -702,6 +768,85 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
         </>
       ) : (
         <>
+          {/* Material Picker — same as manual form, shown for HPP categories (Bahan Baku, Packing, dll) */}
+          {isHppCategory && (
+            <div className="space-y-2 pt-1 border-t border-dashed border-gray-100">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pilih Komponen / Material</label>
+              {selectedMaterial ? (
+                <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2">
+                  <div>
+                    <p className="text-xs font-black text-gray-800">{selectedMaterial.name}</p>
+                    <p className="text-[10px] text-gray-400">{selectedMaterial.unit} · Rp{selectedMaterial.price.toLocaleString('id-ID')}/{selectedMaterial.unit}</p>
+                  </div>
+                  <button
+                    onClick={() => setDraft(prev => ({ ...prev, materialId: undefined }))}
+                    className="text-[10px] text-gray-400 hover:text-red-500 font-bold px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    Ganti
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    value={materialSearch}
+                    onChange={e => setMaterialSearch(e.target.value)}
+                    placeholder="Cari bahan..."
+                    className="w-full h-8 rounded-xl border border-gray-200 px-3 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+                  />
+                  {displayIngredients.length > 0 ? (
+                    <div className="max-h-32 overflow-y-auto rounded-xl border border-gray-100 bg-white divide-y divide-gray-50">
+                      {displayIngredients.map(ing => (
+                        <button
+                          key={ing.id}
+                          onClick={() => {
+                            setDraft(prev => ({
+                              ...prev,
+                              materialId: ing.id,
+                              keterangan: `Beli ${ing.name}`,
+                              nominal: (prev.qty_beli || 0) * ing.price,
+                            }));
+                            setMaterialSearch('');
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-orange-50 transition-colors"
+                        >
+                          <span className="text-xs font-bold text-gray-700">{ing.name}</span>
+                          <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">{ing.unit}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 px-1">
+                      {materialSearch ? 'Bahan tidak ditemukan.' : `Belum ada bahan untuk kategori "${draft.kategori}".`}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Qty Beli (Pengeluaran) — placed BEFORE nominal so auto-compute useEffect can see it */}
+          {draft.jenis === 'Pengeluaran' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                Jumlah Beli{selectedMaterial ? ` (${selectedMaterial.unit})` : ''}
+              </label>
+              <input
+                ref={qtyRef}
+                type="number" min="0" step="any"
+                value={draft.qty_beli || ''}
+                onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
+                placeholder="0"
+                className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+              />
+              {selectedMaterial && draft.qty_beli > 0 && (
+                <p className="text-[10px] text-gray-400 pl-1">
+                  Auto: {draft.qty_beli} × Rp{selectedMaterial.price.toLocaleString('id-ID')} = {formatCurrency(draft.qty_beli * selectedMaterial.price, true)}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Keterangan */}
           <div className="space-y-1">
             <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Keterangan</label>
@@ -727,23 +872,13 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
               placeholder="0"
               className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
             />
-            {draft.nominal > 0 && <p className="text-[10px] text-gray-400 pl-1">{formatCurrency(draft.nominal, true)}</p>}
+            {draft.nominal > 0 && (
+              <p className="text-[10px] text-gray-400 pl-1">
+                {formatCurrency(draft.nominal, true)}
+                {isHppCategory && selectedMaterial && ' · terhitung otomatis, bisa diubah manual'}
+              </p>
+            )}
           </div>
-
-          {/* Qty Beli (Pengeluaran) */}
-          {draft.jenis === 'Pengeluaran' && (
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Qty Beli</label>
-              <input
-                ref={qtyRef}
-                type="number" min="0" step="any"
-                value={draft.qty_beli || ''}
-                onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
-                placeholder="0"
-                className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
-              />
-            </div>
-          )}
 
           {/* Qty Jual (Pemasukan non-Penjualan) */}
           {draft.jenis === 'Pemasukan' && draft.kategori !== 'Penjualan' && (
@@ -767,7 +902,7 @@ function EditCard({ fields, raw, products, categories, onUpdate, onRemove }: Edi
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, onSaveBatch }: Props) {
+export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, onSaveBatch }: Props) {
   const [input, setInput] = React.useState('');
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
@@ -784,7 +919,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
   }, [open]);
 
   const handleParse = () => {
-    const results = parseAll(input, ingredients, products, categories, todayStr());
+    const results = parseAll(input, ingredients, products, categories, todayStr(), hppCategories);
     const valid = results.filter(r => r.parsed !== null) as { raw: string; parsed: QuickEntryFields }[];
     if (valid.length === 0) return;
     setEntries(valid);
@@ -897,7 +1032,9 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
                     fields={e.parsed}
                     raw={e.raw}
                     products={products}
+                    ingredients={ingredients}
                     categories={categories}
+                    hppCategories={hppCategories}
                     onUpdate={(updated) => updateEntry(i, updated)}
                     onRemove={() => removeEntry(i)}
                   />

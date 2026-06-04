@@ -195,6 +195,7 @@ export default function TransactionManager({ user, transactions, setTransactions
           qty_beli: Number(fields.qty_beli) || 0,
           qty_total: derivedQtyTotal,
           penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
+          materialId: fields.materialId || '',
         };
 
         // Penjualan: hitung subtotal, biaya, dan nominal bersih
@@ -1843,6 +1844,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         products={products}
         ingredients={ingredients}
         categories={dynamicCategories}
+        hppCategories={settings?.kategori_hpp || []}
         onSaveBatch={saveQuickBatch}
       />
     </div>
