@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
-import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox, ShoppingBag } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Transaction, Product, Variant, HppMaterial } from '../types';
 import { CATEGORIES_LIST } from '../constants/data';
@@ -376,6 +376,89 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           <p className="text-[10px] font-bold mt-2">Margin Keuntungan: {margin.toFixed(1)}%</p>
         </Card>
       </div>
+
+      {/* Sales Profit Summary */}
+      {productPerformance.length > 0 && (() => {
+        const totalQty = productPerformance.reduce((s, p) => s + p.totalQty, 0);
+        const totalGross = productPerformance.reduce((s, p) => s + p.totalGross, 0);
+        const totalNet = productPerformance.reduce((s, p) => s + p.totalNet, 0);
+        const totalHPP = productPerformance.reduce((s, p) => s + p.totalHPP, 0);
+        const totalProfit = totalNet - totalHPP;
+        const profitMargin = totalNet > 0 ? (totalProfit / totalNet) * 100 : 0;
+        const isPositive = totalProfit >= 0;
+
+        return (
+          <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="p-2.5 rounded-2xl bg-primary/10 text-primary">
+                  <ShoppingBag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1A2E]">Kesimpulan Profit Bersih Penjualan</h3>
+                  <p className="text-[11px] font-medium text-gray-400">{periodLabel} · {totalQty} unit terjual dari {productPerformance.length} produk</p>
+                </div>
+                <Badge className={cn(
+                  "ml-auto border-none font-black text-sm px-3 py-1",
+                  isPositive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+                )}>
+                  {isPositive ? '+' : ''}{profitMargin.toFixed(1)}% Margin
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-gray-50 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Gross Penjualan</p>
+                  <p className="text-lg font-black text-[#1A1A2E]">{formatCurrency(totalGross, true)}</p>
+                  <p className="text-[10px] font-bold text-gray-400 mt-0.5">Sebelum potongan</p>
+                </div>
+                <div className="bg-gray-50 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Net Penjualan</p>
+                  <p className="text-lg font-black text-[#1A1A2E]">{formatCurrency(totalNet, true)}</p>
+                  <p className="text-[10px] font-bold text-gray-400 mt-0.5">Setelah biaya platform</p>
+                </div>
+                <div className="bg-gray-50 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total HPP</p>
+                  <p className="text-lg font-black text-gray-600">{formatCurrency(totalHPP, true)}</p>
+                  <p className="text-[10px] font-bold text-gray-400 mt-0.5">Biaya produksi</p>
+                </div>
+                <div className={cn(
+                  "rounded-2xl p-4",
+                  isPositive ? "bg-green-50" : "bg-red-50"
+                )}>
+                  <p className={cn("text-[10px] font-black uppercase tracking-widest mb-1", isPositive ? "text-green-600" : "text-red-500")}>
+                    Profit Bersih
+                  </p>
+                  <p className={cn("text-lg font-black", isPositive ? "text-green-600" : "text-red-500")}>
+                    {formatCurrency(totalProfit, true)}
+                  </p>
+                  <p className={cn("text-[10px] font-bold mt-0.5", isPositive ? "text-green-500" : "text-red-400")}>
+                    Net Penjualan − HPP
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress bar HPP vs Profit */}
+              <div className="mt-4">
+                <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1.5">
+                  <span>HPP {totalNet > 0 ? ((totalHPP / totalNet) * 100).toFixed(1) : 0}%</span>
+                  <span>Profit {profitMargin.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden flex">
+                  <div
+                    className="h-full bg-gray-300 rounded-l-full transition-all"
+                    style={{ width: `${Math.min(100, totalNet > 0 ? (totalHPP / totalNet) * 100 : 0)}%` }}
+                  />
+                  <div
+                    className={cn("h-full rounded-r-full transition-all", isPositive ? "bg-green-400" : "bg-red-400")}
+                    style={{ width: `${Math.min(100, Math.max(0, profitMargin))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+        );
+      })()}
 
       {filteredTransactions.length === 0 ? (
         <Card className="border-none shadow-sm rounded-3xl bg-white">
