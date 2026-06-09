@@ -691,9 +691,10 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         satuan
       };
 
-      // Propagate new price to ALL other variants across ALL products that share the same bahan name
+      // Propagate changes to ALL other variants across ALL products that share the same bahan
+      // IMPORTANT: match by OLD name so variants that haven't been renamed yet are found correctly.
       const updatedActiveVariant = { ...activeHppVariant, bahan: newBahan };
-      const normalizedNama = nama.toLowerCase().trim();
+      const oldNama = editingMaterial.material.nama.toLowerCase().trim();
       const modifiedProductIds = new Set<string>();
 
       const syncedProducts = products.map(p => {
@@ -702,18 +703,22 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           if (p.id === selectedProductId && v.id === activeHppVariant.id) {
             return { ...v, bahan: newBahan };
           }
-          const hasSameName = v.bahan.some(
-            b => b.nama.toLowerCase().trim() === normalizedNama
+          // Match by OLD name OR by ingredientId to catch all related entries
+          const hasSameIngredient = v.bahan.some(
+            b => (oldNama && b.nama.toLowerCase().trim() === oldNama) ||
+                 (ingredientId && b.ingredientId === ingredientId)
           );
-          if (!hasSameName) return v;
+          if (!hasSameIngredient) return v;
           modifiedProductIds.add(p.id);
           return {
             ...v,
-            bahan: v.bahan.map(b =>
-              b.nama.toLowerCase().trim() === normalizedNama
+            bahan: v.bahan.map(b => {
+              const matchByName = oldNama && b.nama.toLowerCase().trim() === oldNama;
+              const matchById = ingredientId && b.ingredientId === ingredientId;
+              return (matchByName || matchById)
                 ? { ...b, nama, kelompok, harga, satuan, ingredientId }
-                : b
-            )
+                : b;
+            })
           };
         });
         return { ...p, varian: updatedVarian };

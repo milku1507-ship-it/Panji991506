@@ -365,14 +365,31 @@ function AppContent() {
         (p.varian || []).flatMap(v => (v.bahan || []))
       ).filter(m => m && m.nama && m.nama.trim());
 
-      // Use a map to track unique materials by normalized name to prevent duplicates
-      const materialMap = new Map();
+      // Deduplicate by ingredientId first (most authoritative), then fall back to name.
+      // Prefer entries that have an ingredientId so a just-saved rename always wins
+      // over stale entries in other variants that haven't been updated yet.
+      const materialById = new Map<string, typeof allMaterials[0]>();
+      const materialByName = new Map<string, typeof allMaterials[0]>();
       allMaterials.forEach(m => {
-        const normalizedName = m.nama.toLowerCase().trim();
-        if (!materialMap.has(normalizedName)) {
-          materialMap.set(normalizedName, m);
+        if (m.ingredientId) {
+          // Keep whichever has an id; first writer wins (they're the same ingredient)
+          if (!materialById.has(m.ingredientId)) {
+            materialById.set(m.ingredientId, m);
+          }
+        } else {
+          const normalizedName = m.nama.toLowerCase().trim();
+          if (!materialByName.has(normalizedName)) {
+            materialByName.set(normalizedName, m);
+          }
         }
       });
+      // Remove name-keyed entries that are already covered by an id-keyed entry
+      materialById.forEach(m => {
+        materialByName.delete(m.nama.toLowerCase().trim());
+      });
+      const materialMap = new Map<string, typeof allMaterials[0]>();
+      materialById.forEach((m, id) => materialMap.set(id, m));
+      materialByName.forEach((m, name) => materialMap.set(name, m));
 
       const uniqueMaterials = Array.from(materialMap.values());
       
