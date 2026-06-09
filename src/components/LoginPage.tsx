@@ -196,7 +196,7 @@ export default function LoginPage({ settings }: LoginPageProps) {
         </div>
 
         <p className="text-xs text-gray-400">
-          Dibuat dengan ❤️ oleh <span className="font-semibold text-gray-500">Panji Abdillah Al-gipari</span>
+          Dibuat oleh <span className="font-semibold text-gray-500">Panji Abdillah Al-gipari</span>
         </p>
       </div>
     </div>
