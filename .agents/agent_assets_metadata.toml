@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ZgN_WHF-QNaihkmYlFSYh"
+uri = "file://scripts-output/1_SCRIPT_PROMOSI_CEUMILAN.md"
+type = "text"
+title = "Script Promosi CeuMilan"
+
+[[outputs]]
+id = "p_BHnaXsruP70GTL59Zjt"
+uri = "file://scripts-output/2_PANDUAN_PENGGUNAAN_CEUMILAN_A_Z.md"
+type = "text"
+title = "Panduan Penggunaan A–Z CeuMilan"
