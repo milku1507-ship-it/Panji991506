@@ -63,6 +63,9 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   const handleLogout = async () => {
+    // Close the drawer first so no stale UI references user data
+    // while the component is still mounted but user is transitioning to null.
+    setIsMenuOpen(false);
     try {
       await signOut(auth);
       toast.success('Kamu berhasil keluar');
