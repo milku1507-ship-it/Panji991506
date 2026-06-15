@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowUp, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator, Calendar, PiggyBank } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator, Calendar, PiggyBank } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
 import { Ingredient, Transaction, StoreSettings, Dompet } from '../types';
 import { User } from 'firebase/auth';
@@ -155,7 +155,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
           )}
 
           <div className="grid grid-cols-4 gap-2">
-            <HeaderAction icon={ArrowUp} label="Tambah" onClick={() => setActiveTab('transactions')} />
+            <HeaderAction icon={Calculator} label="HPP" onClick={() => setActiveTab('hpp')} />
             <HeaderAction icon={Package} label="Stok" onClick={() => setActiveTab('stock')} />
             <HeaderAction icon={PiggyBank} label="Tabungan" onClick={() => setActiveTab('dompet')} />
             <HeaderAction icon={History} label="Riwayat" onClick={() => setActiveTab('transactions')} />

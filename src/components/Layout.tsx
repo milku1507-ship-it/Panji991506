@@ -154,7 +154,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
               >
                 {displayBack ? (
                   <h1 className="text-lg font-black text-[#1A1A2E]">
-                    {NAV_ITEMS.find(i => i.id === activeTab)?.label || "HPP"}
+                    {[...NAV_ITEMS, ...MENU_GROUPS.flatMap(g => g.items)].find(i => i.id === activeTab)?.label || "Transaksi"}
                   </h1>
                 ) : (
                   <div className="flex items-center gap-3">
