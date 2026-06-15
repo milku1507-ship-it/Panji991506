@@ -8,8 +8,9 @@ import FinancialReport from './components/FinancialReport';
 import ROASCalculator from './components/ROASCalculator';
 import StoreSettingsManager from './components/StoreSettingsManager';
 import CategoryManager from './components/CategoryManager';
+import DompetManager from './components/DompetManager';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
-import { Ingredient, Product, Transaction, StoreSettings } from './types';
+import { Ingredient, Product, Transaction, StoreSettings, Dompet } from './types';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
@@ -60,6 +61,7 @@ function AppContent() {
   const [ingredients, setIngredients] = React.useState<Ingredient[]>([]);
   const [products, setProducts] = React.useState<Product[]>([]);
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
+  const [dompets, setDompets] = React.useState<Dompet[]>([]);
   const SETTINGS_CACHE_KEY = 'ceumilan_store_settings_cache';
   const defaultSettings: StoreSettings = {
     name: 'CeuMilan',
@@ -102,6 +104,7 @@ function AppContent() {
         // mental balik ke login karena state stale.
         setActiveTab('dashboard');
         setBackAction(null);
+        setDompets([]);
       }
 
       setUser(currentUser);
@@ -174,6 +177,18 @@ function AppContent() {
       console.error('Products sync error:', error);
     });
 
+    // Sync Dompets
+    const unsubDompets = onSnapshot(collection(db, `users/${uid}/dompet`), (snapshot) => {
+      const data = snapshot.docs.map(d => d.data() as Dompet);
+      setDompets(data.sort((a, b) => {
+        const aMs = a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0;
+        const bMs = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0;
+        return aMs - bMs;
+      }));
+    }, (error) => {
+      console.error('Dompet sync error:', error);
+    });
+
     // Sync Transactions
     const unsubTransactions = onSnapshot(collection(db, `users/${uid}/transaksi`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Transaction);
@@ -195,6 +210,7 @@ function AppContent() {
       unsubSettings();
       unsubIngredients();
       unsubProducts();
+      unsubDompets();
       unsubTransactions();
     };
   }, [user]);
@@ -644,6 +660,13 @@ function AppContent() {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'dompet':
+        return <DompetManager
+          user={user}
+          dompets={dompets}
+          setDompets={setDompets}
+          transactions={transactions}
+        />;
       case 'dashboard':
         return <Dashboard 
           user={user} 
@@ -653,6 +676,7 @@ function AppContent() {
           setActiveTab={handleTabChange} 
           onSeedData={seedCloudData}
           onStartFresh={handleStartFresh}
+          dompets={dompets}
         />;
       case 'hpp':
         return <HPPManager 
@@ -683,7 +707,9 @@ function AppContent() {
           products={products} 
           ingredients={ingredients} 
           setIngredients={setIngredients} 
-          onSuccess={() => {}} 
+          onSuccess={() => {}}
+          dompets={dompets}
+          setDompets={setDompets}
         />;
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} />;
@@ -719,7 +745,8 @@ function AppContent() {
           ingredients={ingredients} 
           transactions={transactions} 
           storeSettings={storeSettings}
-          setActiveTab={handleTabChange} 
+          setActiveTab={handleTabChange}
+          dompets={dompets}
         />;
       default:
         return <Dashboard 
@@ -727,7 +754,8 @@ function AppContent() {
           ingredients={ingredients} 
           transactions={transactions} 
           storeSettings={storeSettings}
-          setActiveTab={handleTabChange} 
+          setActiveTab={handleTabChange}
+          dompets={dompets}
         />;
     }
   };

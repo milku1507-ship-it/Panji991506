@@ -1,0 +1,61 @@
+{
+  "system_instruction": "Tolong implementasikan logika backend, database (Firebase/Supabase), dan state management untuk fitur 'Dompet Tabungan'. UI sudah tersedia, fokus pada fungsionalitas dan integritas data kas.",
+  "project_status": {
+    "ui_ready": [
+      "Ikon dompet di sudut kiri atas kartu merah 'Saldo Laba' pada halaman Home.",
+      "Opsi tabungan pada form input 'Catat Transaksi'.",
+      "Antarmuka manajemen dompet untuk menampung daftar dompet custom."
+    ],
+    "backend_pending": [
+      "Pembuatan entri database untuk dompet custom.",
+      "Logika kalkulasi mutasi antar saldo.",
+      "Filter sumber dana pada form pengeluaran.",
+      "Pemisahan kalkulasi Laba/Rugi."
+    ]
+  },
+  "database_schema_requirements": {
+    "tabel_dompet": {
+      "fields": ["id_dompet", "nama_dompet", "saldo_terkumpul"],
+      "description": "Menyimpan data dompet tabungan yang dicustom pengguna."
+    },
+    "tabel_transaksi": {
+      "fields_tambahan": ["sumber_dana", "kategori_arus_kas"],
+      "description": "sumber_dana mencatat ID dompet atau 'saldo_utama'. kategori_arus_kas membedakan antara 'pengeluaran_operasional', 'mutasi_ke_dompet', dll."
+    }
+  },
+  "business_logic_rules": {
+    "fitur_1_isi_tabungan_mutasi": {
+      "trigger": "Pengguna memilih opsi simpan/isi ke Dompet Tabungan.",
+      "action": "Potong nominal dari 'Saldo Utama' dan tambahkan ke 'saldo_terkumpul' di dompet tujuan.",
+      "laba_rugi_impact": false,
+      "rule": "Transaksi ini HANYA mutasi internal. DILARANG keras memotong atau mengubah angka Laba/Rugi."
+    },
+    "fitur_2_form_pengeluaran_sumber_dana": {
+      "ui_update": "Aktifkan dropdown 'Sumber Dana' pada form Pengeluaran yang sudah ada.",
+      "default_value": "Saldo Utama",
+      "dynamic_options": "Ambil data daftar dompet tabungan milik pengguna."
+    },
+    "fitur_3_pengeluaran_saldo_utama": {
+      "condition": "sumber_dana == 'Saldo Utama'",
+      "action": "Potong 'Saldo Utama'.",
+      "laba_rugi_impact": true,
+      "examples": [
+        "Biaya iklan (pastikan tercatat sebagai iklan, bukan ikan).",
+        "Biaya pecking (dihitung sebagai gaji/bayaran per 1 pack pesanan, bukan bahan material)."
+      ]
+    },
+    "fitur_4_pengeluaran_dompet_tabungan": {
+      "condition": "sumber_dana == 'ID_Dompet_Tabungan'",
+      "validation": "Jika nominal pengeluaran > saldo_terkumpul dompet, gagalkan transaksi dan kembalikan error 'Saldo dompet tidak cukup'.",
+      "action": "HANYA potong 'saldo_terkumpul' pada dompet tersebut. 'Saldo Utama' HARUS TETAP.",
+      "laba_rugi_impact": false,
+      "rule": "Belanja dari dompet ini adalah belanja aset/dana khusus. TIDAK BOLEH memotong Laba/Rugi operasional."
+    }
+  },
+  "strict_constraints": {
+    "atomic_transactions": true,
+    "transaction_safety_note": "Semua query mutasi (potong dan tambah saldo) harus dieksekusi secara atomic. Jika satu gagal, semua di-rollback.",
+    "clean_state_initialization": true,
+    "onboarding_rule": "Saat akun baru dibuat atau aplikasi dijalankan pertama kali, HAPUS secara permanen seluruh opsi data contoh (dummy data). Daftar dompet dan riwayat transaksi harus dimulai dalam keadaan kosong dan bersih."
+  }
+}

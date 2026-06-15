@@ -61,6 +61,11 @@ export type PenjualanDetail = {
   varian: PenjualanVarian[];
 };
 
+export type KategoriArusKas =
+  | 'pengeluaran_operasional'
+  | 'mutasi_ke_dompet'
+  | 'pengeluaran_dompet';
+
 export type Transaction = {
   id: string;
   tanggal: string;
@@ -68,7 +73,7 @@ export type Transaction = {
   keterangan: string;
   kategori: string;
   jenis: 'Pemasukan' | 'Pengeluaran';
-  type?: 'pemasukan' | 'pengeluaran'; // Alias for compatibility
+  type?: 'pemasukan' | 'pengeluaran';
   nominal: number;
   total_penjualan?: number;
   total_biaya?: number;
@@ -78,6 +83,9 @@ export type Transaction = {
   penjualan_detail?: PenjualanDetail[];
   stockSnapshot?: { ingredientId: string; stockBefore: number; delta: number }[];
   createdAt?: any;
+  // Dompet Tabungan fields
+  sumber_dana?: string;       // 'saldo_utama' | dompet_id
+  kategori_arus_kas?: KategoriArusKas;
 };
 
 export type KategoriSettings = {
@@ -99,4 +107,11 @@ export type StoreSettings = {
   showLogoInSidebar: boolean;
   receiptFooter?: string;
   onboardingCompleted?: boolean;
+};
+
+export type Dompet = {
+  id: string;
+  nama: string;
+  saldo_terkumpul: number;
+  createdAt?: any;
 };

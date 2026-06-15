@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
@@ -38,6 +38,7 @@ const MENU_GROUPS = [
       { id: 'roas', label: 'Kalkulator ROAS', icon: TrendingUp },
       { id: 'reports', label: 'Laporan Keuangan', icon: PieChart },
       { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
+      { id: 'dompet', label: 'Dompet Tabungan', icon: Wallet },
     ]
   },
   {

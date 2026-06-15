@@ -5,9 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X, Wallet, PiggyBank } from 'lucide-react';
 import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
-import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee } from '../types';
+import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee, Dompet, KategoriArusKas } from '../types';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -57,6 +57,8 @@ interface TransactionManagerProps {
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
   onSuccess?: () => void;
+  dompets?: Dompet[];
+  setDompets?: React.Dispatch<React.SetStateAction<Dompet[]>>;
 }
 
 const CATEGORIES = [
@@ -71,7 +73,7 @@ const CATEGORIES = [
   { name: 'Lainnya', type: 'Pengeluaran', fixed: false },
 ];
 
-export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess }: TransactionManagerProps) {
+export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess, dompets = [], setDompets }: TransactionManagerProps) {
   const { settings } = useSettings();
   const dateInputRef = React.useRef<HTMLInputElement>(null);
   const processingTxRef = React.useRef<Set<string>>(new Set());
@@ -132,6 +134,9 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   const [selectedTxIds, setSelectedTxIds] = React.useState<string[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = React.useState<string>('');
+  // Dompet Tabungan state
+  const [selectedDompetId, setSelectedDompetId] = React.useState<string>('');   // target dompet saat kategori=Tabungan
+  const [selectedSumberDana, setSelectedSumberDana] = React.useState<string>('saldo_utama'); // sumber saat jenis=Pengeluaran
   
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -174,6 +179,8 @@ export default function TransactionManager({ user, transactions, setTransactions
     setNewTx(EMPTY_TX);
     setSelectedMaterialId('');
     setIsRange(false);
+    setSelectedDompetId('');
+    setSelectedSumberDana('saldo_utama');
   };
 
   const saveQuickBatch = async (list: QuickEntryFields[]): Promise<{ saved: number; failed: number }> => {
@@ -267,7 +274,7 @@ export default function TransactionManager({ user, transactions, setTransactions
   }, [newTx.penjualan_detail]);
 
   // Helper to process and save a single transaction (used by manual form and import)
-  const processAndSaveTransaction = async (txData: any) => {
+  const processAndSaveTransaction = async (txData: any, dompetOp?: { id: string; delta: number }) => {
     if (!user) return;
     
     // Identify affected ingredients and calculate snapshot
@@ -456,6 +463,12 @@ export default function TransactionManager({ user, transactions, setTransactions
         currentStock: increment(update.delta)
       });
     });
+    // Dompet atomic update (mutasi masuk / pengeluaran keluar)
+    if (dompetOp) {
+      batch.update(doc(db, `users/${user.uid}/dompet/${dompetOp.id}`), {
+        saldo_terkumpul: increment(dompetOp.delta)
+      });
+    }
 
     await batch.commit();
     return txToSave;
@@ -990,7 +1003,40 @@ export default function TransactionManager({ user, transactions, setTransactions
     setIsSaving(true);
     
     try {
-      await processAndSaveTransaction(newTx);
+      // Compute dompet operation
+      let dompetOp: { id: string; delta: number } | undefined;
+      let kategoriArusKas: KategoriArusKas | undefined;
+
+      if (newTx.jenis === 'Pengeluaran') {
+        if (newTx.kategori === 'Tabungan' && selectedDompetId) {
+          kategoriArusKas = 'mutasi_ke_dompet';
+          dompetOp = { id: selectedDompetId, delta: newTx.nominal || 0 };
+        } else if (selectedSumberDana && selectedSumberDana !== 'saldo_utama') {
+          const dompet = dompets.find(d => d.id === selectedSumberDana);
+          if (!dompet || dompet.saldo_terkumpul < (newTx.nominal || 0)) {
+            toast.error(`Saldo dompet "${dompet?.nama || 'yang dipilih'}" tidak cukup (tersedia: ${formatCurrency(dompet?.saldo_terkumpul || 0, true)})`);
+            setIsSaving(false);
+            isUpdatingRef.current = false;
+            return;
+          }
+          kategoriArusKas = 'pengeluaran_dompet';
+          dompetOp = { id: selectedSumberDana, delta: -(newTx.nominal || 0) };
+        } else {
+          kategoriArusKas = 'pengeluaran_operasional';
+        }
+      }
+
+      const enrichedTxData = {
+        ...newTx,
+        ...(kategoriArusKas ? { kategori_arus_kas: kategoriArusKas } : {}),
+        sumber_dana: (newTx.kategori === 'Tabungan' && selectedDompetId)
+          ? selectedDompetId
+          : selectedSumberDana !== 'saldo_utama'
+            ? selectedSumberDana
+            : undefined,
+      };
+
+      await processAndSaveTransaction(enrichedTxData, dompetOp);
       toast.success('Transaksi disimpan ✓');
       
       // Reset State & UI
@@ -998,6 +1044,8 @@ export default function TransactionManager({ user, transactions, setTransactions
       setSelectedMaterialId('');
       setSelectedTxIds([]);
       setIsRange(false);
+      setSelectedDompetId('');
+      setSelectedSumberDana('saldo_utama');
       if (onSuccess) onSuccess();
 
       // Refocus to date input
@@ -1022,7 +1070,19 @@ export default function TransactionManager({ user, transactions, setTransactions
       setIsDeleteConfirmOpen(true);
     } else {
       try {
-        await deleteDoc(doc(db, `users/${user.uid}/transaksi/${id}`));
+        const batch = writeBatch(db);
+        batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
+        // Reverse dompet balance jika transaksi dompet
+        if (tx?.kategori_arus_kas === 'mutasi_ke_dompet' && tx.sumber_dana) {
+          batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+            saldo_terkumpul: increment(-tx.nominal)
+          });
+        } else if (tx?.kategori_arus_kas === 'pengeluaran_dompet' && tx.sumber_dana) {
+          batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+            saldo_terkumpul: increment(tx.nominal)
+          });
+        }
+        await batch.commit();
         setTransactions(prev => prev.filter(t => t.id !== id));
         setSelectedTxIds(prev => prev.filter(selectedId => selectedId !== id));
         toast.success('Transaksi dihapus');
@@ -1049,6 +1109,17 @@ export default function TransactionManager({ user, transactions, setTransactions
           batch.update(doc(db, `users/${user.uid}/stok/${snap.ingredientId}`), {
             currentStock: snap.stockBefore
           });
+        });
+      }
+
+      // Reverse dompet balance jika transaksi dompet
+      if ((txSnapshot as any).kategori_arus_kas === 'mutasi_ke_dompet' && (txSnapshot as any).sumber_dana) {
+        batch.update(doc(db, `users/${user.uid}/dompet/${(txSnapshot as any).sumber_dana}`), {
+          saldo_terkumpul: increment(-txSnapshot.nominal)
+        });
+      } else if ((txSnapshot as any).kategori_arus_kas === 'pengeluaran_dompet' && (txSnapshot as any).sumber_dana) {
+        batch.update(doc(db, `users/${user.uid}/dompet/${(txSnapshot as any).sumber_dana}`), {
+          saldo_terkumpul: increment(txSnapshot.nominal)
         });
       }
 
@@ -1387,6 +1458,71 @@ export default function TransactionManager({ user, transactions, setTransactions
                 </Select>
               </div>
             </div>
+
+            {/* Sumber Dana — ketika jenis Pengeluaran bukan dari Tabungan/Penjualan */}
+            {newTx.jenis === 'Pengeluaran' &&
+              newTx.kategori !== 'Penjualan' &&
+              newTx.kategori !== 'Tabungan' &&
+              dompets.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
+                  <Wallet className="w-3 h-3" />
+                  Sumber Dana
+                </Label>
+                <Select
+                  value={selectedSumberDana}
+                  onValueChange={(v) => setSelectedSumberDana(v)}
+                >
+                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="saldo_utama">💰 Saldo Utama</SelectItem>
+                    {dompets.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        🏦 {d.nama} ({formatCurrency(d.saldo_terkumpul, true)})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedSumberDana !== 'saldo_utama' && (
+                  <p className="text-[10px] font-bold text-blue-600">
+                    Pengeluaran dari dompet tidak memengaruhi laporan P&L.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Dompet target — ketika kategori Tabungan */}
+            {newTx.kategori === 'Tabungan' && dompets.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
+                  <PiggyBank className="w-3 h-3" />
+                  Simpan ke Dompet
+                </Label>
+                <Select
+                  value={selectedDompetId}
+                  onValueChange={(v) => setSelectedDompetId(v)}
+                >
+                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
+                    <SelectValue placeholder="Pilih dompet target" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="">— Tabungan umum (tanpa dompet) —</SelectItem>
+                    {dompets.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.nama} · saldo {formatCurrency(d.saldo_terkumpul, true)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedDompetId && (
+                  <p className="text-[10px] font-bold text-green-600">
+                    ✓ Dana masuk ke dompet ini · tidak masuk hitungan P&L.
+                  </p>
+                )}
+              </div>
+            )}
 
             {newTx.kategori === 'Penjualan' && (
               <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">

@@ -158,19 +158,22 @@ export interface TransactionStats {
 }
 
 /**
- * Hitung statistik dari transaksi yang sudah terfilter.
- * Wajib dipanggil setelah filterByDateRange supaya angka konsisten.
- *
- * @param transactions Daftar transaksi (sebaiknya sudah terfilter range).
- * @param range Rentang tanggal yang dipakai (untuk debug log).
- * @param source Label sumber pemanggil ('Transaksi' / 'Laporan') untuk log.
+ * Transaksi yang DIEKSKLUSI dari P&L:
+ *  - mutasi_ke_dompet  : uang hanya pindah ke dompet tabungan, bukan pengeluaran nyata
+ *  - pengeluaran_dompet: belanja dari saldo dompet, tidak menyentuh saldo operasional
+ * Transaksi tanpa kategori_arus_kas (data lama) dianggap operasional.
  */
+const isOperational = (t: any): boolean => {
+  const kat = t?.kategori_arus_kas;
+  return !kat || kat === 'pengeluaran_operasional';
+};
+
 export const computeStats = (
   transactions: any[],
   range: { start: string; end: string },
   source: string = 'unknown'
 ): TransactionStats => {
-  const valid = transactions.filter(isValidTransaction);
+  const valid = transactions.filter(t => isValidTransaction(t) && isOperational(t));
   const totalPemasukan = valid
     .filter(isIncome)
     .reduce((acc, t) => acc + getTxNominal(t), 0);

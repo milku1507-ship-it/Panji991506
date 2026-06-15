@@ -1,0 +1,2 @@
+- [HPP-Stock sync integrity](hpp-stock-sync-integrity.md) — deleting HPP product must also clean up bahan references in stok collection to avoid orphan data.
+- [Dompet Tabungan architecture](dompet-tabungan-architecture.md) — wallet feature: separate Firestore collection, atomic batch updates, P&L exclusion via kategori_arus_kas field.

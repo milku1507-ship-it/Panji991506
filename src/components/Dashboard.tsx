@@ -4,9 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowUp, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowUp, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator, Calendar, PiggyBank } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
-import { Ingredient, Transaction, StoreSettings } from '../types';
+import { Ingredient, Transaction, StoreSettings, Dompet } from '../types';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { formatSmartUnit } from '../lib/unitUtils';
@@ -28,9 +28,10 @@ interface DashboardProps {
   setActiveTab: (tab: string) => void;
   onSeedData?: () => Promise<void>;
   onStartFresh?: () => Promise<void>;
+  dompets?: Dompet[];
 }
 
-export default function Dashboard({ user, ingredients, transactions, storeSettings, setActiveTab, onSeedData, onStartFresh }: DashboardProps) {
+export default function Dashboard({ user, ingredients, transactions, storeSettings, setActiveTab, onSeedData, onStartFresh, dompets = [] }: DashboardProps) {
   // Filter periode bersama (single source of truth) — sama persis dengan
   // halaman Transaksi & Laporan. Mengubah preset di sini ikut mengubah
   // angka di halaman lain.
@@ -57,6 +58,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
 
   const incomeCount = filteredTransactions.filter(isIncome).length;
   const expenseCount = filteredTransactions.filter(isExpense).length;
+  const totalTabungan = dompets.reduce((s, d) => s + (d.saldo_terkumpul || 0), 0);
 
   const lowStockItems = ingredients.filter(i => i.currentStock <= i.minStock);
 
@@ -132,7 +134,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
           </div>
 
           {/* Balance block — full width to avoid clipping for large numbers */}
-          <div className="mb-7">
+          <div className="mb-5">
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">
               Saldo Laba · {rangeLabel}
             </p>
@@ -141,10 +143,21 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
             </h3>
           </div>
 
+          {/* Tabungan mini badge */}
+          {totalTabungan > 0 && (
+            <button
+              onClick={() => setActiveTab('dompet')}
+              className="flex items-center gap-1.5 mb-5 px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors"
+            >
+              <PiggyBank className="w-3 h-3" />
+              Tabungan: {formatCurrency(totalTabungan, true)}
+            </button>
+          )}
+
           <div className="grid grid-cols-4 gap-2">
             <HeaderAction icon={ArrowUp} label="Tambah" onClick={() => setActiveTab('transactions')} />
             <HeaderAction icon={Package} label="Stok" onClick={() => setActiveTab('stock')} />
-            <HeaderAction icon={Calculator} label="HPP" onClick={() => setActiveTab('hpp')} />
+            <HeaderAction icon={PiggyBank} label="Tabungan" onClick={() => setActiveTab('dompet')} />
             <HeaderAction icon={History} label="Riwayat" onClick={() => setActiveTab('transactions')} />
           </div>
         </div>
