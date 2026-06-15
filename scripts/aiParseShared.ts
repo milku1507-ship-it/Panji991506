@@ -83,7 +83,7 @@ export const responseSchema = {
 };
 
 export async function runAIParse(body: any) {
-  const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
   if (!apiKey) {
     throw new Error('AI integration belum dikonfigurasi.');
