@@ -53,7 +53,20 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
 
   const totalRevenue = stats.totalPemasukan;
   const totalExpense = stats.totalPengeluaran;
-  const netProfit = stats.saldo;
+  const netProfit = stats.saldo; // Laba Operasional (tanpa tabungan)
+
+  // Uang yang disisihkan ke dompet tabungan dalam periode ini.
+  // Dikurangi dari Laba untuk menghasilkan Saldo Kas Aktual yang tersedia.
+  const totalMutasiTabunganPeriode = React.useMemo(
+    () => filteredTransactions
+      .filter(t => (t as any).kategori_arus_kas === 'mutasi_ke_dompet')
+      .reduce((s, t) => s + getTxNominal(t), 0),
+    [filteredTransactions]
+  );
+
+  // Saldo Kas = Laba Operasional - Uang yang sudah disisihkan ke tabungan
+  const saldoKas = netProfit - totalMutasiTabunganPeriode;
+
   const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
   const incomeCount = filteredTransactions.filter(isIncome).length;
@@ -136,11 +149,16 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
           {/* Balance block — full width to avoid clipping for large numbers */}
           <div className="mb-5">
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">
-              Saldo Laba · {rangeLabel}
+              Saldo Kas · {rangeLabel}
             </p>
             <h3 className="text-3xl sm:text-4xl font-black leading-tight break-words">
-              {formatCurrency(netProfit, true)}
+              {formatCurrency(saldoKas, true)}
             </h3>
+            {totalMutasiTabunganPeriode > 0 && (
+              <p className="text-[10px] opacity-60 mt-1">
+                Laba operasional {formatCurrency(netProfit, true)} · disisihkan {formatCurrency(totalMutasiTabunganPeriode, true)}
+              </p>
+            )}
           </div>
 
           {/* Tabungan mini badge */}
