@@ -407,7 +407,10 @@ export default function TransactionManager({ user, transactions, setTransactions
       qty_total: txData.qty_total || 0,
       qty_beli: txData.qty_beli || 0,
       createdAt: serverTimestamp(),
-      stockSnapshot: snapshot.length > 0 ? snapshot : null
+      stockSnapshot: snapshot.length > 0 ? snapshot : null,
+      // Dompet fields — wajib disimpan agar reversal saat delete bisa berjalan
+      ...(txData.kategori_arus_kas ? { kategori_arus_kas: txData.kategori_arus_kas } : {}),
+      ...(txData.sumber_dana ? { sumber_dana: txData.sumber_dana } : {}),
     };
 
     if (txData.kategori === 'Penjualan' && txData.penjualan_detail) {
@@ -1182,6 +1185,18 @@ export default function TransactionManager({ user, transactions, setTransactions
         idsToDelete.forEach(id => {
           batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
         });
+        // Reverse dompet balances untuk setiap transaksi dompet dalam batch
+        selectedTxs.forEach(tx => {
+          if (tx.kategori_arus_kas === 'mutasi_ke_dompet' && tx.sumber_dana) {
+            batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+              saldo_terkumpul: increment(-tx.nominal)
+            });
+          } else if (tx.kategori_arus_kas === 'pengeluaran_dompet' && tx.sumber_dana) {
+            batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+              saldo_terkumpul: increment(tx.nominal)
+            });
+          }
+        });
         await batch.commit();
         setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
         setSelectedTxIds([]);
@@ -1221,6 +1236,19 @@ export default function TransactionManager({ user, transactions, setTransactions
           }
         });
       }
+
+      // Reverse dompet balances untuk setiap transaksi dompet dalam batch
+      selectedTxs.forEach(tx => {
+        if ((tx as any).kategori_arus_kas === 'mutasi_ke_dompet' && (tx as any).sumber_dana) {
+          batch.update(doc(db, `users/${user.uid}/dompet/${(tx as any).sumber_dana}`), {
+            saldo_terkumpul: increment(-tx.nominal)
+          });
+        } else if ((tx as any).kategori_arus_kas === 'pengeluaran_dompet' && (tx as any).sumber_dana) {
+          batch.update(doc(db, `users/${user.uid}/dompet/${(tx as any).sumber_dana}`), {
+            saldo_terkumpul: increment(tx.nominal)
+          });
+        }
+      });
 
       await batch.commit();
 
