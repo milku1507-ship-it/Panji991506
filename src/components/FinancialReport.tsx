@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
-import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox, ShoppingBag } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox, ShoppingBag, Wallet, PiggyBank } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { Transaction, Product, Variant, HppMaterial } from '../types';
+import { Transaction, Product, Variant, HppMaterial, Dompet } from '../types';
 import { CATEGORIES_LIST } from '../constants/data';
 import { cn } from '@/lib/utils';
 import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
@@ -23,9 +23,10 @@ import { useDateFilter } from '../lib/dateFilterContext';
 interface FinancialReportProps {
   transactions: Transaction[];
   products: Product[];
+  dompets?: Dompet[];
 }
 
-export default function FinancialReport({ transactions, products }: FinancialReportProps) {
+export default function FinancialReport({ transactions, products, dompets = [] }: FinancialReportProps) {
   const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
@@ -58,6 +59,16 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const totalExpense = stats.totalPengeluaran;
   const netProfit = stats.saldo;
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
+
+  // Alokasi kas: tabungan yang disisihkan dalam periode ini
+  const totalMutasiTabunganPeriode = React.useMemo(
+    () => filteredTransactions
+      .filter(t => (t as any).kategori_arus_kas === 'mutasi_ke_dompet')
+      .reduce((s, t) => s + getTxNominal(t), 0),
+    [filteredTransactions]
+  );
+  const saldoKasAktif = netProfit - totalMutasiTabunganPeriode;
+  const totalTabunganSemua = dompets.reduce((s, d) => s + (d.saldo_terkumpul || 0), 0);
 
   // Hanya transaksi operasional (bukan mutasi tabungan) yang masuk laporan
   const operationalTransactions = filteredTransactions.filter(isOperational);
@@ -380,6 +391,40 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           <p className="text-[10px] font-bold mt-2">Margin Keuntungan: {margin.toFixed(1)}%</p>
         </Card>
       </div>
+
+      {/* Alokasi Kas — hanya tampil jika ada tabungan */}
+      {(totalMutasiTabunganPeriode > 0 || totalTabunganSemua > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2.5 rounded-2xl bg-brand-50 text-primary">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <Badge className="bg-brand-50 text-primary border-none font-black text-[10px]">Aktif</Badge>
+            </div>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Kas Aktif</p>
+            <h3 className={cn(
+              "text-xl font-black mt-1",
+              saldoKasAktif >= 0 ? "text-[#1A1A2E]" : "text-red-500"
+            )}>{formatCurrency(saldoKasAktif, true)}</h3>
+            {totalMutasiTabunganPeriode > 0 && (
+              <p className="text-[10px] text-gray-400 mt-1">Disisihkan: {formatCurrency(totalMutasiTabunganPeriode, true)}</p>
+            )}
+          </Card>
+
+          <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2.5 rounded-2xl bg-amber-50 text-amber-500">
+                <PiggyBank className="w-5 h-5" />
+              </div>
+              <Badge className="bg-amber-50 text-amber-600 border-none font-black text-[10px]">Tabungan</Badge>
+            </div>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Tabungan</p>
+            <h3 className="text-xl font-black text-[#1A1A2E] mt-1">{formatCurrency(totalTabunganSemua, true)}</h3>
+            <p className="text-[10px] text-gray-400 mt-1">Saldo terkumpul seluruh dompet</p>
+          </Card>
+        </div>
+      )}
 
       {/* Sales Profit Summary */}
       {productPerformance.length > 0 && (() => {

@@ -154,11 +154,6 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
             <h3 className="text-3xl sm:text-4xl font-black leading-tight break-words">
               {formatCurrency(saldoKas, true)}
             </h3>
-            {totalMutasiTabunganPeriode > 0 && (
-              <p className="text-[10px] opacity-60 mt-1">
-                Laba operasional {formatCurrency(netProfit, true)} · disisihkan {formatCurrency(totalMutasiTabunganPeriode, true)}
-              </p>
-            )}
           </div>
 
           {/* Tabungan mini badge */}

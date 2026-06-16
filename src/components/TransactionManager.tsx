@@ -801,6 +801,15 @@ export default function TransactionManager({ user, transactions, setTransactions
   const totalExpense = stats.totalPengeluaran;
   const balance = stats.saldo;
 
+  // Saldo Kas = Laba Operasional - uang yang disisihkan ke tabungan dalam periode
+  const totalMutasiTabunganPeriode = React.useMemo(
+    () => periodTransactions
+      .filter(t => (t as any).kategori_arus_kas === 'mutasi_ke_dompet')
+      .reduce((s, t) => s + getTxNominal(t), 0),
+    [periodTransactions]
+  );
+  const saldoKas = balance - totalMutasiTabunganPeriode;
+
   // Riwayat transaksi yang ditampilkan: filter periode + search + type.
   const filteredTransactions = React.useMemo(
     () =>
@@ -1363,8 +1372,8 @@ export default function TransactionManager({ user, transactions, setTransactions
             <CreditCard className="w-6 h-6 md:w-7 md:h-7" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total Saldo · {rangeLabel}</p>
-            <h3 className="text-2xl md:text-4xl font-black truncate">{formatCurrency(balance, true)}</h3>
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo Kas · {rangeLabel}</p>
+            <h3 className="text-2xl md:text-4xl font-black truncate">{formatCurrency(saldoKas, true)}</h3>
           </div>
         </div>
         <div className="flex gap-3 md:gap-4 w-full md:w-auto">
