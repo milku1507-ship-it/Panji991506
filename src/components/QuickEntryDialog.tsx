@@ -2,9 +2,9 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Product, Ingredient } from '../types';
+import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 
 export type QuickEntryFields = {
@@ -17,6 +17,7 @@ export type QuickEntryFields = {
   qty_beli: number;
   qty_total: number;
   materialId?: string;
+  sumber_dana?: string;
   penjualan_detail?: {
     produk_id: string;
     produk_nama: string;
@@ -31,6 +32,7 @@ interface Props {
   ingredients: Ingredient[];
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[];
   hppCategories: string[];
+  dompets?: Dompet[];
   onSaveBatch: (list: QuickEntryFields[]) => Promise<{ saved: number; failed: number }>;
 }
 
@@ -926,11 +928,13 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, onSaveBatch }: Props) {
+export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, dompets = [], onSaveBatch }: Props) {
   const [input, setInput] = React.useState('');
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [step, setStep] = React.useState<'input' | 'preview'>('input');
+  const [showSumberDana, setShowSumberDana] = React.useState(false);
+  const [selectedSumberDana, setSelectedSumberDana] = React.useState('saldo_utama');
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -938,6 +942,8 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       setInput('');
       setEntries([]);
       setStep('input');
+      setShowSumberDana(false);
+      setSelectedSumberDana('saldo_utama');
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [open]);
@@ -960,11 +966,19 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     setEntries(prev => prev.map((e, i) => i === idx ? { ...e, parsed: updated } : e));
   };
 
-  const handleSave = async () => {
+  // Step 1 — intercept Simpan: show sumber dana picker, don't write yet
+  const handleSave = () => {
     if (entries.length === 0) return;
+    setSelectedSumberDana('saldo_utama');
+    setShowSumberDana(true);
+  };
+
+  // Step 2 — confirmed: enrich entries with chosen sumber_dana then persist
+  const handleConfirmSave = async () => {
     setSaving(true);
+    setShowSumberDana(false);
     try {
-      await onSaveBatch(entries.map(e => e.parsed));
+      await onSaveBatch(entries.map(e => ({ ...e.parsed, sumber_dana: selectedSumberDana })));
       onOpenChange(false);
     } finally {
       setSaving(false);
@@ -1080,6 +1094,103 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
                 : <><CheckCircle2 className="w-4 h-4" /> Simpan {entries.length} Transaksi</>
               }
             </Button>
+          </div>
+        )}
+
+        {/* ── Sumber Dana Bottom Sheet ── */}
+        {showSumberDana && (
+          <div className="absolute inset-0 z-50 flex flex-col justify-end rounded-[2rem] overflow-hidden">
+            {/* backdrop */}
+            <div
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              onClick={() => setShowSumberDana(false)}
+            />
+            {/* sheet */}
+            <div className="relative bg-white rounded-t-[2rem] px-6 pt-6 pb-8 space-y-5 shadow-2xl">
+              {/* handle bar */}
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto -mt-1 mb-1" />
+
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-brand-50 flex items-center justify-center text-primary shrink-0">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-black text-[#1A1A2E] text-sm">Pilih Sumber Dana</p>
+                  <p className="text-[11px] text-gray-400">untuk {entries.length} transaksi ini</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {/* Saldo Utama option */}
+                <button
+                  onClick={() => setSelectedSumberDana('saldo_utama')}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all text-left',
+                    selectedSumberDana === 'saldo_utama'
+                      ? 'border-primary bg-brand-50'
+                      : 'border-gray-100 bg-gray-50 hover:border-gray-200'
+                  )}
+                >
+                  <Wallet className={cn('w-4 h-4 shrink-0', selectedSumberDana === 'saldo_utama' ? 'text-primary' : 'text-gray-400')} />
+                  <div className="flex-1 min-w-0">
+                    <p className={cn('text-sm font-black', selectedSumberDana === 'saldo_utama' ? 'text-primary' : 'text-gray-700')}>
+                      💰 Saldo Utama
+                    </p>
+                    <p className="text-[10px] text-gray-400">Kas utama & Laba ikut berkurang</p>
+                  </div>
+                  {selectedSumberDana === 'saldo_utama' && (
+                    <Check className="w-4 h-4 text-primary shrink-0" />
+                  )}
+                </button>
+
+                {/* Dompet Tabungan options */}
+                {dompets.map(d => (
+                  <button
+                    key={d.id}
+                    onClick={() => setSelectedSumberDana(d.id)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all text-left',
+                      selectedSumberDana === d.id
+                        ? 'border-amber-400 bg-amber-50'
+                        : 'border-gray-100 bg-gray-50 hover:border-amber-200'
+                    )}
+                  >
+                    <PiggyBank className={cn('w-4 h-4 shrink-0', selectedSumberDana === d.id ? 'text-amber-500' : 'text-gray-400')} />
+                    <div className="flex-1 min-w-0">
+                      <p className={cn('text-sm font-black', selectedSumberDana === d.id ? 'text-amber-700' : 'text-gray-700')}>
+                        🏦 {d.nama}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        Saldo: {formatCurrency(d.saldo_terkumpul || 0, true)} · Kas utama tidak berkurang
+                      </p>
+                    </div>
+                    {selectedSumberDana === d.id && (
+                      <Check className="w-4 h-4 text-amber-500 shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSumberDana(false)}
+                  className="flex-1 rounded-2xl font-bold h-11 border-gray-200"
+                >
+                  Batal
+                </Button>
+                <Button
+                  onClick={handleConfirmSave}
+                  disabled={saving}
+                  className="flex-[2] rounded-2xl font-bold h-11 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none gap-2"
+                >
+                  {saving
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</>
+                    : <><CheckCircle2 className="w-4 h-4" /> Konfirmasi & Simpan</>
+                  }
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </DialogContent>

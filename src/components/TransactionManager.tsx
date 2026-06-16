@@ -252,7 +252,27 @@ export default function TransactionManager({ user, transactions, setTransactions
           txData.qty_beli = 0; // qty_beli selalu 0 untuk Penjualan, sama dengan form manual
         }
 
-        await processAndSaveTransaction(txData);
+        // Handle sumber_dana — jika dipilih dompet, set kategori_arus_kas & update saldo dompet atomik
+        let dompetOp: { id: string; delta: number } | undefined = undefined;
+        const sumberDana = (fields as any).sumber_dana;
+        if (sumberDana && sumberDana !== 'saldo_utama') {
+          const dompet = dompets.find(d => d.id === sumberDana);
+          if (!dompet) {
+            toast.error('Dompet tidak ditemukan, transaksi dilewati');
+            failed++;
+            continue;
+          }
+          if ((dompet.saldo_terkumpul || 0) < txData.nominal) {
+            toast.error(`Saldo dompet "${dompet.nama}" tidak cukup (tersedia: ${formatCurrency(dompet.saldo_terkumpul || 0, true)})`);
+            failed++;
+            continue;
+          }
+          txData.sumber_dana = sumberDana;
+          txData.kategori_arus_kas = 'pengeluaran_dompet';
+          dompetOp = { id: sumberDana, delta: -txData.nominal };
+        }
+
+        await processAndSaveTransaction(txData, dompetOp);
         saved++;
       } catch (err) {
         console.error('[quick-entry] failed to save', err);
@@ -2022,6 +2042,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         ingredients={ingredients}
         categories={dynamicCategories}
         hppCategories={settings?.kategori_hpp || []}
+        dompets={dompets}
         onSaveBatch={saveQuickBatch}
       />
     </div>
