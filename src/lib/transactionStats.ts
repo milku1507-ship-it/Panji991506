@@ -163,7 +163,7 @@ export interface TransactionStats {
  *  - pengeluaran_dompet: belanja dari saldo dompet, tidak menyentuh saldo operasional
  * Transaksi tanpa kategori_arus_kas (data lama) dianggap operasional.
  */
-const isOperational = (t: any): boolean => {
+export const isOperational = (t: any): boolean => {
   const kat = t?.kategori_arus_kas;
   return !kat || kat === 'pengeluaran_operasional';
 };

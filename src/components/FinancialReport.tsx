@@ -16,6 +16,7 @@ import {
   RangePreset,
   filterByDateRange,
   computeStats,
+  isOperational,
 } from '../lib/transactionStats';
 import { useDateFilter } from '../lib/dateFilterContext';
 
@@ -58,8 +59,11 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const netProfit = stats.saldo;
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
+  // Hanya transaksi operasional (bukan mutasi tabungan) yang masuk laporan
+  const operationalTransactions = filteredTransactions.filter(isOperational);
+
   // Category breakdown for Pie Chart
-  const categoryData = filteredTransactions.reduce((acc: any[], t) => {
+  const categoryData = operationalTransactions.reduce((acc: any[], t) => {
     const amount = getTxNominal(t);
     if (amount <= 0) return acc;
 
@@ -79,7 +83,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const expenseCategories = categoryData.filter(c => c.jenis === 'Pengeluaran');
 
   // Grouped expenses for the table
-  const expenseTableData = filteredTransactions
+  const expenseTableData = operationalTransactions
     .filter(isExpense)
     .reduce((acc: { name: string; total: number; count: number }[], t) => {
       const amount = getTxNominal(t);
