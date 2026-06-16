@@ -803,7 +803,11 @@ export default function TransactionManager({ user, transactions, setTransactions
     () =>
       periodTransactions
         .filter(t => {
-          const matchesSearch = (t.keterangan || '').toLowerCase().includes(searchTerm.toLowerCase());
+          const q = searchTerm.toLowerCase();
+          const matchesSearch = !q ||
+            (t.keterangan || '').toLowerCase().includes(q) ||
+            (t.kategori || '').toLowerCase().includes(q) ||
+            (t.jenis || '').toLowerCase().includes(q);
           const matchesType = typeFilter === 'Semua' || t.jenis === typeFilter;
           return matchesSearch && matchesType;
         })
