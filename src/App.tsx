@@ -161,7 +161,9 @@ function AppContent() {
 
     // Sync Ingredients
     const unsubIngredients = onSnapshot(collection(db, `users/${uid}/stok`), (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Ingredient);
+      // Always include doc.id so ingredient.id === Firestore document ID,
+      // even if the document data was written without an explicit 'id' field.
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Ingredient));
       setIngredients(data);
       setIsCloudSyncing(false);
     }, (error) => {
@@ -171,7 +173,7 @@ function AppContent() {
 
     // Sync Products
     const unsubProducts = onSnapshot(collection(db, `users/${uid}/hpp`), (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Product);
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
       setProducts(data);
     }, (error) => {
       console.error('Products sync error:', error);
@@ -179,7 +181,7 @@ function AppContent() {
 
     // Sync Dompets
     const unsubDompets = onSnapshot(collection(db, `users/${uid}/dompet`), (snapshot) => {
-      const data = snapshot.docs.map(d => d.data() as Dompet);
+      const data = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Dompet));
       setDompets(data.sort((a, b) => {
         const aMs = a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0;
         const bMs = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0;
@@ -191,7 +193,7 @@ function AppContent() {
 
     // Sync Transactions
     const unsubTransactions = onSnapshot(collection(db, `users/${uid}/transaksi`), (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Transaction);
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Transaction));
       // Sort by date descending — handle ISO strings, Firestore Timestamps, and plain objects
       const safeMs = (raw: any): number => {
         if (!raw) return 0;

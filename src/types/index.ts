@@ -80,6 +80,7 @@ export type Transaction = {
   laba?: number;
   qty_total: number;
   qty_beli: number;
+  materialId?: string;
   penjualan_detail?: PenjualanDetail[];
   stockSnapshot?: { ingredientId: string; stockBefore: number; delta: number }[];
   createdAt?: any;

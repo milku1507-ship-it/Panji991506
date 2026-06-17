@@ -1064,6 +1064,7 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       const enrichedTxData = {
         ...newTx,
+        ...(selectedMaterialId ? { materialId: selectedMaterialId } : {}),
         ...(kategoriArusKas ? { kategori_arus_kas: kategoriArusKas } : {}),
         sumber_dana: (newTx.kategori === 'Tabungan' && selectedDompetId)
           ? selectedDompetId
@@ -1911,8 +1912,13 @@ export default function TransactionManager({ user, transactions, setTransactions
                         <p className="text-[10px] font-bold text-gray-400 mt-1">
                           Ref: {(() => {
                             const snapshot = t.stockSnapshot?.[0];
-                            const ingredient = snapshot ? ingredients.find(i => i.id === snapshot.ingredientId) : ingredients.find(i => i.name === t.keterangan.replace('Beli ', ''));
-                            return formatSmartUnit(t.qty_beli, ingredient?.unit || 'gram');
+                            // Priority: stockSnapshot → saved materialId → name fallback
+                            const ingredient = snapshot
+                              ? ingredients.find(i => i.id === snapshot.ingredientId)
+                              : t.materialId
+                                ? ingredients.find(i => i.id === t.materialId)
+                                : ingredients.find(i => i.name === t.keterangan.replace('Beli ', ''));
+                            return formatSmartUnit(t.qty_beli, ingredient?.unit || 'pcs');
                           })()}
                         </p>
                       )}
