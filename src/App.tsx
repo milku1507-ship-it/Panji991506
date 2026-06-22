@@ -10,6 +10,7 @@ import StoreSettingsManager from './components/StoreSettingsManager';
 import CategoryManager from './components/CategoryManager';
 import DompetManager from './components/DompetManager';
 import Kasir from './components/Kasir';
+import StoreCatalog from './components/StoreCatalog';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
 import { Ingredient, Product, Transaction, StoreSettings, Dompet } from './types';
 import { Toaster } from '@/components/ui/sonner';
@@ -26,6 +27,12 @@ import { BackStackProvider, useBackHandler } from './lib/backStack';
 import { DateFilterProvider } from './lib/dateFilterContext';
 
 export default function App() {
+  // Public store catalog route: ?store=USER_ID
+  const storeUserId = new URLSearchParams(window.location.search).get('store');
+  if (storeUserId) {
+    return <StoreCatalog userId={storeUserId} />;
+  }
+
   return (
     <SettingsProvider>
       <BackStackProvider>

@@ -2,7 +2,9 @@ import React from 'react';
 import {
   Search, ShoppingCart, Plus, Minus, Trash2, X, Printer,
   Tag, CreditCard, Banknote, CheckCircle2, Package, ChevronRight,
-  RotateCcw, Receipt
+  RotateCcw, Receipt, Share2, MessageCircle, QrCode, Zap,
+  Smartphone, Wifi, AlertCircle, Filter, ScanLine, User,
+  ExternalLink, Copy, Hash, FileText, ArrowRight, Store
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,8 +13,9 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'motion/react';
 import { Product, Ingredient, StoreSettings } from '../types';
-import { User, db, doc, writeBatch, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
+import { User as FirebaseUser, db, doc, writeBatch, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
 
+// ─── Types ───────────────────────────────────────────────────────────────────
 type CartItem = {
   productId: string;
   productName: string;
@@ -23,11 +26,12 @@ type CartItem = {
 };
 
 type DiscountMode = 'flat' | 'persen';
-type PaymentMethod = 'tunai' | 'nontunai';
+type PaymentMethod = 'tunai' | 'nontunai' | 'qris' | 'transfer';
 type Step = 'order' | 'checkout' | 'receipt';
 
 type ReceiptData = {
   txId: string;
+  queueNumber: number;
   tanggal: string;
   jam: string;
   items: CartItem[];
@@ -41,10 +45,13 @@ type ReceiptData = {
   paymentMethod: PaymentMethod;
   cashPaid: number;
   kembalian: number;
+  customerName: string;
+  customerPhone: string;
+  catatan: string;
 };
 
 interface KasirProps {
-  user: User;
+  user: FirebaseUser;
   products: Product[];
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
@@ -52,6 +59,7 @@ interface KasirProps {
   onNavigate?: (tab: string) => void;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function formatRp(n: number) {
   return 'Rp' + Math.round(n).toLocaleString('id-ID');
 }
@@ -60,20 +68,108 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
+  { value: 'tunai', label: 'Tunai', icon: Banknote, color: 'text-green-600' },
+  { value: 'qris', label: 'QRIS', icon: QrCode, color: 'text-purple-600' },
+  { value: 'transfer', label: 'Transfer', icon: Smartphone, color: 'text-blue-600' },
+  { value: 'nontunai', label: 'EDC/Kartu', icon: CreditCard, color: 'text-orange-600' },
+];
+
+// ─── Queue number session counter ─────────────────────────────────────────────
+let sessionQueueCounter = 0;
+function nextQueueNumber() {
+  sessionQueueCounter += 1;
+  return sessionQueueCounter;
+}
+
+// ─── Barcode scanner detector ─────────────────────────────────────────────────
+function useBarcodeScanner(onScan: (code: string) => void) {
+  const bufferRef = React.useRef<string>('');
+  const lastKeyTimeRef = React.useRef<number>(0);
+
+  React.useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const now = Date.now();
+      const delta = now - lastKeyTimeRef.current;
+      lastKeyTimeRef.current = now;
+
+      // If gap > 80ms reset buffer (human typing is slow)
+      if (delta > 80) bufferRef.current = '';
+
+      if (e.key === 'Enter') {
+        const code = bufferRef.current.trim();
+        bufferRef.current = '';
+        if (code.length >= 4) onScan(code);
+      } else if (e.key.length === 1) {
+        bufferRef.current += e.key;
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onScan]);
+}
+
+// ─── Cash drawer trigger ──────────────────────────────────────────────────────
+async function triggerCashDrawer() {
+  try {
+    // ESC/POS: DLE EOT 2 — works on most thermal printers with drawer
+    const escPosDrawerCommand = new Uint8Array([0x10, 0x14, 0x00, 0x01, 0x00]);
+
+    if ('usb' in navigator) {
+      // Try Web USB first
+      const devices = await (navigator as any).usb.getDevices();
+      if (devices.length > 0) {
+        const device = devices[0];
+        await device.open();
+        if (device.configuration === null) await device.selectConfiguration(1);
+        await device.claimInterface(0);
+        await device.transferOut(1, escPosDrawerCommand);
+        await device.close();
+        toast.success('Cash drawer dibuka');
+        return;
+      }
+    }
+
+    if ('bluetooth' in navigator) {
+      // Bluetooth thermal printer attempt
+      toast.info('Buka pengaturan printer Bluetooth untuk cash drawer');
+      return;
+    }
+
+    toast.info('Cash drawer tidak terdeteksi. Buka manual.');
+  } catch {
+    toast.info('Tidak ada perangkat USB terdeteksi. Buka cash drawer manual.');
+  }
+}
+
+// ─── Share store link ─────────────────────────────────────────────────────────
+function getStoreCatalogUrl(userId: string) {
+  const origin = window.location.origin + window.location.pathname;
+  return `${origin}?store=${userId}`;
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Kasir({ user, products, ingredients, setIngredients, storeSettings, onNavigate }: KasirProps) {
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [activeCategory, setActiveCategory] = React.useState<string>('Semua');
   const [cart, setCart] = React.useState<CartItem[]>([]);
   const [step, setStep] = React.useState<Step>('order');
   const [showCartMobile, setShowCartMobile] = React.useState(false);
+  const [showStoreLink, setShowStoreLink] = React.useState(false);
   const [discountMode, setDiscountMode] = React.useState<DiscountMode>('flat');
   const [discountValue, setDiscountValue] = React.useState(0);
   const [taxPct, setTaxPct] = React.useState(0);
   const [paymentMethod, setPaymentMethod] = React.useState<PaymentMethod>('tunai');
   const [cashPaid, setCashPaid] = React.useState(0);
+  const [customerName, setCustomerName] = React.useState('');
+  const [customerPhone, setCustomerPhone] = React.useState('');
+  const [catatan, setCatatan] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [receipt, setReceipt] = React.useState<ReceiptData | null>(null);
   const cashInputRef = React.useRef<HTMLInputElement>(null);
+  const searchRef = React.useRef<HTMLInputElement>(null);
 
+  // Print style injection
   React.useEffect(() => {
     const style = document.createElement('style');
     style.id = 'kasir-print-style';
@@ -82,20 +178,54 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         body > * { display: none !important; }
         #kasir-receipt-print { display: block !important; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 9999; padding: 16px; box-sizing: border-box; }
         #kasir-receipt-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        #kasir-barcode-labels { display: block !important; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 9999; padding: 8px; box-sizing: border-box; }
       }
     `;
     document.head.appendChild(style);
     return () => { document.getElementById('kasir-print-style')?.remove(); };
   }, []);
 
+  // Category list derived from products
+  const categories = React.useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach(p => {
+      if (p.varian?.some(v => v.harga_jual > 0)) {
+        const cat = (p as any).kategori || 'Umum';
+        cats.add(cat);
+      }
+    });
+    return ['Semua', ...Array.from(cats).sort()];
+  }, [products]);
+
+  // Filtered product list
   const visibleProducts = React.useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return products.filter(p =>
-      p.varian.some(v => v.harga_jual > 0) &&
-      (q === '' || p.nama.toLowerCase().includes(q) || p.varian.some(v => v.nama.toLowerCase().includes(q)))
-    );
-  }, [products, searchQuery]);
+    return products.filter(p => {
+      if (!p.varian.some(v => v.harga_jual > 0)) return false;
+      const matchCat = activeCategory === 'Semua' || (p as any).kategori === activeCategory || (!((p as any).kategori) && activeCategory === 'Umum');
+      const matchSearch = q === '' || p.nama.toLowerCase().includes(q) || p.varian.some(v => v.nama.toLowerCase().includes(q) || (v.sku || '').toLowerCase().includes(q));
+      return matchCat && matchSearch;
+    });
+  }, [products, searchQuery, activeCategory]);
 
+  // Barcode scanner handler
+  const handleBarcodeScan = React.useCallback((code: string) => {
+    const matched = products.find(p => p.sku === code || p.varian.some(v => v.sku === code));
+    if (!matched) {
+      setSearchQuery(code);
+      toast.info(`Barcode "${code}" — cari produk`);
+      return;
+    }
+    const variant = matched.varian.find(v => v.sku === code) || matched.varian.find(v => v.harga_jual > 0);
+    if (variant) {
+      addToCart(matched, variant);
+      toast.success(`${matched.nama} ditambahkan ke keranjang`);
+    }
+  }, [products]);
+
+  useBarcodeScanner(handleBarcodeScan);
+
+  // Cart calculations
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const subtotal = cart.reduce((s, i) => s + i.hargaJual * i.qty, 0);
   const discountAmount = discountMode === 'flat'
@@ -132,6 +262,9 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
     setDiscountValue(0);
     setTaxPct(0);
     setCashPaid(0);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCatatan('');
     setStep('order');
     setShowCartMobile(false);
   };
@@ -203,6 +336,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
       });
 
       const txId = Math.random().toString(36).substr(2, 9);
+      const queueNumber = nextQueueNumber();
       const now = new Date();
       const today = now.toISOString().split('T')[0];
       const qtyTotal = cart.reduce((s, i) => s + i.qty, 0);
@@ -214,7 +348,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         id: txId,
         userId: user.uid,
         tanggal: today,
-        keterangan: `Kasir: ${names}`,
+        keterangan: `Kasir: ${names}${customerName ? ` — ${customerName}` : ''}`,
         kategori: 'Penjualan',
         jenis: 'Pemasukan',
         type: 'pemasukan',
@@ -231,6 +365,10 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         qty_total: qtyTotal,
         qty_beli: 0,
         payment_method: paymentMethod,
+        queue_number: queueNumber,
+        customer_name: customerName || null,
+        customer_phone: customerPhone || null,
+        catatan: catatan || null,
         ...(paymentMethod === 'tunai' ? { cash_paid: cashPaid, kembalian } : {}),
         createdAt: serverTimestamp(),
         stockSnapshot: snapshotArr.length > 0 ? snapshotArr : null,
@@ -252,13 +390,21 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
       await batch.commit();
 
       const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      setReceipt({ txId, tanggal: today, jam, items: [...cart], subtotal, discountAmount, discountMode, discountValue, taxAmount, taxPct, nominal: total, paymentMethod, cashPaid, kembalian });
+      setReceipt({ txId, queueNumber, tanggal: today, jam, items: [...cart], subtotal, discountAmount, discountMode, discountValue, taxAmount, taxPct, nominal: total, paymentMethod, cashPaid, kembalian, customerName, customerPhone, catatan });
       setCart([]);
       setDiscountValue(0);
       setTaxPct(0);
       setCashPaid(0);
+      setCustomerName('');
+      setCustomerPhone('');
+      setCatatan('');
       setStep('receipt');
       toast.success('Transaksi berhasil disimpan!');
+
+      // Auto-trigger cash drawer for cash payments
+      if (paymentMethod === 'tunai') {
+        triggerCashDrawer();
+      }
     } catch (err) {
       console.error('[Kasir] save error:', err);
       toast.error('Gagal menyimpan transaksi');
@@ -283,22 +429,58 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
 
       {/* ── Left: Product Panel ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Search bar */}
-        <div className="px-3 py-3 bg-white border-b border-gray-100 shadow-sm flex-shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Cari produk atau varian..."
-              className="pl-9 pr-8 h-10 rounded-xl border-gray-200 bg-gray-50 text-sm font-medium focus-visible:ring-primary"
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <X className="w-4 h-4" />
-              </button>
-            )}
+
+        {/* Top bar: search + store link */}
+        <div className="px-3 pt-3 pb-2 bg-white border-b border-gray-100 shadow-sm flex-shrink-0 space-y-2">
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                ref={searchRef}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Cari produk / varian / SKU..."
+                className="pl-9 pr-8 h-10 rounded-xl border-gray-200 bg-gray-50 text-sm font-medium focus-visible:ring-primary"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {/* Barcode scanner indicator */}
+            <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-center" title="Scanner barcode aktif">
+              <ScanLine className="w-4 h-4 text-gray-400" />
+            </div>
+            {/* Store link */}
+            <button
+              onClick={() => setShowStoreLink(true)}
+              className="flex-shrink-0 w-10 h-10 rounded-xl bg-brand-50 border border-primary/20 flex items-center justify-center text-primary"
+              title="Bagikan toko online"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
           </div>
+
+          {/* Category filter */}
+          {categories.length > 2 && (
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 hide-scrollbar">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={cn(
+                    "flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-all",
+                    activeCategory === cat
+                      ? "orange-gradient text-white shadow-sm"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  )}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Product grid */}
@@ -318,7 +500,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
               {visibleProducts.map(product => (
                 <ProductCard key={product.id} product={product} cart={cart} onAdd={addToCart} />
               ))}
@@ -347,7 +529,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
       </div>
 
       {/* ── Right: Cart Panel (desktop) ── */}
-      <div className="hidden md:flex flex-col w-[300px] lg:w-[340px] xl:w-[360px] bg-white border-l border-gray-100 overflow-hidden flex-shrink-0">
+      <div className="hidden md:flex flex-col w-[300px] lg:w-[340px] xl:w-[380px] bg-white border-l border-gray-100 overflow-hidden flex-shrink-0">
         <CartPanel
           cart={cart}
           subtotal={subtotal}
@@ -411,7 +593,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed bottom-0 left-0 right-0 z-[201] bg-white rounded-t-3xl shadow-2xl max-h-[92dvh] flex flex-col md:left-auto md:right-0 md:top-0 md:bottom-0 md:rounded-none md:rounded-l-3xl md:w-[420px] md:max-h-full"
+              className="fixed bottom-0 left-0 right-0 z-[201] bg-white rounded-t-3xl shadow-2xl max-h-[92dvh] flex flex-col md:left-auto md:right-0 md:top-0 md:bottom-0 md:rounded-none md:rounded-l-3xl md:w-[460px] md:max-h-full"
             >
               <CheckoutPanel
                 cart={cart}
@@ -425,6 +607,9 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
                 paymentMethod={paymentMethod}
                 cashPaid={cashPaid}
                 kembalian={kembalian}
+                customerName={customerName}
+                customerPhone={customerPhone}
+                catatan={catatan}
                 isSaving={isSaving}
                 cashInputRef={cashInputRef}
                 onDiscountModeChange={setDiscountMode}
@@ -432,9 +617,62 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
                 onTaxPctChange={setTaxPct}
                 onPaymentMethodChange={setPaymentMethod}
                 onCashPaidChange={setCashPaid}
+                onCustomerNameChange={setCustomerName}
+                onCustomerPhoneChange={setCustomerPhone}
+                onCatatanChange={setCatatan}
                 onConfirm={saveKasirSale}
                 onBack={() => setStep('order')}
               />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── Store Link Modal ── */}
+      <AnimatePresence>
+        {showStoreLink && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200]"
+              onClick={() => setShowStoreLink(false)}
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[201] bg-white rounded-3xl shadow-2xl p-6 max-w-sm mx-auto"
+            >
+              <div className="text-center mb-5">
+                <div className="w-14 h-14 rounded-2xl orange-gradient flex items-center justify-center mx-auto mb-3">
+                  <Store className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="text-lg font-black text-[#1A1A2E]">Toko Online Kamu</h3>
+                <p className="text-xs text-gray-400 font-medium mt-1">Bagikan link ini ke pelanggan untuk melihat katalog & pesan</p>
+              </div>
+              <div className="bg-gray-50 rounded-2xl p-3 flex items-center gap-2 mb-4">
+                <p className="flex-1 text-xs font-bold text-gray-600 break-all">{getStoreCatalogUrl(user.uid)}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  className="rounded-2xl h-11 font-bold text-sm gap-2"
+                  onClick={() => {
+                    navigator.clipboard.writeText(getStoreCatalogUrl(user.uid));
+                    toast.success('Link disalin!');
+                  }}
+                >
+                  <Copy className="w-4 h-4" /> Salin Link
+                </Button>
+                <Button
+                  className="orange-gradient text-white rounded-2xl h-11 font-bold text-sm gap-2"
+                  onClick={() => {
+                    const text = `Halo! Lihat katalog produk kami di: ${getStoreCatalogUrl(user.uid)}`;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                  }}
+                >
+                  <MessageCircle className="w-4 h-4" /> Share WA
+                </Button>
+              </div>
+              <button onClick={() => setShowStoreLink(false)} className="w-full mt-3 text-xs text-gray-400 font-bold py-2">Tutup</button>
             </motion.div>
           </>
         )}
@@ -443,7 +681,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
   );
 }
 
-// ───────── ProductCard ─────────
+// ─── ProductCard ──────────────────────────────────────────────────────────────
 function ProductCard({ product, cart, onAdd }: {
   product: Product;
   cart: CartItem[];
@@ -454,6 +692,9 @@ function ProductCard({ product, cart, onAdd }: {
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
       <div className="px-3 pt-3 pb-2 border-b border-gray-50">
         <p className="text-[11px] font-black text-[#1A1A2E] leading-tight line-clamp-2">{product.nama}</p>
+        {(product as any).kategori && (
+          <span className="text-[9px] font-bold text-primary/60 uppercase tracking-wide">{(product as any).kategori}</span>
+        )}
       </div>
       <div className="flex-1 p-2 space-y-1.5">
         {sellableVariants.map(variant => {
@@ -471,16 +712,10 @@ function ProductCard({ product, cart, onAdd }: {
               )}
             >
               <div className="text-left min-w-0 flex-1">
-                <p className={cn(
-                  "text-[10px] font-bold truncate leading-tight",
-                  inCart ? "text-primary" : "text-gray-700"
-                )}>
+                <p className={cn("text-[10px] font-bold truncate leading-tight", inCart ? "text-primary" : "text-gray-700")}>
                   {sellableVariants.length === 1 && variant.nama === product.nama ? 'Standar' : variant.nama}
                 </p>
-                <p className={cn(
-                  "text-[10px] font-bold mt-0.5",
-                  inCart ? "text-primary/80" : "text-gray-400"
-                )}>
+                <p className={cn("text-[10px] font-bold mt-0.5", inCart ? "text-primary/80" : "text-gray-400")}>
                   {formatRp(variant.harga_jual)}
                 </p>
               </div>
@@ -501,7 +736,7 @@ function ProductCard({ product, cart, onAdd }: {
   );
 }
 
-// ───────── CartPanel ─────────
+// ─── CartPanel ────────────────────────────────────────────────────────────────
 function CartPanel({ cart, subtotal, discountAmount, taxAmount, total, onUpdateQty, onRemove, onClear, onCheckout }: {
   cart: CartItem[];
   subtotal: number;
@@ -618,13 +853,15 @@ function CartPanel({ cart, subtotal, discountAmount, taxAmount, total, onUpdateQ
   );
 }
 
-// ───────── CheckoutPanel ─────────
+// ─── CheckoutPanel ────────────────────────────────────────────────────────────
 function CheckoutPanel({
   cart, subtotal, discountMode, discountValue, discountAmount,
   taxPct, taxAmount, total, paymentMethod, cashPaid, kembalian,
+  customerName, customerPhone, catatan,
   isSaving, cashInputRef,
   onDiscountModeChange, onDiscountValueChange, onTaxPctChange,
-  onPaymentMethodChange, onCashPaidChange, onConfirm, onBack
+  onPaymentMethodChange, onCashPaidChange, onCustomerNameChange,
+  onCustomerPhoneChange, onCatatanChange, onConfirm, onBack
 }: {
   cart: CartItem[];
   subtotal: number;
@@ -637,6 +874,9 @@ function CheckoutPanel({
   paymentMethod: PaymentMethod;
   cashPaid: number;
   kembalian: number;
+  customerName: string;
+  customerPhone: string;
+  catatan: string;
   isSaving: boolean;
   cashInputRef: React.RefObject<HTMLInputElement>;
   onDiscountModeChange: (m: DiscountMode) => void;
@@ -644,9 +884,14 @@ function CheckoutPanel({
   onTaxPctChange: (v: number) => void;
   onPaymentMethodChange: (m: PaymentMethod) => void;
   onCashPaidChange: (v: number) => void;
+  onCustomerNameChange: (v: string) => void;
+  onCustomerPhoneChange: (v: string) => void;
+  onCatatanChange: (v: string) => void;
   onConfirm: () => void;
   onBack: () => void;
 }) {
+  const canPay = paymentMethod !== 'tunai' || cashPaid >= total;
+
   return (
     <div className="flex flex-col h-full max-h-[92dvh] md:max-h-full">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
@@ -670,6 +915,26 @@ function CheckoutPanel({
               <span className="font-bold text-[#1A1A2E]">{formatRp(item.hargaJual * item.qty)}</span>
             </div>
           ))}
+        </div>
+
+        {/* Customer info */}
+        <div className="space-y-2">
+          <label className="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5" /> Pelanggan (Opsional)
+          </label>
+          <Input
+            value={customerName}
+            onChange={e => onCustomerNameChange(e.target.value)}
+            placeholder="Nama pelanggan"
+            className="h-9 rounded-xl border-gray-200 text-sm font-medium focus-visible:ring-primary"
+          />
+          <Input
+            value={customerPhone}
+            onChange={e => onCustomerPhoneChange(e.target.value)}
+            placeholder="No. WhatsApp (628xxxxxxxx)"
+            type="tel"
+            className="h-9 rounded-xl border-gray-200 text-sm font-medium focus-visible:ring-primary"
+          />
         </div>
 
         {/* Diskon */}
@@ -697,7 +962,7 @@ function CheckoutPanel({
               min={0}
               value={discountValue || ''}
               onChange={e => onDiscountValueChange(Number(e.target.value) || 0)}
-              placeholder={discountMode === 'flat' ? '0' : '0'}
+              placeholder="0"
               className="flex-1 h-9 rounded-xl border-gray-200 text-sm font-bold focus-visible:ring-primary"
             />
           </div>
@@ -711,9 +976,7 @@ function CheckoutPanel({
           <label className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2 block">Pajak (%)</label>
           <div className="flex items-center gap-2">
             <Input
-              type="number"
-              min={0}
-              max={100}
+              type="number" min={0} max={100}
               value={taxPct || ''}
               onChange={e => onTaxPctChange(Number(e.target.value) || 0)}
               placeholder="0"
@@ -721,30 +984,24 @@ function CheckoutPanel({
             />
             <span className="text-xs text-gray-400 font-medium">% dari subtotal setelah diskon</span>
           </div>
-          {taxAmount > 0 && (
-            <p className="text-xs text-gray-500 font-bold mt-1">+{formatRp(taxAmount)}</p>
-          )}
         </div>
 
         {/* Metode bayar */}
         <div>
           <label className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2 block">Metode Pembayaran</label>
           <div className="grid grid-cols-2 gap-2">
-            {([
-              { value: 'tunai', label: 'Tunai', icon: Banknote },
-              { value: 'nontunai', label: 'Non-Tunai', icon: CreditCard }
-            ] as { value: PaymentMethod; label: string; icon: any }[]).map(({ value, label, icon: Icon }) => (
+            {PAYMENT_OPTIONS.map(({ value, label, icon: Icon, color }) => (
               <button
                 key={value}
                 onClick={() => onPaymentMethodChange(value)}
                 className={cn(
-                  "flex flex-col items-center gap-2 py-4 rounded-2xl border-2 transition-all font-bold text-sm",
+                  "flex flex-col items-center gap-1.5 py-3 rounded-2xl border-2 transition-all font-bold text-xs",
                   paymentMethod === value
                     ? "border-primary bg-brand-50 text-primary"
                     : "border-gray-100 bg-gray-50 text-gray-400 hover:border-gray-200"
                 )}
               >
-                <Icon className="w-5 h-5" />
+                <Icon className={cn("w-5 h-5", paymentMethod === value ? "text-primary" : color)} />
                 {label}
               </button>
             ))}
@@ -761,14 +1018,12 @@ function CheckoutPanel({
             <label className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2 block">Uang Diterima</label>
             <Input
               ref={cashInputRef}
-              type="number"
-              min={0}
+              type="number" min={0}
               value={cashPaid || ''}
               onChange={e => onCashPaidChange(Number(e.target.value) || 0)}
               placeholder={String(Math.ceil(total / 1000) * 1000)}
               className="h-12 rounded-xl border-gray-200 text-base font-black focus-visible:ring-primary"
             />
-            {/* Quick cash buttons */}
             <div className="flex flex-wrap gap-1.5 mt-2">
               {[0, 1000, 2000, 5000, 10000].map(extra => {
                 const rounded = Math.ceil(total / 1000) * 1000 + extra;
@@ -783,7 +1038,7 @@ function CheckoutPanel({
                 );
               })}
             </div>
-            {cashPaid >= total && (
+            {cashPaid >= total && total > 0 && (
               <div className="mt-3 bg-green-50 border border-green-200 rounded-xl px-3 py-2 flex justify-between items-center">
                 <span className="text-xs font-bold text-green-700">Kembalian</span>
                 <span className="text-sm font-black text-green-700">{formatRp(kembalian)}</span>
@@ -797,6 +1052,17 @@ function CheckoutPanel({
             )}
           </motion.div>
         )}
+
+        {/* Catatan */}
+        <div>
+          <label className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2 block">Catatan (Opsional)</label>
+          <Input
+            value={catatan}
+            onChange={e => onCatatanChange(e.target.value)}
+            placeholder="Catatan pesanan..."
+            className="h-9 rounded-xl border-gray-200 text-sm font-medium focus-visible:ring-primary"
+          />
+        </div>
       </div>
 
       {/* Total + Confirm */}
@@ -807,7 +1073,7 @@ function CheckoutPanel({
         </div>
         <Button
           onClick={onConfirm}
-          disabled={isSaving || (paymentMethod === 'tunai' && cashPaid < total)}
+          disabled={isSaving || !canPay}
           className="w-full h-12 orange-gradient text-white font-black rounded-2xl shadow-lg shadow-brand-200 text-sm"
         >
           {isSaving ? (
@@ -826,19 +1092,68 @@ function CheckoutPanel({
   );
 }
 
-// ───────── ReceiptView ─────────
+// ─── ReceiptView ──────────────────────────────────────────────────────────────
 function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
   receipt: ReceiptData;
   storeSettings: StoreSettings;
   onNewOrder: () => void;
   onPrint: () => void;
 }) {
+  const [showBarcodeLabels, setShowBarcodeLabels] = React.useState(false);
+
+  const buildWhatsAppText = () => {
+    const lines: string[] = [];
+    lines.push(`*Struk Pembayaran — ${storeSettings.name}*`);
+    lines.push(`No. Antrian: *#${receipt.queueNumber}*`);
+    lines.push(`No. Struk: ${receipt.txId.toUpperCase()}`);
+    lines.push(`Tanggal: ${formatDate(receipt.tanggal)}, ${receipt.jam}`);
+    lines.push('');
+    lines.push('*Rincian:*');
+    receipt.items.forEach(item => {
+      lines.push(`• ${item.productName}${item.variantName !== item.productName ? ` (${item.variantName})` : ''} ×${item.qty} = ${formatRp(item.hargaJual * item.qty)}`);
+    });
+    lines.push('');
+    lines.push(`Subtotal: ${formatRp(receipt.subtotal)}`);
+    if (receipt.discountAmount > 0) lines.push(`Diskon: -${formatRp(receipt.discountAmount)}`);
+    if (receipt.taxAmount > 0) lines.push(`Pajak (${receipt.taxPct}%): +${formatRp(receipt.taxAmount)}`);
+    lines.push(`*TOTAL: ${formatRp(receipt.nominal)}*`);
+    lines.push(`Metode: ${PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod}`);
+    if (receipt.paymentMethod === 'tunai') {
+      lines.push(`Dibayar: ${formatRp(receipt.cashPaid)}`);
+      lines.push(`Kembalian: ${formatRp(receipt.kembalian)}`);
+    }
+    if (storeSettings.receiptFooter) {
+      lines.push('');
+      lines.push(storeSettings.receiptFooter);
+    }
+    return lines.join('\n');
+  };
+
+  const sendToWhatsApp = () => {
+    const phone = receipt.customerPhone.replace(/[^0-9]/g, '');
+    const text = buildWhatsAppText();
+    if (phone) {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    }
+  };
+
+  const paymentLabel = PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod;
+
   return (
     <>
-      {/* Printable receipt — hidden on screen, shown on print */}
+      {/* Printable receipt */}
       <div id="kasir-receipt-print" style={{ display: 'none' }}>
         <PrintReceipt receipt={receipt} storeSettings={storeSettings} />
       </div>
+
+      {/* Printable barcode labels */}
+      {showBarcodeLabels && (
+        <div id="kasir-barcode-labels" style={{ display: 'none' }}>
+          <BarcodeLabels items={receipt.items} txId={receipt.txId} storeName={storeSettings.name} />
+        </div>
+      )}
 
       {/* Screen receipt */}
       <div className="flex flex-col h-[calc(100dvh-64px-80px)] md:h-[calc(100dvh-64px)] overflow-hidden bg-[#F5F7FA]">
@@ -854,7 +1169,11 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
               </div>
               <div>
                 <h2 className="text-xl font-black text-[#1A1A2E]">Pembayaran Berhasil!</h2>
-                <p className="text-xs text-gray-400 font-medium mt-1">#{receipt.txId.toUpperCase()}</p>
+                <div className="flex items-center gap-2 justify-center mt-2">
+                  <span className="text-2xl font-black text-primary">#{receipt.queueNumber}</span>
+                  <span className="text-xs text-gray-400 font-bold">No. Antrian</span>
+                </div>
+                <p className="text-xs text-gray-400 font-medium mt-1">Struk #{receipt.txId.toUpperCase()}</p>
               </div>
             </motion.div>
 
@@ -874,6 +1193,9 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
                 {storeSettings.showAddressOnReceipt && storeSettings.address && (
                   <p className="text-[11px] text-white/80 mt-0.5">{storeSettings.address}</p>
                 )}
+                {receipt.customerName && (
+                  <p className="text-[11px] text-white/90 mt-1 font-bold">Pelanggan: {receipt.customerName}</p>
+                )}
                 <p className="text-[10px] text-white/70 mt-1">{formatDate(receipt.tanggal)} · {receipt.jam}</p>
               </div>
 
@@ -891,6 +1213,9 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
                     <p className="text-sm font-black text-[#1A1A2E]">{formatRp(item.hargaJual * item.qty)}</p>
                   </div>
                 ))}
+                {receipt.catatan && (
+                  <p className="text-xs text-gray-400 italic pt-1">Catatan: {receipt.catatan}</p>
+                )}
               </div>
 
               {/* Totals */}
@@ -901,9 +1226,7 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
                 </div>
                 {receipt.discountAmount > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
-                    <span>
-                      Diskon {receipt.discountMode === 'persen' ? `(${receipt.discountValue}%)` : ''}
-                    </span>
+                    <span>Diskon {receipt.discountMode === 'persen' ? `(${receipt.discountValue}%)` : ''}</span>
                     <span className="font-bold">-{formatRp(receipt.discountAmount)}</span>
                   </div>
                 )}
@@ -923,9 +1246,7 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
               <div className="px-5 py-4">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Metode</span>
-                  <span className="font-bold text-[#1A1A2E] flex items-center gap-1">
-                    {receipt.paymentMethod === 'tunai' ? <><Banknote className="w-3.5 h-3.5" /> Tunai</> : <><CreditCard className="w-3.5 h-3.5" /> Non-Tunai</>}
-                  </span>
+                  <span className="font-bold text-[#1A1A2E]">{paymentLabel}</span>
                 </div>
                 {receipt.paymentMethod === 'tunai' && (
                   <>
@@ -950,34 +1271,54 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
         </div>
 
         {/* Action buttons */}
-        <div className="flex-shrink-0 p-4 bg-white border-t border-gray-100 flex gap-3">
-          <Button
-            variant="outline"
-            onClick={onPrint}
-            className="flex-1 h-11 rounded-2xl font-bold border-gray-200 text-gray-600 gap-2"
-          >
-            <Printer className="w-4 h-4" /> Cetak Struk
-          </Button>
-          <Button
-            onClick={onNewOrder}
-            className="flex-1 h-11 orange-gradient text-white font-black rounded-2xl shadow-lg shadow-brand-200 gap-2"
-          >
-            <Receipt className="w-4 h-4" /> Transaksi Baru
-          </Button>
+        <div className="flex-shrink-0 p-4 bg-white border-t border-gray-100 space-y-2">
+          {/* Top row: Print + WhatsApp */}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={onPrint}
+              className="flex-1 h-11 rounded-2xl font-bold border-gray-200 text-gray-600 gap-2"
+            >
+              <Printer className="w-4 h-4" /> Cetak Struk
+            </Button>
+            <Button
+              onClick={sendToWhatsApp}
+              className="flex-1 h-11 rounded-2xl font-bold bg-green-500 hover:bg-green-600 text-white gap-2"
+            >
+              <MessageCircle className="w-4 h-4" /> Kirim WA
+            </Button>
+          </div>
+          {/* Bottom row: Labels + New */}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => { setShowBarcodeLabels(true); setTimeout(() => window.print(), 200); }}
+              className="flex-1 h-10 rounded-2xl font-bold border-gray-200 text-gray-500 gap-2 text-xs"
+            >
+              <Hash className="w-3.5 h-3.5" /> Label Barcode
+            </Button>
+            <Button
+              onClick={onNewOrder}
+              className="flex-1 h-10 orange-gradient text-white font-black rounded-2xl shadow-lg shadow-brand-200 gap-2 text-sm"
+            >
+              <Receipt className="w-4 h-4" /> Transaksi Baru
+            </Button>
+          </div>
         </div>
       </div>
     </>
   );
 }
 
-// ───────── PrintReceipt (thermal format) ─────────
+// ─── PrintReceipt (thermal 80mm format) ──────────────────────────────────────
 function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeSettings: StoreSettings }) {
   const style: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px', maxWidth: '300px', margin: '0 auto' };
-  const divider = '--------------------------------';
+  const divider = '================================';
+  const paymentLabel = PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod;
   return (
     <div style={style}>
       {storeSettings.showNameOnReceipt && (
-        <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '14px', marginBottom: '2px' }}>
+        <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '15px', marginBottom: '2px' }}>
           {storeSettings.name}
         </div>
       )}
@@ -988,11 +1329,16 @@ function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeS
         <div style={{ textAlign: 'center', fontSize: '11px', marginBottom: '4px' }}>Telp: {storeSettings.phone}</div>
       )}
       <div style={{ textAlign: 'center' }}>{divider}</div>
+      <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '18px', margin: '4px 0' }}>
+        ANTRIAN #{receipt.queueNumber}
+      </div>
+      <div style={{ textAlign: 'center' }}>{divider}</div>
       <div style={{ fontSize: '11px', marginTop: '4px' }}>
         <div>Tanggal : {formatDate(receipt.tanggal)}</div>
         <div>Jam     : {receipt.jam}</div>
-        <div>No      : #{receipt.txId.toUpperCase()}</div>
-        <div>Bayar   : {receipt.paymentMethod === 'tunai' ? 'TUNAI' : 'NON-TUNAI'}</div>
+        <div>Struk   : #{receipt.txId.toUpperCase()}</div>
+        <div>Bayar   : {paymentLabel.toUpperCase()}</div>
+        {receipt.customerName && <div>Pelanggan: {receipt.customerName}</div>}
       </div>
       <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
       {receipt.items.map(item => (
@@ -1006,6 +1352,9 @@ function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeS
           </div>
         </div>
       ))}
+      {receipt.catatan && (
+        <div style={{ fontSize: '11px', fontStyle: 'italic' }}>Catatan: {receipt.catatan}</div>
+      )}
       <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span>Subtotal</span><span>{formatRp(receipt.subtotal)}</span>
@@ -1022,7 +1371,7 @@ function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeS
         </div>
       )}
       <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '13px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px' }}>
         <span>TOTAL</span><span>{formatRp(receipt.nominal)}</span>
       </div>
       {receipt.paymentMethod === 'tunai' && (
@@ -1039,6 +1388,52 @@ function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeS
       {storeSettings.receiptFooter && (
         <div style={{ textAlign: 'center', fontSize: '11px', marginTop: '4px' }}>{storeSettings.receiptFooter}</div>
       )}
+      <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '8px', color: '#888' }}>
+        Powered by CeuMilan POS
+      </div>
+    </div>
+  );
+}
+
+// ─── BarcodeLabels (print label for each item) ────────────────────────────────
+function BarcodeLabels({ items, txId, storeName }: { items: CartItem[]; txId: string; storeName: string }) {
+  const labelStyle: React.CSSProperties = {
+    display: 'inline-block',
+    width: '60mm',
+    height: '30mm',
+    border: '1px solid #ccc',
+    padding: '4px 6px',
+    margin: '2px',
+    fontFamily: 'monospace',
+    fontSize: '9px',
+    verticalAlign: 'top',
+    boxSizing: 'border-box',
+    pageBreakInside: 'avoid',
+  };
+  const labels: { name: string; price: number; sku: string }[] = [];
+  items.forEach(item => {
+    for (let i = 0; i < item.qty; i++) {
+      labels.push({
+        name: `${item.productName}${item.variantName !== item.productName ? ` - ${item.variantName}` : ''}`,
+        price: item.hargaJual,
+        sku: item.variantId.slice(-8).toUpperCase(),
+      });
+    }
+  });
+  return (
+    <div style={{ padding: '8px' }}>
+      {labels.map((label, idx) => (
+        <div key={idx} style={labelStyle}>
+          <div style={{ fontWeight: 'bold', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {label.name}
+          </div>
+          <div style={{ fontSize: '8px', color: '#666' }}>{storeName}</div>
+          <div style={{ fontSize: '12px', fontWeight: 'bold', margin: '3px 0' }}>{formatRp(label.price)}</div>
+          <div style={{ fontSize: '8px', letterSpacing: '2px', borderTop: '1px solid #eee', paddingTop: '2px' }}>
+            {label.sku}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
