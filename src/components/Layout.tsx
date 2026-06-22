@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet, Scan } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
@@ -33,6 +33,7 @@ const MENU_GROUPS = [
   {
     title: 'KELOLA',
     items: [
+      { id: 'kasir', label: 'Kasir (POS)', icon: Scan },
       { id: 'products', label: 'Manajemen Produk', icon: Package },
       { id: 'hpp', label: 'Manajemen HPP', icon: Calculator },
       { id: 'roas', label: 'Kalkulator ROAS', icon: TrendingUp },
@@ -58,9 +59,10 @@ interface LayoutProps {
   showBack?: boolean;
   storeSettings: StoreSettings;
   user: FirebaseUser;
+  fullBleed?: boolean;
 }
 
-export default function Layout({ children, activeTab, setActiveTab, onResetData, onBack, showBack, storeSettings, user }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, onResetData, onBack, showBack, storeSettings, user, fullBleed }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   const handleLogout = async () => {
@@ -276,8 +278,8 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
           )}
         </AnimatePresence>
 
-        <main className="flex-1 p-4 md:p-8 pb-32 md:pb-8">
-          <div className="max-w-4xl mx-auto">
+        <main className={cn("flex-1", fullBleed ? "overflow-hidden" : "p-4 md:p-8 pb-32 md:pb-8")}>
+          <div className={cn(fullBleed ? "h-full" : "max-w-4xl mx-auto")}>
             {children}
           </div>
         </main>

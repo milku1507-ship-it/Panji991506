@@ -9,6 +9,7 @@ import ROASCalculator from './components/ROASCalculator';
 import StoreSettingsManager from './components/StoreSettingsManager';
 import CategoryManager from './components/CategoryManager';
 import DompetManager from './components/DompetManager';
+import Kasir from './components/Kasir';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
 import { Ingredient, Product, Transaction, StoreSettings, Dompet } from './types';
 import { Toaster } from '@/components/ui/sonner';
@@ -662,6 +663,15 @@ function AppContent() {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'kasir':
+        return <Kasir
+          user={user}
+          products={products}
+          ingredients={ingredients}
+          setIngredients={setIngredients}
+          storeSettings={storeSettings}
+          onNavigate={handleTabChange}
+        />;
       case 'dompet':
         return <DompetManager
           user={user}
@@ -772,6 +782,7 @@ function AppContent() {
         showBack={!!backAction}
         storeSettings={storeSettings}
         user={user}
+        fullBleed={activeTab === 'kasir'}
       >
         <Toaster position="top-center" richColors />
         <AnimatePresence mode="wait">
