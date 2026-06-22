@@ -99,6 +99,7 @@ export type KategoriSettings = {
 
 export type StoreSettings = {
   logo?: string;
+  banner?: string;
   name: string;
   tagline?: string;
   phone?: string;
