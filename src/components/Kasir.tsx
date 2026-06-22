@@ -672,15 +672,45 @@ function ProductCard({ product, cart, onAdd }: {
   onAdd: (product: Product, variant: { id: string; nama: string; harga_jual: number }) => void;
 }) {
   const sellableVariants = product.varian.filter(v => v.harga_jual > 0);
+  const totalInCart = cart.filter(i => i.productId === product.id).reduce((s, i) => s + i.qty, 0);
+
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
-      <div className="px-3 pt-3 pb-2 border-b border-gray-50">
-        <p className="text-[11px] font-black text-[#1A1A2E] leading-tight line-clamp-2">{product.nama}</p>
-        {(product as any).kategori && (
-          <span className="text-[9px] font-bold text-primary/60 uppercase tracking-wide">{(product as any).kategori}</span>
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col group">
+      {/* Product photo */}
+      <div className="relative w-full aspect-square bg-gray-50 overflow-hidden flex-shrink-0">
+        {product.foto ? (
+          <img
+            src={product.foto}
+            alt={product.nama}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <Package className="w-8 h-8 text-gray-200" />
+          </div>
+        )}
+        {/* Total in cart badge */}
+        {totalInCart > 0 && (
+          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-primary flex items-center justify-center shadow">
+            <span className="text-[9px] font-black text-white">{totalInCart}</span>
+          </div>
+        )}
+        {/* Kategori badge */}
+        {product.kategori && (
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 pt-3 pb-1.5">
+            <p className="text-[9px] font-black text-white uppercase tracking-wider truncate">{product.kategori}</p>
+          </div>
         )}
       </div>
-      <div className="flex-1 p-2 space-y-1.5">
+
+      {/* Name */}
+      <div className="px-2.5 pt-2 pb-1">
+        <p className="text-[11px] font-black text-[#1A1A2E] leading-tight line-clamp-1">{product.nama}</p>
+      </div>
+
+      {/* Variants */}
+      <div className="flex-1 px-2 pb-2 space-y-1">
         {sellableVariants.map(variant => {
           const cartItem = cart.find(i => i.variantId === variant.id);
           const inCart = !!cartItem;
@@ -696,20 +726,20 @@ function ProductCard({ product, cart, onAdd }: {
               )}
             >
               <div className="text-left min-w-0 flex-1">
-                <p className={cn("text-[10px] font-bold truncate leading-tight", inCart ? "text-primary" : "text-gray-700")}>
+                <p className={cn("text-[10px] font-bold truncate leading-tight", inCart ? "text-primary" : "text-gray-600")}>
                   {sellableVariants.length === 1 && variant.nama === product.nama ? 'Standar' : variant.nama}
                 </p>
-                <p className={cn("text-[10px] font-bold mt-0.5", inCart ? "text-primary/80" : "text-gray-400")}>
+                <p className={cn("text-[11px] font-black mt-0.5", inCart ? "text-primary" : "text-gray-800")}>
                   {formatRp(variant.harga_jual)}
                 </p>
               </div>
               {inCart ? (
-                <Badge className="bg-primary text-white text-[9px] font-black px-1.5 py-0.5 rounded-lg ml-1 flex-shrink-0">
-                  ×{cartItem.qty}
-                </Badge>
+                <div className="flex items-center gap-1 ml-1 flex-shrink-0">
+                  <span className="text-[10px] font-black text-primary bg-primary/10 rounded-lg px-1.5 py-0.5">×{cartItem.qty}</span>
+                </div>
               ) : (
-                <div className="w-5 h-5 rounded-lg bg-gray-200 flex items-center justify-center ml-1 flex-shrink-0">
-                  <Plus className="w-3 h-3 text-gray-500" />
+                <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center ml-1 flex-shrink-0">
+                  <Plus className="w-3 h-3 text-primary" />
                 </div>
               )}
             </button>

@@ -43,6 +43,8 @@ export type Product = {
   sku?: string;
   nama: string;
   deskripsi?: string;
+  foto?: string;
+  kategori?: string;
   varian: Variant[];
   biaya_lain?: AdditionalFee[];
 };

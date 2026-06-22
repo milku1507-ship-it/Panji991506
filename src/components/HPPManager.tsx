@@ -10,6 +10,7 @@ import {
   GripVertical, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
+import ProductPhotoUpload from './ProductPhotoUpload';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -1076,46 +1077,87 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
       {/* VIEW: PRODUCTS */}
       {view === 'products' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
           {products.map(p => (
-            <Card key={p.id} className="border-none shadow-sm rounded-3xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 rounded-2xl bg-brand-50 text-primary">
-                    <Package className="w-6 h-6" />
+            <Card key={p.id} className="border-none shadow-sm rounded-2xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300 flex flex-col">
+              {/* Product photo — full width at top */}
+              <div className="relative w-full aspect-square bg-gray-50 overflow-hidden flex-shrink-0">
+                {p.foto ? (
+                  <img src={p.foto} alt={p.nama} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Package className="w-10 h-10 text-gray-200" />
                   </div>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" className="rounded-xl text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => handleDuplicateProduct(p)} title="Duplikasi">
-                      <Copy className="w-4 h-4" />
+                )}
+                {/* Camera overlay to change photo */}
+                {user && (
+                  <div className="absolute inset-0 flex items-end justify-end p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ProductPhotoUpload
+                      productId={p.id}
+                      userId={user.uid}
+                      currentFoto={p.foto}
+                      size="sm"
+                      className="shadow-lg"
+                      onUploaded={url => setProducts(prev => prev.map(x => x.id === p.id ? { ...x, foto: url } : x))}
+                    />
+                  </div>
+                )}
+                {/* Tap anywhere to upload when no photo */}
+                {!p.foto && user && (
+                  <ProductPhotoUpload
+                    productId={p.id}
+                    userId={user.uid}
+                    currentFoto={undefined}
+                    size="lg"
+                    className="absolute inset-0 !rounded-none opacity-0 cursor-pointer"
+                    onUploaded={url => setProducts(prev => prev.map(x => x.id === p.id ? { ...x, foto: url } : x))}
+                  />
+                )}
+                {/* Kategori badge */}
+                {(p as any).kategori && (
+                  <div className="absolute top-2 left-2">
+                    <span className="text-[9px] font-black bg-black/50 text-white px-1.5 py-0.5 rounded-md uppercase tracking-wider backdrop-blur-sm">
+                      {(p as any).kategori}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <CardContent className="p-3 flex flex-col flex-1">
+                <div className="flex items-start justify-between gap-1 mb-1">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-black text-[#1A1A2E] line-clamp-2 leading-tight">{p.nama}</h3>
+                    {p.sku && (
+                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">SKU: {p.sku}</span>
+                    )}
+                  </div>
+                  <div className="flex gap-0.5 flex-shrink-0">
+                    <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}>
+                      <Edit2 className="w-3.5 h-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="rounded-xl text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}>
-                      <Edit2 className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteProduct(p.id)}>
-                      <Trash2 className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteProduct(p.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-xl font-black text-[#1A1A2E]">{p.nama}</h3>
-                  {p.sku && (
-                    <Badge variant="outline" className="text-[10px] border-primary/20 bg-brand-50 text-primary px-2 font-bold uppercase tracking-wider h-5">
-                      SKU: {p.sku}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.deskripsi || 'Tidak ada deskripsi'}</p>
-                <div className="flex items-center justify-between">
-                  <Badge className="bg-brand-100 text-primary border-none font-bold">
+                {p.varian.some(v => v.harga_jual > 0) && (
+                  <p className="text-xs font-black text-primary mb-2">
+                    {p.varian.length === 1
+                      ? `Rp${p.varian[0].harga_jual.toLocaleString('id-ID')}`
+                      : `Rp${Math.min(...p.varian.map(v => v.harga_jual)).toLocaleString('id-ID')}+`}
+                  </p>
+                )}
+                <div className="flex items-center justify-between mt-auto pt-1 border-t border-gray-50">
+                  <Badge className="bg-brand-100 text-primary border-none font-bold text-[9px] h-4 px-1.5">
                     {p.varian.length} Varian
                   </Badge>
-                  <Button 
-                    variant="ghost" 
-                    className="text-primary font-bold hover:bg-brand-50 rounded-xl gap-1"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary font-bold hover:bg-brand-50 rounded-lg gap-0.5 h-6 px-2 text-[10px]"
                     onClick={() => handleViewVariants(p.id)}
                   >
-                    Lihat Varian
-                    <ChevronRight className="w-4 h-4" />
+                    Detail <ChevronRight className="w-3 h-3" />
                   </Button>
                 </div>
               </CardContent>
