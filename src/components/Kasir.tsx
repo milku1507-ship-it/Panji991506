@@ -169,21 +169,6 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
   const cashInputRef = React.useRef<HTMLInputElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
 
-  // Print style injection
-  React.useEffect(() => {
-    const style = document.createElement('style');
-    style.id = 'kasir-print-style';
-    style.textContent = `
-      @media print {
-        body > * { display: none !important; }
-        #kasir-receipt-print { display: block !important; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 9999; padding: 16px; box-sizing: border-box; }
-        #kasir-receipt-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        #kasir-barcode-labels { display: block !important; position: fixed; top: 0; left: 0; width: 100%; background: white; z-index: 9999; padding: 8px; box-sizing: border-box; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => { document.getElementById('kasir-print-style')?.remove(); };
-  }, []);
 
   // Category list derived from products
   const categories = React.useMemo(() => {
@@ -419,7 +404,6 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         receipt={receipt}
         storeSettings={storeSettings}
         onNewOrder={() => { setStep('order'); setReceipt(null); }}
-        onPrint={() => window.print()}
       />
     );
   }
@@ -1092,15 +1076,108 @@ function CheckoutPanel({
   );
 }
 
+// ─── Print helpers — open new window (works on all mobile browsers) ───────────
+function openPrintWindow(html: string) {
+  const win = window.open('', '_blank');
+  if (!win) { toast.error('Izinkan popup di browser untuk mencetak'); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // Small delay so images/fonts can load
+  setTimeout(() => { win.print(); win.close(); }, 350);
+}
+
+function buildReceiptHtml(receipt: ReceiptData, storeSettings: StoreSettings): string {
+  const divider = '================================';
+  const paymentLabel = PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod;
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const rows: string[] = [];
+  receipt.items.forEach(item => {
+    const name = item.productName + (item.variantName !== item.productName ? ` (${item.variantName})` : '');
+    rows.push(`
+      <div style="margin-bottom:5px">
+        <div style="font-weight:bold">${esc(name)}</div>
+        <div style="display:flex;justify-content:space-between">
+          <span>${item.qty} x ${formatRp(item.hargaJual)}</span>
+          <span>${formatRp(item.hargaJual * item.qty)}</span>
+        </div>
+      </div>`);
+  });
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Struk ${esc(receipt.txId.toUpperCase())}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Courier New', monospace; font-size: 12px; background: #fff; color: #000; }
+      .wrap { max-width: 300px; margin: 0 auto; padding: 12px 8px; }
+      .center { text-align: center; }
+      .row { display: flex; justify-content: space-between; margin: 2px 0; }
+      .bold { font-weight: bold; }
+      .big { font-size: 20px; font-weight: bold; }
+      .divider { text-align: center; margin: 5px 0; letter-spacing: 0; }
+      .footer { text-align: center; font-size: 10px; color: #666; margin-top: 10px; }
+      @media print { @page { margin: 4mm; } }
+    </style>
+  </head><body><div class="wrap">
+    ${storeSettings.showNameOnReceipt ? `<div class="center bold" style="font-size:15px;margin-bottom:2px">${esc(storeSettings.name)}</div>` : ''}
+    ${storeSettings.showAddressOnReceipt && storeSettings.address ? `<div class="center" style="font-size:11px;margin-bottom:2px">${esc(storeSettings.address)}</div>` : ''}
+    ${storeSettings.phone ? `<div class="center" style="font-size:11px;margin-bottom:4px">Telp: ${esc(storeSettings.phone)}</div>` : ''}
+    <div class="divider">${divider}</div>
+    <div class="center big" style="margin:5px 0">ANTRIAN #${receipt.queueNumber}</div>
+    <div class="divider">${divider}</div>
+    <div style="font-size:11px;margin:4px 0">
+      <div>Tanggal : ${esc(formatDate(receipt.tanggal))}</div>
+      <div>Jam     : ${esc(receipt.jam)}</div>
+      <div>Struk   : #${esc(receipt.txId.toUpperCase())}</div>
+      <div>Bayar   : ${esc(paymentLabel.toUpperCase())}</div>
+      ${receipt.customerName ? `<div>Pelanggan: ${esc(receipt.customerName)}</div>` : ''}
+    </div>
+    <div class="divider">${divider}</div>
+    ${rows.join('')}
+    ${receipt.catatan ? `<div style="font-size:11px;font-style:italic;margin-bottom:4px">Catatan: ${esc(receipt.catatan)}</div>` : ''}
+    <div class="divider">${divider}</div>
+    <div class="row"><span>Subtotal</span><span>${formatRp(receipt.subtotal)}</span></div>
+    ${receipt.discountAmount > 0 ? `<div class="row"><span>Diskon${receipt.discountMode === 'persen' ? ` ${receipt.discountValue}%` : ''}</span><span>-${formatRp(receipt.discountAmount)}</span></div>` : ''}
+    ${receipt.taxAmount > 0 ? `<div class="row"><span>Pajak ${receipt.taxPct}%</span><span>+${formatRp(receipt.taxAmount)}</span></div>` : ''}
+    <div class="divider">${divider}</div>
+    <div class="row bold" style="font-size:14px"><span>TOTAL</span><span>${formatRp(receipt.nominal)}</span></div>
+    ${receipt.paymentMethod === 'tunai' ? `
+      <div class="row"><span>Dibayar</span><span>${formatRp(receipt.cashPaid)}</span></div>
+      <div class="row bold"><span>Kembali</span><span>${formatRp(receipt.kembalian)}</span></div>` : ''}
+    <div class="divider">${divider}</div>
+    ${storeSettings.receiptFooter ? `<div class="footer">${esc(storeSettings.receiptFooter)}</div>` : ''}
+    <div class="footer" style="margin-top:8px">Powered by CeuMilan POS</div>
+  </div></body></html>`;
+}
+
+function buildBarcodeLabelsHtml(items: CartItem[], storeName: string): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const labels: { name: string; price: number; sku: string }[] = [];
+  items.forEach(item => {
+    const name = item.productName + (item.variantName !== item.productName ? ` - ${item.variantName}` : '');
+    for (let i = 0; i < item.qty; i++) {
+      labels.push({ name, price: item.hargaJual, sku: item.variantId.slice(-8).toUpperCase() });
+    }
+  });
+  const labelHtml = labels.map(l => `
+    <div style="display:inline-block;width:60mm;height:30mm;border:1px solid #ccc;padding:4px 6px;margin:2px;font-family:monospace;font-size:9px;vertical-align:top;box-sizing:border-box;page-break-inside:avoid;overflow:hidden">
+      <div style="font-weight:bold;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.name)}</div>
+      <div style="font-size:8px;color:#666">${esc(storeName)}</div>
+      <div style="font-size:13px;font-weight:bold;margin:3px 0">${formatRp(l.price)}</div>
+      <div style="font-size:8px;letter-spacing:2px;border-top:1px solid #eee;padding-top:2px">${esc(l.sku)}</div>
+    </div>`).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Label Barcode</title>
+    <style>body{margin:4px;background:#fff}@media print{@page{margin:2mm}}</style>
+  </head><body>${labelHtml}</body></html>`;
+}
+
 // ─── ReceiptView ──────────────────────────────────────────────────────────────
-function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
+function ReceiptView({ receipt, storeSettings, onNewOrder }: {
   receipt: ReceiptData;
   storeSettings: StoreSettings;
   onNewOrder: () => void;
-  onPrint: () => void;
 }) {
-  const [showBarcodeLabels, setShowBarcodeLabels] = React.useState(false);
-
   const buildWhatsAppText = () => {
     const lines: string[] = [];
     lines.push(`*Struk Pembayaran — ${storeSettings.name}*`);
@@ -1142,298 +1219,156 @@ function ReceiptView({ receipt, storeSettings, onNewOrder, onPrint }: {
   const paymentLabel = PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod;
 
   return (
-    <>
-      {/* Printable receipt */}
-      <div id="kasir-receipt-print" style={{ display: 'none' }}>
-        <PrintReceipt receipt={receipt} storeSettings={storeSettings} />
-      </div>
-
-      {/* Printable barcode labels */}
-      {showBarcodeLabels && (
-        <div id="kasir-barcode-labels" style={{ display: 'none' }}>
-          <BarcodeLabels items={receipt.items} txId={receipt.txId} storeName={storeSettings.name} />
-        </div>
-      )}
-
-      {/* Screen receipt */}
-      <div className="flex flex-col h-[calc(100dvh-64px-80px)] md:h-[calc(100dvh-64px)] overflow-hidden bg-[#F5F7FA]">
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          <div className="max-w-sm mx-auto space-y-4">
-            {/* Success header */}
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              className="flex flex-col items-center text-center py-6 gap-3"
-            >
-              <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
-                <CheckCircle2 className="w-9 h-9 text-green-500" />
+    <div className="flex flex-col h-[calc(100dvh-64px-80px)] md:h-[calc(100dvh-64px)] overflow-hidden bg-[#F5F7FA]">
+      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+        <div className="max-w-sm mx-auto space-y-4">
+          {/* Success header */}
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="flex flex-col items-center text-center py-6 gap-3"
+          >
+            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle2 className="w-9 h-9 text-green-500" />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-[#1A1A2E]">Pembayaran Berhasil!</h2>
+              <div className="flex items-center gap-2 justify-center mt-2">
+                <span className="text-2xl font-black text-primary">#{receipt.queueNumber}</span>
+                <span className="text-xs text-gray-400 font-bold">No. Antrian</span>
               </div>
-              <div>
-                <h2 className="text-xl font-black text-[#1A1A2E]">Pembayaran Berhasil!</h2>
-                <div className="flex items-center gap-2 justify-center mt-2">
-                  <span className="text-2xl font-black text-primary">#{receipt.queueNumber}</span>
-                  <span className="text-xs text-gray-400 font-bold">No. Antrian</span>
-                </div>
-                <p className="text-xs text-gray-400 font-medium mt-1">Struk #{receipt.txId.toUpperCase()}</p>
-              </div>
-            </motion.div>
+              <p className="text-xs text-gray-400 font-medium mt-1">Struk #{receipt.txId.toUpperCase()}</p>
+            </div>
+          </motion.div>
 
-            {/* Receipt card */}
-            <motion.div
-              initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}
-              className="bg-white rounded-3xl shadow-sm overflow-hidden"
-            >
-              {/* Store header */}
-              <div className="bg-gradient-to-br from-primary to-orange-500 text-white px-5 py-4 text-center">
-                {storeSettings.logo && storeSettings.showLogoOnReceipt && (
-                  <img src={storeSettings.logo} alt="" className="h-10 object-contain mx-auto mb-2 rounded-xl" />
-                )}
-                {storeSettings.showNameOnReceipt && (
-                  <p className="font-black text-base">{storeSettings.name}</p>
-                )}
-                {storeSettings.showAddressOnReceipt && storeSettings.address && (
-                  <p className="text-[11px] text-white/80 mt-0.5">{storeSettings.address}</p>
-                )}
-                {receipt.customerName && (
-                  <p className="text-[11px] text-white/90 mt-1 font-bold">Pelanggan: {receipt.customerName}</p>
-                )}
-                <p className="text-[10px] text-white/70 mt-1">{formatDate(receipt.tanggal)} · {receipt.jam}</p>
-              </div>
+          {/* Receipt card */}
+          <motion.div
+            initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}
+            className="bg-white rounded-3xl shadow-sm overflow-hidden"
+          >
+            {/* Store header */}
+            <div className="bg-gradient-to-br from-primary to-orange-500 text-white px-5 py-4 text-center">
+              {storeSettings.logo && storeSettings.showLogoOnReceipt && (
+                <img src={storeSettings.logo} alt="" className="h-10 object-contain mx-auto mb-2 rounded-xl" />
+              )}
+              {storeSettings.showNameOnReceipt && (
+                <p className="font-black text-base">{storeSettings.name}</p>
+              )}
+              {storeSettings.showAddressOnReceipt && storeSettings.address && (
+                <p className="text-[11px] text-white/80 mt-0.5">{storeSettings.address}</p>
+              )}
+              {receipt.customerName && (
+                <p className="text-[11px] text-white/90 mt-1 font-bold">Pelanggan: {receipt.customerName}</p>
+              )}
+              <p className="text-[10px] text-white/70 mt-1">{formatDate(receipt.tanggal)} · {receipt.jam}</p>
+            </div>
 
-              {/* Items */}
-              <div className="px-5 py-4 space-y-2.5 border-b border-dashed border-gray-200">
-                {receipt.items.map(item => (
-                  <div key={item.variantId} className="flex justify-between items-start">
-                    <div>
-                      <p className="text-sm font-bold text-[#1A1A2E]">{item.productName}</p>
-                      {item.variantName !== item.productName && (
-                        <p className="text-xs text-gray-400">{item.variantName}</p>
-                      )}
-                      <p className="text-xs text-gray-400">{formatRp(item.hargaJual)} × {item.qty}</p>
-                    </div>
-                    <p className="text-sm font-black text-[#1A1A2E]">{formatRp(item.hargaJual * item.qty)}</p>
+            {/* Items */}
+            <div className="px-5 py-4 space-y-2.5 border-b border-dashed border-gray-200">
+              {receipt.items.map(item => (
+                <div key={item.variantId} className="flex justify-between items-start">
+                  <div>
+                    <p className="text-sm font-bold text-[#1A1A2E]">{item.productName}</p>
+                    {item.variantName !== item.productName && (
+                      <p className="text-xs text-gray-400">{item.variantName}</p>
+                    )}
+                    <p className="text-xs text-gray-400">{formatRp(item.hargaJual)} × {item.qty}</p>
                   </div>
-                ))}
-                {receipt.catatan && (
-                  <p className="text-xs text-gray-400 italic pt-1">Catatan: {receipt.catatan}</p>
-                )}
-              </div>
+                  <p className="text-sm font-black text-[#1A1A2E]">{formatRp(item.hargaJual * item.qty)}</p>
+                </div>
+              ))}
+              {receipt.catatan && (
+                <p className="text-xs text-gray-400 italic pt-1">Catatan: {receipt.catatan}</p>
+              )}
+            </div>
 
-              {/* Totals */}
-              <div className="px-5 py-4 space-y-2 border-b border-dashed border-gray-200">
+            {/* Totals */}
+            <div className="px-5 py-4 space-y-2 border-b border-dashed border-gray-200">
+              <div className="flex justify-between text-sm text-gray-500">
+                <span>Subtotal</span>
+                <span className="font-bold text-[#1A1A2E]">{formatRp(receipt.subtotal)}</span>
+              </div>
+              {receipt.discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Diskon {receipt.discountMode === 'persen' ? `(${receipt.discountValue}%)` : ''}</span>
+                  <span className="font-bold">-{formatRp(receipt.discountAmount)}</span>
+                </div>
+              )}
+              {receipt.taxAmount > 0 && (
                 <div className="flex justify-between text-sm text-gray-500">
-                  <span>Subtotal</span>
-                  <span className="font-bold text-[#1A1A2E]">{formatRp(receipt.subtotal)}</span>
+                  <span>Pajak ({receipt.taxPct}%)</span>
+                  <span className="font-bold text-[#1A1A2E]">+{formatRp(receipt.taxAmount)}</span>
                 </div>
-                {receipt.discountAmount > 0 && (
-                  <div className="flex justify-between text-sm text-green-600">
-                    <span>Diskon {receipt.discountMode === 'persen' ? `(${receipt.discountValue}%)` : ''}</span>
-                    <span className="font-bold">-{formatRp(receipt.discountAmount)}</span>
-                  </div>
-                )}
-                {receipt.taxAmount > 0 && (
-                  <div className="flex justify-between text-sm text-gray-500">
-                    <span>Pajak ({receipt.taxPct}%)</span>
-                    <span className="font-bold text-[#1A1A2E]">+{formatRp(receipt.taxAmount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-black text-[#1A1A2E] pt-2 border-t border-gray-100">
-                  <span>TOTAL</span>
-                  <span className="text-primary">{formatRp(receipt.nominal)}</span>
-                </div>
+              )}
+              <div className="flex justify-between text-base font-black text-[#1A1A2E] pt-2 border-t border-gray-100">
+                <span>TOTAL</span>
+                <span className="text-primary">{formatRp(receipt.nominal)}</span>
               </div>
+            </div>
 
-              {/* Payment info */}
-              <div className="px-5 py-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Metode</span>
-                  <span className="font-bold text-[#1A1A2E]">{paymentLabel}</span>
-                </div>
-                {receipt.paymentMethod === 'tunai' && (
-                  <>
-                    <div className="flex justify-between text-sm mt-1.5">
-                      <span className="text-gray-500">Dibayar</span>
-                      <span className="font-bold text-[#1A1A2E]">{formatRp(receipt.cashPaid)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm mt-1.5">
-                      <span className="text-gray-500">Kembalian</span>
-                      <span className="font-black text-green-600">{formatRp(receipt.kembalian)}</span>
-                    </div>
-                  </>
-                )}
-                {storeSettings.receiptFooter && (
-                  <p className="text-center text-xs text-gray-400 font-medium mt-4 pt-3 border-t border-dashed border-gray-200">
-                    {storeSettings.receiptFooter}
-                  </p>
-                )}
+            {/* Payment info */}
+            <div className="px-5 py-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Metode</span>
+                <span className="font-bold text-[#1A1A2E]">{paymentLabel}</span>
               </div>
-            </motion.div>
-          </div>
+              {receipt.paymentMethod === 'tunai' && (
+                <>
+                  <div className="flex justify-between text-sm mt-1.5">
+                    <span className="text-gray-500">Dibayar</span>
+                    <span className="font-bold text-[#1A1A2E]">{formatRp(receipt.cashPaid)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-1.5">
+                    <span className="text-gray-500">Kembalian</span>
+                    <span className="font-black text-green-600">{formatRp(receipt.kembalian)}</span>
+                  </div>
+                </>
+              )}
+              {storeSettings.receiptFooter && (
+                <p className="text-center text-xs text-gray-400 font-medium mt-4 pt-3 border-t border-dashed border-gray-200">
+                  {storeSettings.receiptFooter}
+                </p>
+              )}
+            </div>
+          </motion.div>
         </div>
+      </div>
 
-        {/* Action buttons */}
-        <div className="flex-shrink-0 p-4 bg-white border-t border-gray-100 space-y-2">
-          {/* Top row: Print + WhatsApp */}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={onPrint}
-              className="flex-1 h-11 rounded-2xl font-bold border-gray-200 text-gray-600 gap-2"
-            >
-              <Printer className="w-4 h-4" /> Cetak Struk
-            </Button>
-            <Button
-              onClick={sendToWhatsApp}
-              className="flex-1 h-11 rounded-2xl font-bold bg-green-500 hover:bg-green-600 text-white gap-2"
-            >
-              <MessageCircle className="w-4 h-4" /> Kirim WA
-            </Button>
-          </div>
-          {/* Bottom row: Labels + New */}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => { setShowBarcodeLabels(true); setTimeout(() => window.print(), 200); }}
-              className="flex-1 h-10 rounded-2xl font-bold border-gray-200 text-gray-500 gap-2 text-xs"
-            >
-              <Hash className="w-3.5 h-3.5" /> Label Barcode
-            </Button>
-            <Button
-              onClick={onNewOrder}
-              className="flex-1 h-10 orange-gradient text-white font-black rounded-2xl shadow-lg shadow-brand-200 gap-2 text-sm"
-            >
-              <Receipt className="w-4 h-4" /> Transaksi Baru
-            </Button>
-          </div>
+      {/* Action buttons */}
+      <div className="flex-shrink-0 p-4 bg-white border-t border-gray-100 space-y-2">
+        {/* Top row: Print + WhatsApp */}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => openPrintWindow(buildReceiptHtml(receipt, storeSettings))}
+            className="flex-1 h-11 rounded-2xl font-bold border-gray-200 text-gray-600 gap-2"
+          >
+            <Printer className="w-4 h-4" /> Cetak Struk
+          </Button>
+          <Button
+            onClick={sendToWhatsApp}
+            className="flex-1 h-11 rounded-2xl font-bold bg-green-500 hover:bg-green-600 text-white gap-2"
+          >
+            <MessageCircle className="w-4 h-4" /> Kirim WA
+          </Button>
         </div>
-      </div>
-    </>
-  );
-}
-
-// ─── PrintReceipt (thermal 80mm format) ──────────────────────────────────────
-function PrintReceipt({ receipt, storeSettings }: { receipt: ReceiptData; storeSettings: StoreSettings }) {
-  const style: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px', maxWidth: '300px', margin: '0 auto' };
-  const divider = '================================';
-  const paymentLabel = PAYMENT_OPTIONS.find(p => p.value === receipt.paymentMethod)?.label || receipt.paymentMethod;
-  return (
-    <div style={style}>
-      {storeSettings.showNameOnReceipt && (
-        <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '15px', marginBottom: '2px' }}>
-          {storeSettings.name}
+        {/* Bottom row: Labels + New */}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => openPrintWindow(buildBarcodeLabelsHtml(receipt.items, storeSettings.name))}
+            className="flex-1 h-10 rounded-2xl font-bold border-gray-200 text-gray-500 gap-2 text-xs"
+          >
+            <Hash className="w-3.5 h-3.5" /> Label Barcode
+          </Button>
+          <Button
+            onClick={onNewOrder}
+            className="flex-1 h-10 orange-gradient text-white font-black rounded-2xl shadow-lg shadow-brand-200 gap-2 text-sm"
+          >
+            <Receipt className="w-4 h-4" /> Transaksi Baru
+          </Button>
         </div>
-      )}
-      {storeSettings.showAddressOnReceipt && storeSettings.address && (
-        <div style={{ textAlign: 'center', fontSize: '11px', marginBottom: '2px' }}>{storeSettings.address}</div>
-      )}
-      {storeSettings.phone && (
-        <div style={{ textAlign: 'center', fontSize: '11px', marginBottom: '4px' }}>Telp: {storeSettings.phone}</div>
-      )}
-      <div style={{ textAlign: 'center' }}>{divider}</div>
-      <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '18px', margin: '4px 0' }}>
-        ANTRIAN #{receipt.queueNumber}
-      </div>
-      <div style={{ textAlign: 'center' }}>{divider}</div>
-      <div style={{ fontSize: '11px', marginTop: '4px' }}>
-        <div>Tanggal : {formatDate(receipt.tanggal)}</div>
-        <div>Jam     : {receipt.jam}</div>
-        <div>Struk   : #{receipt.txId.toUpperCase()}</div>
-        <div>Bayar   : {paymentLabel.toUpperCase()}</div>
-        {receipt.customerName && <div>Pelanggan: {receipt.customerName}</div>}
-      </div>
-      <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
-      {receipt.items.map(item => (
-        <div key={item.variantId} style={{ marginBottom: '4px' }}>
-          <div style={{ fontWeight: 'bold' }}>
-            {item.productName}{item.variantName !== item.productName ? ` (${item.variantName})` : ''}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>{item.qty} x {formatRp(item.hargaJual)}</span>
-            <span>{formatRp(item.hargaJual * item.qty)}</span>
-          </div>
-        </div>
-      ))}
-      {receipt.catatan && (
-        <div style={{ fontSize: '11px', fontStyle: 'italic' }}>Catatan: {receipt.catatan}</div>
-      )}
-      <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Subtotal</span><span>{formatRp(receipt.subtotal)}</span>
-      </div>
-      {receipt.discountAmount > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span>Diskon{receipt.discountMode === 'persen' ? ` ${receipt.discountValue}%` : ''}</span>
-          <span>-{formatRp(receipt.discountAmount)}</span>
-        </div>
-      )}
-      {receipt.taxAmount > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span>Pajak {receipt.taxPct}%</span><span>+{formatRp(receipt.taxAmount)}</span>
-        </div>
-      )}
-      <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px' }}>
-        <span>TOTAL</span><span>{formatRp(receipt.nominal)}</span>
-      </div>
-      {receipt.paymentMethod === 'tunai' && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Dibayar</span><span>{formatRp(receipt.cashPaid)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-            <span>Kembali</span><span>{formatRp(receipt.kembalian)}</span>
-          </div>
-        </>
-      )}
-      <div style={{ textAlign: 'center', margin: '4px 0' }}>{divider}</div>
-      {storeSettings.receiptFooter && (
-        <div style={{ textAlign: 'center', fontSize: '11px', marginTop: '4px' }}>{storeSettings.receiptFooter}</div>
-      )}
-      <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '8px', color: '#888' }}>
-        Powered by CeuMilan POS
       </div>
     </div>
   );
 }
 
-// ─── BarcodeLabels (print label for each item) ────────────────────────────────
-function BarcodeLabels({ items, txId, storeName }: { items: CartItem[]; txId: string; storeName: string }) {
-  const labelStyle: React.CSSProperties = {
-    display: 'inline-block',
-    width: '60mm',
-    height: '30mm',
-    border: '1px solid #ccc',
-    padding: '4px 6px',
-    margin: '2px',
-    fontFamily: 'monospace',
-    fontSize: '9px',
-    verticalAlign: 'top',
-    boxSizing: 'border-box',
-    pageBreakInside: 'avoid',
-  };
-  const labels: { name: string; price: number; sku: string }[] = [];
-  items.forEach(item => {
-    for (let i = 0; i < item.qty; i++) {
-      labels.push({
-        name: `${item.productName}${item.variantName !== item.productName ? ` - ${item.variantName}` : ''}`,
-        price: item.hargaJual,
-        sku: item.variantId.slice(-8).toUpperCase(),
-      });
-    }
-  });
-  return (
-    <div style={{ padding: '8px' }}>
-      {labels.map((label, idx) => (
-        <div key={idx} style={labelStyle}>
-          <div style={{ fontWeight: 'bold', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {label.name}
-          </div>
-          <div style={{ fontSize: '8px', color: '#666' }}>{storeName}</div>
-          <div style={{ fontSize: '12px', fontWeight: 'bold', margin: '3px 0' }}>{formatRp(label.price)}</div>
-          <div style={{ fontSize: '8px', letterSpacing: '2px', borderTop: '1px solid #eee', paddingTop: '2px' }}>
-            {label.sku}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
