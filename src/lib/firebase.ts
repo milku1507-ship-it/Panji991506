@@ -71,20 +71,22 @@ const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || firebas
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Use initializeAuth with specific persistence and resolver
-// We use indexedDBLocalPersistence for better compatibility in iframes, 
-// but fallback to browserLocalPersistence which is standard for web.
+// Use initializeAuth with a persistence fallback chain.
+// [indexedDBLocalPersistence, browserLocalPersistence] means:
+//   1. Firebase tries IndexedDB first (works in both top-level and iframe contexts
+//      that share the same origin — i.e., deployed app vs Replit preview).
+//   2. Falls back to localStorage if IndexedDB is unavailable.
+// DO NOT switch persistence based on iframe detection — that caused a split-storage
+// bug where tokens written by a top-level tab couldn't be read by the iframe and
+// vice-versa, causing the "random logout on refresh" / "login mental" issue.
 let authInstance;
 try {
-  // Check if we are in an iframe
-  const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
-  
   authInstance = initializeAuth(app, {
-    persistence: isInIframe ? indexedDBLocalPersistence : browserLocalPersistence,
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
     popupRedirectResolver: browserPopupRedirectResolver,
   });
 } catch (e) {
-  // If already initialized or fails, use getAuth
+  // Already initialized (HMR) — grab the existing instance.
   authInstance = getAuth(app);
 }
 
@@ -108,7 +110,14 @@ try {
 export const db = dbInstance;
 
 export const storage = getStorage(app);
+
 export const googleProvider = new GoogleAuthProvider();
+// Always show Google's account-picker even when the user is already signed in.
+// This prevents stale cached credentials from causing "missing initial state"
+// errors on the next login attempt after a logout.
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
 
 // Force network connection
 export { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject };

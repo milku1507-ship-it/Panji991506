@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
-import { auth, signOut, User as FirebaseUser } from '../lib/firebase';
+import { User as FirebaseUser } from '../lib/firebase';
 
 type NavItem = {
   id: string;
@@ -55,6 +54,7 @@ interface LayoutProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onResetData: () => void;
+  onLogout: () => Promise<void>;
   onBack?: () => void;
   showBack?: boolean;
   storeSettings: StoreSettings;
@@ -62,20 +62,15 @@ interface LayoutProps {
   fullBleed?: boolean;
 }
 
-export default function Layout({ children, activeTab, setActiveTab, onResetData, onBack, showBack, storeSettings, user, fullBleed }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, onResetData, onLogout, onBack, showBack, storeSettings, user, fullBleed }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   const handleLogout = async () => {
-    // Close the drawer first so no stale UI references user data
-    // while the component is still mounted but user is transitioning to null.
+    // Close the drawer first so the menu doesn't flash stale user data.
     setIsMenuOpen(false);
-    try {
-      await signOut(auth);
-      toast.success('Kamu berhasil keluar');
-    } catch (error) {
-      console.error('Logout error:', error);
-      toast.error('Gagal keluar.');
-    }
+    // Delegate to the comprehensive logout handler in App.tsx, which clears
+    // all auth state, caches, and sessionStorage before signing out.
+    await onLogout();
   };
 
   const handleGlobalBack = () => {

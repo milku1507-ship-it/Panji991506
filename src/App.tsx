@@ -16,9 +16,9 @@ import { Ingredient, Product, Transaction, StoreSettings, Dompet } from './types
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
-import { Store, LogOut } from 'lucide-react';
+import { Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { auth, db, onAuthStateChanged, doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, serverTimestamp, User, OperationType, handleFirestoreError, sanitizeData } from './lib/firebase';
+import { auth, db, onAuthStateChanged, signOut, doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, serverTimestamp, User, OperationType, handleFirestoreError, sanitizeData } from './lib/firebase';
 import LoginPage from './components/LoginPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -641,6 +641,40 @@ function AppContent() {
     setBackAction(null);
   };
 
+  // ─── Comprehensive logout ──────────────────────────────────────────────────
+  // Clears ALL auth-related storage so the next signInWithPopup starts with a
+  // completely clean slate (prevents "missing initial state" errors and ensures
+  // new-session data never bleeds in from a previous user's cache).
+  const handleLogout = React.useCallback(async () => {
+    // 1. Remove OAuth flow state (nonces, state params) from sessionStorage.
+    //    These are written by signInWithRedirect and can cause "missing initial
+    //    state" errors if they're stale when a new login attempt begins.
+    try { sessionStorage.clear(); } catch (_) {}
+
+    // 2. Remove any Firebase redirect-state keys from localStorage.
+    try {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('firebase:pending') || key.startsWith('firebase:authEvent')) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (_) {}
+
+    // 3. Clear app-level caches so the next user doesn't see stale branding.
+    try { localStorage.removeItem(SETTINGS_CACHE_KEY); } catch (_) {}
+    try { localStorage.removeItem('cireng_store_settings'); } catch (_) {}
+
+    // 4. Sign out from Firebase — revokes the token and triggers
+    //    onAuthStateChanged(null), which resets all React state.
+    try {
+      await signOut(auth);
+      toast.success('Kamu berhasil keluar');
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Gagal keluar, coba lagi.');
+    }
+  }, []);
+
   // Wire device/browser back to in-app navigation:
   // - if a sub-page has registered backAction, run it
   // - else if we're not on dashboard, go to dashboard
@@ -785,6 +819,7 @@ function AppContent() {
         activeTab={activeTab} 
         setActiveTab={handleTabChange} 
         onResetData={handleResetData}
+        onLogout={handleLogout}
         onBack={backAction || undefined}
         showBack={!!backAction}
         storeSettings={storeSettings}
