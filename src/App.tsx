@@ -773,7 +773,7 @@ function AppContent() {
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} dompets={dompets} />;
       case 'roas':
-        return <ROASCalculator products={products} ingredients={ingredients} user={user} />;
+        return <ROASCalculator products={products} ingredients={ingredients} transactions={transactions} user={user} />;
       case 'store-settings':
         return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} onManageCategories={() => handleTabChange('category-settings')} />;
       case 'category-settings':
