@@ -419,6 +419,7 @@ function parseAll(
 type FocusField = 'tanggal' | 'jenis' | 'kategori' | 'keterangan' | 'nominal' | 'qty_beli' | null;
 
 interface EditCardProps {
+  key?: React.Key;
   fields: QuickEntryFields;
   raw: string;
   products: Product[];

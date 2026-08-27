@@ -1945,7 +1945,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                   
                   {t.penjualan_detail && t.penjualan_detail.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-dashed border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-                      {Array.from(new Map(t.penjualan_detail.map(pd => [pd.produk_id, pd])).values()).map((pd, pdIdx) => (
+                      {Array.from(new Map<string, PenjualanDetail>(t.penjualan_detail.map((pd: PenjualanDetail) => [pd.produk_id, pd])).values()).map((pd, pdIdx) => (
                         <div key={`${pd.produk_id}-${pdIdx}`} className="text-[10px] text-gray-500 bg-white/50 p-1.5 rounded-lg border border-gray-100/50 flex items-start gap-1.5">
                           <Package className="w-3 h-3 text-primary shrink-0 mt-0.5" />
                           <div className="min-w-0">

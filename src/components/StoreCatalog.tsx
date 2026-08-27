@@ -695,6 +695,7 @@ export default function StoreCatalog({ userId, onBack }: StoreCatalogProps) {
 function MenuListItem({
   product, cart, onOpen, onQtyChange, onQuickAdd,
 }: {
+  key?: React.Key;
   product: Product;
   cart: CartItem[];
   onOpen: (p: Product) => void;

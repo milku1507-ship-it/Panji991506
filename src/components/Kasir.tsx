@@ -667,6 +667,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
 
 // ─── ProductCard ──────────────────────────────────────────────────────────────
 function ProductCard({ product, cart, onAdd }: {
+  key?: React.Key;
   product: Product;
   cart: CartItem[];
   onAdd: (product: Product, variant: { id: string; nama: string; harga_jual: number }) => void;
