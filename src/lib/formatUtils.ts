@@ -85,3 +85,40 @@ export function formatCurrency(value: number, compact: boolean = false): string 
     maximumFractionDigits: 0,
   }).format(value);
 }
+
+/**
+ * Calculations and validations for Harga Coret and Diskon.
+ */
+export function calculateDiscountFromCoret(hargaJual: number, hargaCoret: number) {
+  if (!hargaCoret || hargaCoret <= 0) {
+    return { diskonNominal: 0, diskonPersen: 0, isValid: true, error: '' };
+  }
+  if (hargaCoret <= hargaJual) {
+    return { 
+      diskonNominal: 0, 
+      diskonPersen: 0, 
+      isValid: false, 
+      error: 'Harga Coret harus lebih tinggi dari Harga Jual.' 
+    };
+  }
+  const diskonNominal = hargaCoret - hargaJual;
+  const diskonPersen = Number(((diskonNominal / hargaCoret) * 100).toFixed(2));
+  return { diskonNominal, diskonPersen, isValid: true, error: '' };
+}
+
+export function calculateCoretFromDiscount(hargaJual: number, diskonPersen: number) {
+  if (!diskonPersen || diskonPersen <= 0) {
+    return { hargaCoret: 0, diskonNominal: 0, isValid: true, error: '' };
+  }
+  if (diskonPersen >= 100) {
+    return { 
+      hargaCoret: 0, 
+      diskonNominal: 0, 
+      isValid: false, 
+      error: 'Persentase diskon harus kurang dari 100%.' 
+    };
+  }
+  const hargaCoret = Math.round(hargaJual / (1 - diskonPersen / 100));
+  const diskonNominal = hargaCoret - hargaJual;
+  return { hargaCoret, diskonNominal, isValid: true, error: '' };
+}

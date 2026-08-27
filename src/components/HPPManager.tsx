@@ -348,6 +348,205 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     }
   };
 
+function VariantPricingSection({ editingVariant }: { editingVariant: Variant | null }) {
+  const [hargaJual, setHargaJual] = React.useState<number>(editingVariant?.harga_jual || 0);
+  const [hargaCoret, setHargaCoret] = React.useState<string>(
+    editingVariant?.harga_coret ? String(editingVariant.harga_coret) : ''
+  );
+  const [diskonPersen, setDiskonPersen] = React.useState<string>(
+    editingVariant?.diskon_persen ? String(editingVariant.diskon_persen) : ''
+  );
+  const [lastMode, setLastMode] = React.useState<'coret' | 'diskon'>('coret');
+  const [errorMsg, setErrorMsg] = React.useState<string>('');
+
+  React.useEffect(() => {
+    setHargaJual(editingVariant?.harga_jual || 0);
+    setHargaCoret(editingVariant?.harga_coret ? String(editingVariant.harga_coret) : '');
+    setDiskonPersen(editingVariant?.diskon_persen ? String(editingVariant.diskon_persen) : '');
+    setErrorMsg('');
+  }, [editingVariant]);
+
+  const handleHargaJualChange = (newHj: number) => {
+    setHargaJual(newHj);
+    const hcNum = Number(hargaCoret) || 0;
+    const diskonNum = Number(diskonPersen) || 0;
+
+    if (lastMode === 'coret' && hcNum > 0) {
+      if (hcNum <= newHj) {
+        setErrorMsg('Harga Coret harus lebih tinggi dari Harga Jual.');
+        setDiskonPersen('');
+      } else {
+        setErrorMsg('');
+        const calcDiskon = Number((((hcNum - newHj) / hcNum) * 100).toFixed(2));
+        setDiskonPersen(String(calcDiskon));
+      }
+    } else if (lastMode === 'diskon' && diskonNum > 0 && diskonNum < 100) {
+      setErrorMsg('');
+      const calcCoret = Math.round(newHj / (1 - diskonNum / 100));
+      setHargaCoret(String(calcCoret));
+    }
+  };
+
+  const handleHargaCoretChange = (valStr: string) => {
+    setHargaCoret(valStr);
+    setLastMode('coret');
+    const valNum = Number(valStr) || 0;
+
+    if (!valStr || valNum === 0) {
+      setDiskonPersen('');
+      setErrorMsg('');
+      return;
+    }
+
+    if (valNum <= hargaJual) {
+      setErrorMsg('Harga Coret harus lebih tinggi dari Harga Jual.');
+      setDiskonPersen('');
+    } else {
+      setErrorMsg('');
+      const calcDiskon = Number((((valNum - hargaJual) / valNum) * 100).toFixed(2));
+      setDiskonPersen(String(calcDiskon));
+    }
+  };
+
+  const handleDiskonPersenChange = (valStr: string) => {
+    setDiskonPersen(valStr);
+    setLastMode('diskon');
+    const valNum = Number(valStr) || 0;
+
+    if (!valStr || valNum === 0) {
+      setHargaCoret('');
+      setErrorMsg('');
+      return;
+    }
+
+    if (valNum >= 100 || valNum < 0) {
+      setErrorMsg('Persentase diskon harus antara 1% dan 99%.');
+      setHargaCoret('');
+    } else {
+      setErrorMsg('');
+      const calcCoret = Math.round(hargaJual / (1 - valNum / 100));
+      setHargaCoret(String(calcCoret));
+    }
+  };
+
+  const hcNum = Number(hargaCoret) || 0;
+  const diskonNominal = hcNum > hargaJual ? hcNum - hargaJual : 0;
+
+  return (
+    <div className="space-y-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+        <div>
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+            HARGA JUAL, HARGA CORET & DISKON
+          </h4>
+          <p className="text-[10px] text-slate-500 font-medium">Sinkronisasi 2 Arah (Nominal ↔ Persentase)</p>
+        </div>
+        <Badge variant="outline" className="text-[9px] bg-white border-slate-300 font-bold">
+          Auto Calc
+        </Badge>
+      </div>
+
+      <VariantPricingInputs 
+        hargaJual={hargaJual}
+        hargaCoret={hargaCoret}
+        diskonPersen={diskonPersen}
+        editingVariant={editingVariant}
+        handleHargaJualChange={handleHargaJualChange}
+        handleHargaCoretChange={handleHargaCoretChange}
+        handleDiskonPersenChange={handleDiskonPersenChange}
+      />
+
+      {errorMsg ? (
+        <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs font-bold text-rose-700 flex items-center gap-2">
+          <span>⚠️</span> {errorMsg}
+        </div>
+      ) : hcNum > hargaJual && diskonNominal > 0 ? (
+        <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1">
+          <p className="font-bold">
+            🏷️ Harga Coret: <span className="line-through">{formatCurrency(hcNum)}</span> → Harga Jual: <span className="font-black text-emerald-950">{formatCurrency(hargaJual)}</span>
+          </p>
+          <p className="text-[11px] text-emerald-700 font-medium">
+            Hemat: <strong>{formatCurrency(diskonNominal)}</strong> ({Number(diskonPersen).toFixed(2)}% off)
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function VariantPricingInputs({
+  hargaJual,
+  hargaCoret,
+  diskonPersen,
+  editingVariant,
+  handleHargaJualChange,
+  handleHargaCoretChange,
+  handleDiskonPersenChange,
+}: any) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="harga_jual" className="font-bold text-xs text-gray-700">
+            Harga Jual / pcs (Transaksi) *
+          </Label>
+          <Input 
+            id="harga_jual" 
+            name="harga_jual" 
+            type="number" 
+            value={hargaJual} 
+            onChange={(e) => handleHargaJualChange(Number(e.target.value) || 0)}
+            placeholder="27000" 
+            required 
+            className="rounded-xl bg-white font-black h-11" 
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="qty_batch" className="font-bold text-xs text-gray-700">Qty Produksi (Batch)</Label>
+          <Input id="qty_batch" name="qty_batch" type="number" defaultValue={editingVariant?.qty_batch || 10} required className="rounded-xl bg-white h-11" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="harga_coret" className="font-bold text-xs text-gray-700">
+            Harga Coret (Metode A)
+          </Label>
+          <Input 
+            id="harga_coret" 
+            name="harga_coret" 
+            type="number" 
+            value={hargaCoret} 
+            onChange={(e) => handleHargaCoretChange(e.target.value)}
+            placeholder="35000" 
+            className="rounded-xl bg-white font-bold h-11" 
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="diskon_persen" className="font-bold text-xs text-gray-700">
+            Diskon % (Metode B)
+          </Label>
+          <div className="relative">
+            <Input 
+              id="diskon_persen" 
+              name="diskon_persen" 
+              type="number" 
+              step="0.01"
+              value={diskonPersen} 
+              onChange={(e) => handleDiskonPersenChange(e.target.value)}
+              placeholder="20" 
+              className="rounded-xl bg-white font-bold h-11 pr-8" 
+            />
+            <span className="absolute right-3 top-3 text-xs font-bold text-gray-400">%</span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
   // Variant CRUD
   const handleSaveVariant = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -359,9 +558,27 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const nama = formData.get('nama') as string;
       const sku = ((formData.get('sku') as string) || '').trim();
       const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
+      const harga_coret_raw = parseInt(formData.get('harga_coret') as string) || 0;
+      const diskon_persen_raw = parseFloat(formData.get('diskon_persen') as string) || 0;
       const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
       const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
       const min_order = Math.max(1, parseInt(formData.get('min_order') as string) || 1);
+
+      let harga_coret: number | undefined = undefined;
+      let diskon_persen: number | undefined = undefined;
+
+      if (harga_coret_raw > 0) {
+        if (harga_coret_raw <= harga_jual) {
+          toast.error("Harga Coret harus lebih tinggi dari Harga Jual.");
+          setIsSaving(false);
+          return;
+        }
+        harga_coret = harga_coret_raw;
+        diskon_persen = Number((((harga_coret_raw - harga_jual) / harga_coret_raw) * 100).toFixed(2));
+      } else if (diskon_persen_raw > 0 && diskon_persen_raw < 100) {
+        diskon_persen = diskon_persen_raw;
+        harga_coret = Math.round(harga_jual / (1 - diskon_persen_raw / 100));
+      }
 
       if (!selectedProductId) {
         throw new Error("Produk tidak dipilih");
@@ -374,13 +591,26 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
       let updatedVarian;
       if (editingVariant) {
-        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing, min_order, biaya_lain: variantFees } : v);
+        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { 
+          ...v, 
+          nama, 
+          sku, 
+          harga_jual, 
+          harga_coret, 
+          diskon_persen, 
+          qty_batch, 
+          harga_packing, 
+          min_order, 
+          biaya_lain: variantFees 
+        } : v);
       } else {
         const newVariant: Variant = {
           id: 'var_' + Math.random().toString(36).substr(2, 9),
           nama,
           sku,
           harga_jual,
+          harga_coret,
+          diskon_persen,
           qty_batch,
           harga_packing,
           min_order,
@@ -1619,17 +1849,88 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       );
                     })()}
                   </div>
-                  <div className="flex justify-between items-center pt-2">
-                    <span className="text-sm font-bold text-gray-500">Harga Jual</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-400">Rp</span>
-                      <Input 
-                        type="number"
-                        value={activeHppVariant.harga_jual}
-                        onChange={(e) => setActiveHppVariant({...activeHppVariant, harga_jual: parseInt(e.target.value) || 0})}
-                        className="w-24 h-8 font-black text-right rounded-lg border-gray-200"
-                      />
+                  <div className="pt-3 border-t border-dashed border-gray-100 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-gray-700">Harga Jual (Transaksi)</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-gray-400">Rp</span>
+                        <Input 
+                          type="number"
+                          value={activeHppVariant.harga_jual}
+                          onChange={(e) => {
+                            const newHj = parseInt(e.target.value) || 0;
+                            let newHc = activeHppVariant.harga_coret;
+                            let newDisc = activeHppVariant.diskon_persen;
+                            if (newHc && newHc > newHj) {
+                              newDisc = Number((((newHc - newHj) / newHc) * 100).toFixed(2));
+                            } else if (newDisc && newDisc > 0 && newDisc < 100) {
+                              newHc = Math.round(newHj / (1 - newDisc / 100));
+                            }
+                            setActiveHppVariant({
+                              ...activeHppVariant,
+                              harga_jual: newHj,
+                              harga_coret: newHc,
+                              diskon_persen: newDisc
+                            });
+                          }}
+                          className="w-28 h-8 font-black text-right rounded-lg border-gray-200"
+                        />
+                      </div>
                     </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-gray-500">Harga Coret</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-gray-400">Rp</span>
+                        <Input 
+                          type="number"
+                          value={activeHppVariant.harga_coret || ''}
+                          placeholder="0"
+                          onChange={(e) => {
+                            const valNum = parseInt(e.target.value) || 0;
+                            if (valNum <= 0) {
+                              setActiveHppVariant({ ...activeHppVariant, harga_coret: undefined, diskon_persen: undefined });
+                            } else if (valNum <= activeHppVariant.harga_jual) {
+                              toast.error("Harga Coret harus lebih tinggi dari Harga Jual.");
+                              setActiveHppVariant({ ...activeHppVariant, harga_coret: valNum, diskon_persen: undefined });
+                            } else {
+                              const newDisc = Number((((valNum - activeHppVariant.harga_jual) / valNum) * 100).toFixed(2));
+                              setActiveHppVariant({ ...activeHppVariant, harga_coret: valNum, diskon_persen: newDisc });
+                            }
+                          }}
+                          className="w-28 h-8 font-bold text-right rounded-lg border-gray-200"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-gray-500">Diskon (%)</span>
+                      <div className="flex items-center gap-1.5">
+                        <Input 
+                          type="number"
+                          step="0.01"
+                          value={activeHppVariant.diskon_persen || ''}
+                          placeholder="0"
+                          onChange={(e) => {
+                            const valNum = parseFloat(e.target.value) || 0;
+                            if (valNum <= 0 || valNum >= 100) {
+                              setActiveHppVariant({ ...activeHppVariant, diskon_persen: undefined, harga_coret: undefined });
+                            } else {
+                              const newHc = Math.round(activeHppVariant.harga_jual / (1 - valNum / 100));
+                              setActiveHppVariant({ ...activeHppVariant, diskon_persen: valNum, harga_coret: newHc });
+                            }
+                          }}
+                          className="w-20 h-8 font-bold text-right rounded-lg border-gray-200"
+                        />
+                        <span className="text-xs font-bold text-gray-400">%</span>
+                      </div>
+                    </div>
+
+                    {activeHppVariant.harga_coret && activeHppVariant.harga_coret > activeHppVariant.harga_jual && (
+                      <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 font-medium">
+                        🏷️ Hemat {formatCurrency(activeHppVariant.harga_coret - activeHppVariant.harga_jual)} ({activeHppVariant.diskon_persen}% off)
+                      </div>
+                    )}
                   </div>
                   {(() => {
                     const hppBase = calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch);
@@ -1955,16 +2256,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Input id="sku" name="sku" defaultValue={editingVariant?.sku || ''} placeholder="Nomor Referensi SKU dari marketplace" className="rounded-xl h-12" />
               <p className="text-[11px] text-gray-400 font-medium">Untuk mencocokkan otomatis saat import XLS marketplace.</p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="harga_jual" className="font-bold">Harga Jual / pcs</Label>
-                <Input id="harga_jual" name="harga_jual" type="number" defaultValue={editingVariant?.harga_jual || 0} placeholder="1100" required className="rounded-xl" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="qty_batch" className="font-bold">Qty Produksi</Label>
-                <Input id="qty_batch" name="qty_batch" type="number" defaultValue={editingVariant?.qty_batch || 10} required className="rounded-xl" />
-              </div>
-            </div>
+            <VariantPricingSection editingVariant={editingVariant} />
             <div className="space-y-2">
               <Label htmlFor="harga_packing" className="font-bold">Harga Packing / pack</Label>
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />

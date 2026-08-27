@@ -307,6 +307,8 @@ interface ROASResultDisplayProps {
   ppnRate: number;
   numOrders: number;
   setNumOrders?: (val: number) => void;
+  hargaCoretPcs?: number;
+  diskonPersen?: number;
 }
 
 function ROASResultDisplay({
@@ -338,6 +340,8 @@ function ROASResultDisplay({
   ppnRate,
   numOrders,
   setNumOrders,
+  hargaCoretPcs,
+  diskonPersen,
 }: ROASResultDisplayProps) {
   const t_ppn = includePpn ? ppnRate / 100 : 0;
   
@@ -450,6 +454,21 @@ function ROASResultDisplay({
               <p className="font-black text-violet-950 mt-0.5">{formatCurrency(totalHppRealOrder)}</p>
             </div>
           </div>
+
+          {hargaCoretPcs && hargaCoretPcs > hargaJualPcs ? (
+            <div className="flex flex-wrap items-center justify-between p-3 bg-amber-50/90 rounded-xl border border-amber-200 text-xs gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-amber-900">🏷️ Harga Coret:</span>
+                <span className="line-through text-gray-500 font-bold">{formatCurrency(hargaCoretPcs)}</span>
+                <Badge className="bg-rose-500 text-white font-black text-[10px] px-1.5 py-0 border-none">
+                  Diskon {diskonPersen || calculateDiscountFromCoret(hargaJualPcs, hargaCoretPcs).diskonPersen}%
+                </Badge>
+              </div>
+              <span className="text-[10px] text-amber-800 font-medium italic">
+                *Harga Coret hanya referensi promo/diskon. Seluruh kalkulasi ROAS & Omzet menggunakan Harga Jual Transaksi ({formatCurrency(hargaJualPcs)}).
+              </span>
+            </div>
+          ) : null}
         </div>
 
         {/* 2. HASIL KALKULASI UNIT ECONOMICS (PER ORDER) */}
@@ -1676,7 +1695,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                           <SelectContent>
                             {v1ActiveProduct?.varian.map((v) => (
                               <SelectItem key={v.id} value={v.id} className="text-xs">
-                                {v.nama} — {formatCurrency(v.harga_jual, true)}
+                                {v.nama} — {formatCurrency(v.harga_jual, true)}{v.harga_coret && v.harga_coret > v.harga_jual ? ` (Coret: ${formatCurrency(v.harga_coret, true)})` : ''}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1693,6 +1712,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                   name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
                   minOrder={v1Calculation.minOrder}
                   hargaJualPcs={v1Calculation.price}
+                  hargaCoretPcs={v1Calculation.variant.harga_coret}
+                  diskonPersen={v1Calculation.variant.diskon_persen}
                   hppPcs={v1Calculation.hppPcs}
                   biayaProsesOrder={v1Calculation.nominalPerOrder}
                   hargaJualOrder={v1Calculation.price * v1Calculation.minOrder}
@@ -1796,7 +1817,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                                     <div className="space-y-0.5 min-w-0">
                                       <p className="text-xs font-bold text-gray-900 truncate">{v.nama}</p>
                                       <p className="text-[11px] text-gray-500">
-                                        Harga: <strong>{formatCurrency(v.harga_jual, true)}</strong> • HPP: <strong>{formatCurrency(Math.round(hppPcs), true)}</strong> • Min: {v.min_order || 1} pack
+                                        Harga: <strong>{formatCurrency(v.harga_jual, true)}</strong>{v.harga_coret && v.harga_coret > v.harga_jual ? <span className="text-gray-400 text-[10px] ml-1">(Coret: <span className="line-through">{formatCurrency(v.harga_coret, true)}</span>)</span> : null} • HPP: <strong>{formatCurrency(Math.round(hppPcs), true)}</strong> • Min: {v.min_order || 1} pack
                                       </p>
                                     </div>
                                   </div>
