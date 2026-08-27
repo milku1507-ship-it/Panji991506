@@ -253,24 +253,34 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
   const handleDuplicateProduct = async (product: Product) => {
     const id = 'prod_' + Math.random().toString(36).substr(2, 9);
+    const newSku = product.sku ? `${product.sku}-COPY` : '';
     const newProduct: Product = {
       ...JSON.parse(JSON.stringify(product)),
       id,
+      sku: newSku,
       nama: `${product.nama} (Copy)`,
-      varian: product.varian.map(v => ({
+      foto: product.foto || '',
+      biaya_lain: product.biaya_lain ? JSON.parse(JSON.stringify(product.biaya_lain)) : [],
+      varian: (product.varian || []).map(v => ({
         ...JSON.parse(JSON.stringify(v)),
         id: 'var_' + Math.random().toString(36).substr(2, 9)
       }))
     };
     
     try {
+      // Optimistic update
+      setProducts(prev => [...prev, newProduct]);
+      toast.success('Produk berhasil diduplikasi', {
+        description: `Salinan '${newProduct.nama}' dibuat beserta ${newProduct.varian.length} varian.`
+      });
+
       if (user) {
         await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
       }
-      setProducts(prev => [...prev, newProduct]);
-      toast.success(`Produk '${product.nama}' diduplikasi`);
     } catch (error) {
+      console.error("[HPPManager] Error duplicating product:", error);
       if (user) handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
+      toast.error('Gagal menduplikasi produk');
     }
   };
 
@@ -1147,11 +1157,32 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">SKU: {p.sku}</span>
                     )}
                   </div>
-                  <div className="flex gap-0.5 flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}>
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      title="Edit Produk"
+                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" 
+                      onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
+                    >
                       <Edit2 className="w-3.5 h-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteProduct(p.id)}>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      title="Duplikat / Salin Produk"
+                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors" 
+                      onClick={() => handleDuplicateProduct(p)}
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      title="Hapus Produk"
+                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" 
+                      onClick={() => handleDeleteProduct(p.id)}
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
