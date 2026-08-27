@@ -281,15 +281,20 @@ function getHistoricalProductSales(productIds: string[], transactions?: Transact
 interface ROASResultDisplayProps {
   modeTitle: string;
   name: string;
-  hargaJual: number;
-  voucherPerUnit: number;
-  omzetReal: number;
-  hppReal: number;
-  profitSebelumIklan: number;
+  minOrder: number;
+  hargaJualPcs: number;
+  hppPcs: number;
+  biayaProsesOrder: number;
+  hargaJualOrder: number;
+  hppProdukOrder: number;
+  totalHppRealOrder: number;
+  voucherPerPcs: number;
+  omzetRealOrder: number;
+  profitSebelumIklanOrder: number;
   marginSebelumIklanPct: number;
   targetProfitPct: number;
-  targetProfitNominal: number;
-  maxAdSpend: number;
+  targetProfitNominalOrder: number;
+  maxAdSpendOrder: number;
   roasBep: number;
   roasTarget: number;
   roasSetting: number;
@@ -300,22 +305,27 @@ interface ROASResultDisplayProps {
   setSimRoas: (val: number) => void;
   includePpn: boolean;
   ppnRate: number;
-  numOrders?: number;
-  totalUnits?: number;
+  numOrders: number;
+  setNumOrders?: (val: number) => void;
 }
 
 function ROASResultDisplay({
   modeTitle,
   name,
-  hargaJual,
-  voucherPerUnit,
-  omzetReal,
-  hppReal,
-  profitSebelumIklan,
+  minOrder,
+  hargaJualPcs,
+  hppPcs,
+  biayaProsesOrder,
+  hargaJualOrder,
+  hppProdukOrder,
+  totalHppRealOrder,
+  voucherPerPcs,
+  omzetRealOrder,
+  profitSebelumIklanOrder,
   marginSebelumIklanPct,
   targetProfitPct,
-  targetProfitNominal,
-  maxAdSpend,
+  targetProfitNominalOrder,
+  maxAdSpendOrder,
   roasBep,
   roasTarget,
   roasSetting,
@@ -326,12 +336,30 @@ function ROASResultDisplay({
   setSimRoas,
   includePpn,
   ppnRate,
+  numOrders,
+  setNumOrders,
 }: ROASResultDisplayProps) {
   const t_ppn = includePpn ? ppnRate / 100 : 0;
-  const simAdSpendSellerCenter = simRoas > 0 ? hargaJual / simRoas : 0;
-  const simAdSpendTotalBurden = simAdSpendSellerCenter * (1 + t_ppn);
-  const simProfitAfterAds = profitSebelumIklan - simAdSpendTotalBurden;
-  const simMarginAfterAdsPct = hargaJual > 0 ? (simProfitAfterAds / hargaJual) * 100 : 0;
+  
+  // Simulation for 1 Order vs N Orders
+  const simAdSpendSellerCenterOrder = simRoas > 0 ? hargaJualOrder / simRoas : 0;
+  const simAdSpendTotalBurdenOrder = simAdSpendSellerCenterOrder * (1 + t_ppn);
+  const simProfitAfterAdsOrder = profitSebelumIklanOrder - simAdSpendTotalBurdenOrder;
+  const simMarginAfterAdsPct = hargaJualOrder > 0 ? (simProfitAfterAdsOrder / hargaJualOrder) * 100 : 0;
+
+  // N Order Totals
+  const nOrders = Math.max(1, numOrders || 1);
+  const totalSimPcs = nOrders * minOrder;
+  const totalSimRevenue = nOrders * hargaJualOrder;
+  const totalSimHppProduk = nOrders * hppProdukOrder;
+  const totalSimBiayaProses = nOrders * biayaProsesOrder;
+  const totalSimHppReal = nOrders * totalHppRealOrder;
+  const totalSimOmzetReal = nOrders * omzetRealOrder;
+  const totalSimProfitBeforeAds = nOrders * profitSebelumIklanOrder;
+  const totalSimTargetProfit = nOrders * targetProfitNominalOrder;
+  const totalSimMaxAdSpend = nOrders * maxAdSpendOrder;
+  const totalSimAdSpendBurden = simAdSpendTotalBurdenOrder * nOrders;
+  const totalSimProfitAfterAds = simProfitAfterAdsOrder * nOrders;
 
   // Determine automatic status
   let statusBadge = '🟢 AMAN';
@@ -373,32 +401,84 @@ function ROASResultDisplay({
       </CardHeader>
 
       <CardContent className="p-5 md:p-6 space-y-6">
-        {/* 1. HASIL KALKULASI UNIT ECONOMICS */}
+        {/* 1. INFORMASI MINIMAL ORDER & TRANSPARANSI DEBUG (ATURAN UTAMA 1, 2, 4, 9) */}
+        <div className="p-4 rounded-2xl bg-violet-50/70 border border-violet-100 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-violet-200/60 pb-2.5">
+            <div className="flex items-center gap-2">
+              <Package className="w-4 h-4 text-violet-600" />
+              <h4 className="text-xs font-black uppercase tracking-wider text-violet-900">
+                RINCIAN UNIT EKONOMI PER ORDER (TRANSPARANSI DATA)
+              </h4>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-black text-violet-800 bg-violet-200/80 px-2.5 py-0.5 rounded-lg">
+                MINIMAL ORDER: {minOrder} pcs / order
+              </span>
+              <p className="text-[10px] text-violet-600 italic font-medium mt-0.5">
+                Data otomatis dari varian produk
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-xs">
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Harga / pcs</p>
+              <p className="font-black text-gray-900 mt-0.5">{formatCurrency(hargaJualPcs)}</p>
+            </div>
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">HPP / pcs</p>
+              <p className="font-bold text-rose-600 mt-0.5">{formatCurrency(hppPcs)}</p>
+            </div>
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Minimal Order</p>
+              <p className="font-black text-violet-700 mt-0.5">{minOrder} pcs / order</p>
+            </div>
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Harga Jual / Order</p>
+              <p className="font-black text-gray-900 mt-0.5">{formatCurrency(hargaJualOrder)}</p>
+            </div>
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">HPP Produk / Order</p>
+              <p className="font-bold text-rose-600 mt-0.5">{formatCurrency(hppProdukOrder)}</p>
+            </div>
+            <div className="p-2.5 bg-white rounded-xl border border-violet-100">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Biaya Proses / Order</p>
+              <p className="font-bold text-amber-600 mt-0.5">{formatCurrency(biayaProsesOrder)}</p>
+            </div>
+            <div className="p-2.5 bg-violet-100/60 rounded-xl border border-violet-200 col-span-2 sm:col-span-1">
+              <p className="text-[10px] font-bold text-violet-800 uppercase">Total HPP Real / Order</p>
+              <p className="font-black text-violet-950 mt-0.5">{formatCurrency(totalHppRealOrder)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. HASIL KALKULASI UNIT ECONOMICS (PER ORDER) */}
         <div className="space-y-3">
           <h4 className="text-xs font-black uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
             <PieChart className="w-4 h-4 text-violet-600" />
-            HASIL KALKULASI (PER UNIT)
+            HASIL KALKULASI RINGKAS (PER 1 ORDER)
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="p-3 bg-gray-50/80 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase">Harga Jual</p>
-              <p className="text-sm font-black text-gray-900 mt-0.5">{formatCurrency(hargaJual)}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Harga Jual / Order</p>
+              <p className="text-sm font-black text-gray-900 mt-0.5">{formatCurrency(hargaJualOrder)}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">{minOrder} pcs × {formatCurrency(hargaJualPcs)}</p>
             </div>
             <div className="p-3 bg-gray-50/80 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase">Omzet Real</p>
-              <p className="text-sm font-black text-gray-900 mt-0.5">{formatCurrency(omzetReal)}</p>
-              {voucherPerUnit > 0 && (
-                <p className="text-[10px] text-gray-400 mt-0.5">Voucher: -{formatCurrency(voucherPerUnit)}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Omzet Real / Order</p>
+              <p className="text-sm font-black text-gray-900 mt-0.5">{formatCurrency(omzetRealOrder)}</p>
+              {voucherPerPcs > 0 && (
+                <p className="text-[10px] text-gray-400 mt-0.5">Voucher: -{formatCurrency(voucherPerPcs * minOrder)}</p>
               )}
             </div>
             <div className="p-3 bg-gray-50/80 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase">HPP Real</p>
-              <p className="text-sm font-bold text-rose-600 mt-0.5">{formatCurrency(hppReal)}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">HPP + Biaya Proses</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Total HPP Real / Order</p>
+              <p className="text-sm font-bold text-rose-600 mt-0.5">{formatCurrency(totalHppRealOrder)}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">HPP Produk + Biaya Proses</p>
             </div>
             <div className="p-3 bg-violet-50/60 rounded-2xl border border-violet-100">
-              <p className="text-[10px] font-bold text-violet-700 uppercase">Profit Sebelum Iklan</p>
-              <p className="text-sm font-black text-violet-900 mt-0.5">{formatCurrency(profitSebelumIklan)}</p>
+              <p className="text-[10px] font-bold text-violet-700 uppercase">Profit Sebelum Iklan / Order</p>
+              <p className="text-sm font-black text-violet-900 mt-0.5">{formatCurrency(profitSebelumIklanOrder)}</p>
             </div>
             <div className="p-3 bg-violet-50/60 rounded-2xl border border-violet-100">
               <p className="text-[10px] font-bold text-violet-700 uppercase">Margin Sebelum Iklan</p>
@@ -407,41 +487,41 @@ function ROASResultDisplay({
           </div>
         </div>
 
-        {/* 2. TARGET PROFIT & BIAYA IKLAN MAKSIMAL */}
+        {/* 3. TARGET PROFIT & BIAYA IKLAN MAKSIMAL (PER ORDER) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black uppercase text-emerald-800">TARGET PROFIT SETELAH IKLAN</p>
+              <p className="text-xs font-black uppercase text-emerald-800">TARGET PROFIT SETELAH IKLAN / ORDER</p>
               <Badge className="bg-emerald-600 text-white border-none font-bold text-xs">{targetProfitPct}%</Badge>
             </div>
-            <p className="text-2xl font-black text-emerald-700">{formatCurrency(targetProfitNominal)}</p>
+            <p className="text-2xl font-black text-emerald-700">{formatCurrency(targetProfitNominalOrder)}</p>
             <p className="text-[11px] text-emerald-600">
-              Keuntungan bersih per unit yang wajib tersisa setelah seluruh biaya & biaya iklan.
+              Keuntungan bersih per 1 order ({minOrder} pcs) yang wajib tersisa setelah biaya iklan & operasional.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black uppercase text-indigo-800">MAKSIMAL BIAYA IKLAN</p>
+              <p className="text-xs font-black uppercase text-indigo-800">MAKSIMAL BIAYA IKLAN / ORDER</p>
               <span className="text-[11px] font-bold text-indigo-600">
                 {includePpn ? `Sebelum PPN ${ppnRate}%` : 'Tanpa PPN'}
               </span>
             </div>
-            <p className="text-2xl font-black text-indigo-700">{formatCurrency(maxAdSpend)}</p>
+            <p className="text-2xl font-black text-indigo-700">{formatCurrency(maxAdSpendOrder)}</p>
             <p className="text-[11px] text-indigo-600 leading-relaxed">
-              &quot;Jika biaya iklan melebihi angka ini, target profit {targetProfitPct}% tidak lagi tercapai.&quot;
+              Batas maksimal biaya iklan per 1 order agar target profit {targetProfitPct}% tetap tercapai.
             </p>
           </div>
         </div>
 
-        {/* 3. METRIK ROAS (CARDS) */}
+        {/* 4. METRIK ROAS (CARDS) */}
         {!isTargetFeasible ? (
           <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <p className="text-xs font-black text-rose-700">Target Profit Tidak Dapat Dicapai</p>
               <p className="text-xs text-rose-600 leading-relaxed">
-                Margin Sebelum Iklan ({marginSebelumIklanPct.toFixed(1)}%) lebih kecil dari Target Profit Bersih ({targetProfitPct}%). Kurangi biaya HPP / biaya proses, atau naikkan harga jual.
+                Margin Sebelum Iklan ({marginSebelumIklanPct.toFixed(1)}%) lebih kecil dari Target Profit Bersih ({targetProfitPct}%). Kurangi HPP / biaya proses, atau naikkan harga jual.
               </p>
             </div>
           </div>
@@ -449,7 +529,7 @@ function ROASResultDisplay({
           <div className="space-y-3">
             <h4 className="text-xs font-black uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
               <BarChart3 className="w-4 h-4 text-violet-600" />
-              REKOMENDASI METRIK ROAS
+              REKOMENDASI METRIK ROAS (UNIT ECONOMICS CONSISTENT)
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-1">
@@ -492,52 +572,102 @@ function ROASResultDisplay({
           </div>
         )}
 
-        {/* 4. SIMULASI ROAS INTERAKTIF & AUTOMATIC STATUS */}
+        {/* 5. SIMULASI JUMLAH ORDER & ROAS AKTUAL (ATURAN UTAMA 3) */}
         {isTargetFeasible && (
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-gray-200/80">
               <div className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-violet-600" />
-                <span className="text-xs font-bold text-gray-800">Simulasi ROAS Aktual</span>
+                <span className="text-xs font-black text-gray-900 uppercase">
+                  SIMULASI TRANSAKSI JUMLAH ORDER
+                </span>
               </div>
-              <span className="text-xs font-black text-violet-700 bg-violet-100 px-2.5 py-1 rounded-lg">
-                ROAS Input: {simRoas.toFixed(2)}x
-              </span>
+              
+              {setNumOrders && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold text-gray-600">Simulasi Order:</Label>
+                  <div className="flex items-center gap-1 w-28">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={numOrders}
+                      onChange={(e) => setNumOrders(Math.max(1, Number(e.target.value) || 1))}
+                      className="h-8 font-black text-xs text-center rounded-lg bg-white border-gray-300"
+                    />
+                    <span className="text-xs font-bold text-gray-500">order</span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <input
-              type="range"
-              min={1}
-              max={25}
-              step={0.1}
-              value={simRoas}
-              onChange={(e) => setSimRoas(Number(e.target.value))}
-              className="w-full h-2 rounded-lg bg-violet-200 appearance-none cursor-pointer accent-violet-600"
-            />
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs">
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <p className="text-[10px] text-gray-400 font-bold uppercase">Biaya Iklan {includePpn ? '(+PPN)' : ''}</p>
-                <p className="font-black text-gray-900 mt-0.5">{formatCurrency(simAdSpendTotalBurden)}</p>
+            {/* Simulasi breakdown transaksi */}
+            <div className="p-3.5 bg-white rounded-xl border border-gray-200 text-xs space-y-2">
+              <div className="flex justify-between items-center font-bold text-gray-700">
+                <span>Total Pesanan Ditransaksikan ({nOrders} Order):</span>
+                <span className="text-violet-700 font-black">{totalSimPcs} pcs ({nOrders} order × {minOrder} pcs)</span>
               </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <p className="text-[10px] text-gray-400 font-bold uppercase">Profit Setelah Iklan</p>
-                <p className={`font-black mt-0.5 ${simProfitAfterAds >= targetProfitNominal ? 'text-emerald-600' : simProfitAfterAds >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
-                  {formatCurrency(simProfitAfterAds)}
-                </p>
-              </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <p className="text-[10px] text-gray-400 font-bold uppercase">Margin Setelah Iklan</p>
-                <p className={`font-black mt-0.5 ${simMarginAfterAdsPct >= targetProfitPct ? 'text-emerald-600' : simMarginAfterAdsPct >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
-                  {simMarginAfterAdsPct.toFixed(1)}%
-                </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                <div className="p-2 bg-gray-50 rounded-lg">
+                  <p className="text-gray-400 font-medium">Total Omzet Kotor</p>
+                  <p className="font-black text-gray-900">{formatCurrency(totalSimRevenue)}</p>
+                </div>
+                <div className="p-2 bg-gray-50 rounded-lg">
+                  <p className="text-gray-400 font-medium">Total HPP Produk</p>
+                  <p className="font-bold text-rose-600">{formatCurrency(totalSimHppProduk)}</p>
+                </div>
+                <div className="p-2 bg-gray-50 rounded-lg">
+                  <p className="text-gray-400 font-medium">Total Biaya Proses ({nOrders} order)</p>
+                  <p className="font-bold text-amber-600">{formatCurrency(totalSimBiayaProses)}</p>
+                </div>
+                <div className="p-2 bg-violet-50 rounded-lg">
+                  <p className="text-violet-700 font-medium">Total HPP Real</p>
+                  <p className="font-black text-violet-900">{formatCurrency(totalSimHppReal)}</p>
+                </div>
               </div>
             </div>
 
-            {/* STATUS ANNOUNCEMENT */}
-            <div className={`p-3 rounded-xl border text-xs leading-relaxed font-medium ${statusColor}`}>
-              <span className="font-black mr-1">{statusBadge}:</span>
-              {statusDesc}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="text-xs font-bold text-gray-800">Uji ROAS Aktual di Dashboard Iklan:</span>
+                <span className="text-xs font-black text-violet-700 bg-violet-100 px-2.5 py-1 rounded-lg">
+                  ROAS Input: {simRoas.toFixed(2)}x
+                </span>
+              </div>
+
+              <input
+                type="range"
+                min={1}
+                max={25}
+                step={0.1}
+                value={simRoas}
+                onChange={(e) => setSimRoas(Number(e.target.value))}
+                className="w-full h-2 rounded-lg bg-violet-200 appearance-none cursor-pointer accent-violet-600"
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs">
+                <div className="p-3 bg-white rounded-xl border border-gray-200">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Biaya Iklan Total ({nOrders} Order)</p>
+                  <p className="font-black text-gray-900 mt-0.5">{formatCurrency(totalSimAdSpendBurden)}</p>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-gray-200">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Profit Bersih Akhir ({nOrders} Order)</p>
+                  <p className={`font-black mt-0.5 ${totalSimProfitAfterAds >= totalSimTargetProfit ? 'text-emerald-600' : totalSimProfitAfterAds >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
+                    {formatCurrency(totalSimProfitAfterAds)}
+                  </p>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-gray-200">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Margin Profit Bersih</p>
+                  <p className={`font-black mt-0.5 ${simMarginAfterAdsPct >= targetProfitPct ? 'text-emerald-600' : simMarginAfterAdsPct >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
+                    {simMarginAfterAdsPct.toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+
+              {/* STATUS ANNOUNCEMENT */}
+              <div className={`p-3 rounded-xl border text-xs leading-relaxed font-medium ${statusColor}`}>
+                <span className="font-black mr-1">{statusBadge}:</span>
+                {statusDesc}
+              </div>
             </div>
           </div>
         )}
@@ -1561,15 +1691,20 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                 <ROASResultDisplay
                   modeTitle="Iklan Varian"
                   name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
-                  hargaJual={v1Calculation.price}
-                  voucherPerUnit={v1Calculation.voucherPerUnit}
-                  omzetReal={v1Calculation.omzetRealPerUnit}
-                  hppReal={v1Calculation.hppRealPerUnit}
-                  profitSebelumIklan={v1Calculation.profitBeforeAdsPerUnit}
+                  minOrder={v1Calculation.minOrder}
+                  hargaJualPcs={v1Calculation.price}
+                  hppPcs={v1Calculation.hppPcs}
+                  biayaProsesOrder={v1Calculation.nominalPerOrder}
+                  hargaJualOrder={v1Calculation.price * v1Calculation.minOrder}
+                  hppProdukOrder={v1Calculation.hppPcs * v1Calculation.minOrder}
+                  totalHppRealOrder={v1Calculation.hppRealPerUnit * v1Calculation.minOrder}
+                  voucherPerPcs={v1Calculation.voucherPerUnit}
+                  omzetRealOrder={v1Calculation.omzetRealPerUnit * v1Calculation.minOrder}
+                  profitSebelumIklanOrder={v1Calculation.profitBeforeAdsPerUnit * v1Calculation.minOrder}
                   marginSebelumIklanPct={v1Calculation.marginBeforeAdsPct}
                   targetProfitPct={targetProfitPct}
-                  targetProfitNominal={v1Calculation.targetProfitNominalPerUnit}
-                  maxAdSpend={v1Calculation.maxAdSpendPerUnit}
+                  targetProfitNominalOrder={v1Calculation.targetProfitNominalPerUnit * v1Calculation.minOrder}
+                  maxAdSpendOrder={v1Calculation.maxAdSpendPerUnit * v1Calculation.minOrder}
                   roasBep={v1Calculation.roasBep}
                   roasTarget={v1Calculation.roasTarget}
                   roasSetting={v1Calculation.roasSetting}
@@ -1578,8 +1713,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                   setSimRoas={setV1SimRoas}
                   includePpn={includePpn}
                   ppnRate={ppnRate}
-                  numOrders={v1Calculation.numOrders}
-                  totalUnits={v1Calculation.totalUnits}
+                  numOrders={v1OrderSim}
+                  setNumOrders={setV1OrderSim}
                 />
               )}
             </div>
@@ -1710,15 +1845,20 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                 <ROASResultDisplay
                   modeTitle="Iklan Produk (Weighted Average)"
                   name={v2Calculation.product.nama}
-                  hargaJual={v2Calculation.weightedPrice}
-                  voucherPerUnit={v2Calculation.voucherPerUnit}
-                  omzetReal={v2Calculation.omzetRealPerUnit}
-                  hppReal={v2Calculation.hppRealPerUnit}
-                  profitSebelumIklan={v2Calculation.profitBeforeAdsPerUnit}
+                  minOrder={v2Calculation.effectiveMinOrder}
+                  hargaJualPcs={v2Calculation.weightedPrice}
+                  hppPcs={v2Calculation.weightedHppPcs}
+                  biayaProsesOrder={extractFeeRates(v2Calculation.product).nominalPerOrder}
+                  hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
+                  hppProdukOrder={v2Calculation.weightedHppPcs * v2Calculation.effectiveMinOrder}
+                  totalHppRealOrder={v2Calculation.hppRealPerUnit * v2Calculation.effectiveMinOrder}
+                  voucherPerPcs={v2Calculation.voucherPerUnit}
+                  omzetRealOrder={v2Calculation.omzetRealPerUnit * v2Calculation.effectiveMinOrder}
+                  profitSebelumIklanOrder={v2Calculation.profitBeforeAdsPerUnit * v2Calculation.effectiveMinOrder}
                   marginSebelumIklanPct={v2Calculation.marginBeforeAdsPct}
                   targetProfitPct={targetProfitPct}
-                  targetProfitNominal={v2Calculation.targetProfitNominalPerUnit}
-                  maxAdSpend={v2Calculation.maxAdSpendPerUnit}
+                  targetProfitNominalOrder={v2Calculation.targetProfitNominalPerUnit * v2Calculation.effectiveMinOrder}
+                  maxAdSpendOrder={v2Calculation.maxAdSpendPerUnit * v2Calculation.effectiveMinOrder}
                   roasBep={v2Calculation.roasBep}
                   roasTarget={v2Calculation.roasTarget}
                   roasSetting={v2Calculation.roasSetting}
@@ -1729,8 +1869,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                   setSimRoas={setV2SimRoas}
                   includePpn={includePpn}
                   ppnRate={ppnRate}
-                  numOrders={v2Calculation.numOrders}
-                  totalUnits={v2Calculation.totalUnits}
+                  numOrders={v2OrderSim}
+                  setNumOrders={setV2OrderSim}
                 />
               )}
             </div>
@@ -1850,15 +1990,20 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                 <ROASResultDisplay
                   modeTitle="Iklan Grup (Consolidated Portfolio)"
                   name={v3Calculation.groupName}
-                  hargaJual={v3Calculation.groupWeightedPrice}
-                  voucherPerUnit={voucherNominalInput}
-                  omzetReal={v3Calculation.groupOmzetReal}
-                  hppReal={v3Calculation.groupHppReal}
-                  profitSebelumIklan={v3Calculation.profitBeforeAdsGroup}
+                  minOrder={1}
+                  hargaJualPcs={v3Calculation.groupWeightedPrice}
+                  hppPcs={v3Calculation.groupHppReal}
+                  biayaProsesOrder={0}
+                  hargaJualOrder={v3Calculation.groupWeightedPrice}
+                  hppProdukOrder={v3Calculation.groupHppReal}
+                  totalHppRealOrder={v3Calculation.groupHppReal}
+                  voucherPerPcs={voucherNominalInput}
+                  omzetRealOrder={v3Calculation.groupOmzetReal}
+                  profitSebelumIklanOrder={v3Calculation.profitBeforeAdsGroup}
                   marginSebelumIklanPct={v3Calculation.marginBeforeAdsPct}
                   targetProfitPct={targetProfitPct}
-                  targetProfitNominal={v3Calculation.targetProfitNominalGroup}
-                  maxAdSpend={v3Calculation.maxAdSpendGroup}
+                  targetProfitNominalOrder={v3Calculation.targetProfitNominalGroup}
+                  maxAdSpendOrder={v3Calculation.maxAdSpendGroup}
                   roasBep={v3Calculation.roasBepGroup}
                   roasTarget={v3Calculation.roasTargetGroup}
                   roasSetting={v3Calculation.roasSettingGroup}
@@ -1869,6 +2014,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                   setSimRoas={setV3SimRoas}
                   includePpn={includePpn}
                   ppnRate={ppnRate}
+                  numOrders={v3OrderSim}
+                  setNumOrders={setV3OrderSim}
                 />
               )}
             </div>
