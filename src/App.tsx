@@ -30,17 +30,23 @@ export default function App() {
   // Public store catalog route: ?store=USER_ID
   const storeUserId = new URLSearchParams(window.location.search).get('store');
   if (storeUserId) {
-    return <StoreCatalog userId={storeUserId} />;
+    return (
+      <ErrorBoundary>
+        <StoreCatalog userId={storeUserId} />
+      </ErrorBoundary>
+    );
   }
 
   return (
-    <SettingsProvider>
-      <BackStackProvider>
-        <DateFilterProvider>
-          <AppContent />
-        </DateFilterProvider>
-      </BackStackProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <BackStackProvider>
+          <DateFilterProvider>
+            <AppContent />
+          </DateFilterProvider>
+        </BackStackProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }
 

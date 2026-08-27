@@ -14,6 +14,7 @@ import {
   initializeAuth
 } from 'firebase/auth';
 import { 
+  getFirestore,
   initializeFirestore, 
   doc, 
   collection, 
@@ -97,14 +98,19 @@ let dbInstance;
 const dbSettings = {
   experimentalForceLongPolling: true,
 };
+const dbId = firestoreDatabaseId && firestoreDatabaseId !== '(default)' ? firestoreDatabaseId : undefined;
 
 try {
-  // Try to use the named database if provided
-  const dbId = firestoreDatabaseId && firestoreDatabaseId !== '(default)' ? firestoreDatabaseId : undefined;
+  // Try to initialize Firestore with specified settings and database ID
   dbInstance = initializeFirestore(app, dbSettings, dbId);
 } catch (e) {
-  console.error('Failed to initialize Firestore, falling back to default:', e);
-  dbInstance = initializeFirestore(app, dbSettings);
+  // If already initialized (e.g. during HMR or reloads), get the existing instance
+  try {
+    dbInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
+  } catch (err) {
+    console.warn('Fallback to default getFirestore instance:', err);
+    dbInstance = getFirestore(app);
+  }
 }
 
 export const db = dbInstance;

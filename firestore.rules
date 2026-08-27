@@ -20,13 +20,20 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
+      // Public catalog read support (e.g. ?store=USER_ID)
+      match /hpp/{productId} {
+        allow read: if true;
+        allow write: if isOwner(uid);
+      }
+      match /settings/toko {
+        allow read: if true;
+        allow write: if isOwner(uid);
+      }
+      
       // Allow user to manage their own data
       match /{allPaths=**} {
         allow read, write: if isOwner(uid);
       }
-      
-      // Specific validations could be added here for each subcollection if needed
-      // For now, we enforce ownership at the top level of the user's tree
     }
   }
 }

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { 
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
   Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search, Sparkles,
-  GripVertical, ChevronDown, ChevronUp
+  GripVertical, ChevronDown, ChevronUp, Camera
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import ProductPhotoUpload from './ProductPhotoUpload';
@@ -66,6 +66,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [isProductModalOpen, setIsProductModalOpen] = React.useState(false);
   const [isVariantModalOpen, setIsVariantModalOpen] = React.useState(false);
   const [editingProduct, setEditingProduct] = React.useState<Product | null>(null);
+  const [productPhoto, setProductPhoto] = React.useState<string>('');
   const [editingVariant, setEditingVariant] = React.useState<Variant | null>(null);
   
   // Detail HPP State
@@ -155,8 +156,10 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   React.useEffect(() => {
     if (editingProduct) {
       setProductFees(editingProduct.biaya_lain || []);
+      setProductPhoto(editingProduct.foto || '');
     } else {
       setProductFees([]);
+      setProductPhoto('');
     }
   }, [editingProduct]);
 
@@ -173,7 +176,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const deskripsi = (formData.get('deskripsi') as string) || '';
 
       if (editingProduct) {
-        const updatedProduct = { ...editingProduct, nama, sku, deskripsi, biaya_lain: productFees };
+        const updatedProduct = { 
+          ...editingProduct, 
+          nama, 
+          sku, 
+          deskripsi, 
+          foto: productPhoto,
+          biaya_lain: productFees 
+        };
         
         // Optimistic update
         setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
@@ -194,6 +204,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           sku,
           nama,
           deskripsi,
+          foto: productPhoto,
           varian: [],
           biaya_lain: productFees
         };
@@ -1089,29 +1100,34 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     <Package className="w-10 h-10 text-gray-200" />
                   </div>
                 )}
-                {/* Camera overlay to change photo */}
+                {/* Camera button to change/upload photo */}
                 {user && (
-                  <div className="absolute inset-0 flex items-end justify-end p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute inset-0 flex items-end justify-end p-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     <ProductPhotoUpload
                       productId={p.id}
                       userId={user.uid}
                       currentFoto={p.foto}
                       size="sm"
-                      className="shadow-lg"
+                      className="shadow-md bg-white/90 backdrop-blur-sm border border-black/5"
                       onUploaded={url => setProducts(prev => prev.map(x => x.id === p.id ? { ...x, foto: url } : x))}
                     />
                   </div>
                 )}
-                {/* Tap anywhere to upload when no photo */}
+                {/* Direct tap to upload if no photo */}
                 {!p.foto && user && (
-                  <ProductPhotoUpload
-                    productId={p.id}
-                    userId={user.uid}
-                    currentFoto={undefined}
-                    size="lg"
-                    className="absolute inset-0 !rounded-none opacity-0 cursor-pointer"
-                    onUploaded={url => setProducts(prev => prev.map(x => x.id === p.id ? { ...x, foto: url } : x))}
-                  />
+                  <div 
+                    className="absolute inset-0 flex items-center justify-center cursor-pointer"
+                    onClick={(e) => {
+                      // Trigger upload by finding the inner ProductPhotoUpload
+                      const target = e.currentTarget.parentElement?.querySelector('input[type="file"]') as HTMLInputElement;
+                      if (target) target.click();
+                    }}
+                  >
+                    <div className="flex flex-col items-center gap-1 text-gray-400 p-2">
+                      <Camera className="w-6 h-6 text-gray-300" />
+                      <span className="text-[10px] font-bold text-gray-400">+ Foto</span>
+                    </div>
+                  </div>
                 )}
                 {/* Kategori badge */}
                 {(p as any).kategori && (
@@ -1540,6 +1556,28 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <DialogDescription>Masukkan informasi produk utama di sini.</DialogDescription>
           </DialogHeader>
           <form key={editingProduct?.id || 'new-product'} onSubmit={handleSaveProduct} className="space-y-4 py-4">
+            {/* Foto Produk */}
+            <div className="space-y-2">
+              <Label className="font-bold">Foto Produk</Label>
+              {user && (
+                <div className="flex items-start gap-4 p-3 bg-gray-50/80 rounded-2xl border border-gray-100">
+                  <ProductPhotoUpload
+                    productId={editingProduct?.id}
+                    userId={user.uid}
+                    currentFoto={productPhoto}
+                    size="md"
+                    showActions={true}
+                    onUploaded={url => setProductPhoto(url)}
+                    onRemove={() => setProductPhoto('')}
+                  />
+                  <div className="text-xs text-gray-500 space-y-1 self-center">
+                    <p className="font-bold text-gray-700">Pilih atau Ambil Foto Produk</p>
+                    <p className="text-[11px] text-gray-400">Format: JPG, PNG, WebP. Otomatis dikompres & disimpan.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="sku" className="font-bold text-primary">SKU</Label>

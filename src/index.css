@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
 
 @theme {
   --color-wallet-blue: #E53935;
@@ -37,8 +39,6 @@
     @apply bg-white text-gray-900;
   }
 }
-@import "tw-animate-css";
-@import "@fontsource-variable/geist";
 
 @custom-variant dark (&:is(.dark *));
 

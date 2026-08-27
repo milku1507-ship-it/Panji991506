@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { auth, db, doc, onSnapshot, setDoc, sanitizeData } from './lib/firebase';
+import { auth, onAuthStateChanged, db, doc, onSnapshot, setDoc, sanitizeData } from './lib/firebase';
 import { KategoriSettings } from './types';
 
 interface SettingsContextType {
@@ -33,7 +33,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       // Always tear down the previous snapshot listener first, regardless of
       // whether the new state is logged-in or logged-out. This is the key fix:
       // without this, zombie listeners keep running after logout and fire
