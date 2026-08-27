@@ -1286,93 +1286,102 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 )}
               </div>
 
-              <CardContent className="p-3.5 flex flex-col flex-1">
-                {/* 1. Header with full title, SKU, and Price */}
-                <div className="mb-2">
-                  <h3 className="text-sm font-black text-[#1A1A2E] line-clamp-2 leading-snug mb-1" title={p.nama}>
+              <CardContent className="p-3 sm:p-3.5 flex flex-col flex-1 gap-2">
+                {/* Baris 1: Nama Produk */}
+                <div>
+                  <h3 
+                    className="text-xs sm:text-sm font-bold text-[#1A1A2E] line-clamp-2 leading-snug" 
+                    title={p.nama}
+                  >
                     {p.nama}
                   </h3>
-                  <div className="flex items-center justify-between gap-1">
-                    {p.sku ? (
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate">
-                        SKU: {p.sku}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-gray-300 italic">No SKU</span>
-                    )}
-                    {p.varian.some(v => v.harga_jual > 0) && (
-                      <p className="text-xs font-black text-primary shrink-0">
-                        {p.varian.length === 1
-                          ? `Rp${p.varian[0].harga_jual.toLocaleString('id-ID')}`
-                          : `Rp${Math.min(...p.varian.map(v => v.harga_jual)).toLocaleString('id-ID')}+`}
-                      </p>
-                    )}
-                  </div>
                 </div>
 
-                {/* 2. Action buttons and Variant/Detail in clean, distinct footer row */}
-                <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto">
-                  {/* Action buttons with distinct tooltips & hover colors */}
-                  <div className="flex items-center gap-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      title="Edit Produk"
-                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" 
-                      onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </Button>
-                    
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      title="Salin Ringkasan ke Clipboard (Copy Text)"
-                      className={cn(
-                        "w-7 h-7 rounded-lg transition-colors",
-                        copiedProductId === p.id 
-                          ? "text-emerald-600 bg-emerald-50" 
-                          : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
-                      )}
-                      onClick={(e) => handleCopyProductToClipboard(e, p)}
-                    >
-                      {copiedProductId === p.id ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      ) : (
-                        <ClipboardCopy className="w-3.5 h-3.5" />
-                      )}
-                    </Button>
+                {/* Baris 2: SKU & Harga Jual */}
+                <div className="flex items-center justify-between gap-1.5 min-w-0">
+                  <span className="text-[10px] sm:text-[11px] font-semibold text-gray-400 uppercase tracking-wider truncate">
+                    {p.sku ? `SKU: ${p.sku}` : <span className="italic text-gray-300 font-normal">No SKU</span>}
+                  </span>
+                  {p.varian.some(v => v.harga_jual > 0) ? (
+                    <p className="text-xs sm:text-sm font-black text-rose-600 shrink-0">
+                      {p.varian.length === 1
+                        ? `Rp${p.varian[0].harga_jual.toLocaleString('id-ID')}`
+                        : `Rp${Math.min(...p.varian.map(v => v.harga_jual)).toLocaleString('id-ID')}+`}
+                    </p>
+                  ) : (
+                    <span className="text-xs text-gray-300 font-medium">-</span>
+                  )}
+                </div>
 
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      title="Duplikasi Produk (Tambah Data Baru)"
-                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors" 
-                      onClick={() => handleDuplicateProduct(p)}
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </Button>
-
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      title="Hapus Produk"
-                      className="w-7 h-7 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" 
-                      onClick={() => handleDeleteProduct(p.id)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-
-                  {/* Detail link */}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-primary font-bold hover:bg-brand-50 rounded-lg gap-0.5 h-7 px-2 text-[10px] shrink-0"
+                {/* Baris 3: Badge Varian & Tombol Link Detail */}
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <Badge 
+                    variant="outline" 
+                    className="text-[10px] font-bold border-gray-200 bg-gray-50 text-gray-600 px-2 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 transition-colors"
                     onClick={() => handleViewVariants(p.id)}
                   >
-                    <span>{p.varian.length} Var</span>
-                    <ChevronRight className="w-3 h-3" />
+                    {p.varian.length} Varian
+                  </Badge>
+
+                  <button
+                    type="button"
+                    onClick={() => handleViewVariants(p.id)}
+                    className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-0.5 group/btn transition-colors"
+                  >
+                    <span>Detail</span>
+                    <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover/btn:translate-x-0.5" />
+                  </button>
+                </div>
+
+                {/* Baris 4 / Bottom Bar: Grup Ikon Aksi */}
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    title="Edit Produk"
+                    className="w-7 h-7 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" 
+                    onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </Button>
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    title="Salin Ringkasan ke Clipboard (Copy Text)"
+                    className={cn(
+                      "w-7 h-7 rounded-lg transition-colors",
+                      copiedProductId === p.id 
+                        ? "text-emerald-600 bg-emerald-50" 
+                        : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
+                    )}
+                    onClick={(e) => handleCopyProductToClipboard(e, p)}
+                  >
+                    {copiedProductId === p.id ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <ClipboardCopy className="w-4 h-4" />
+                    )}
+                  </Button>
+
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    title="Duplikasi Produk (Tambah Data Baru)"
+                    className="w-7 h-7 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors" 
+                    onClick={() => handleDuplicateProduct(p)}
+                  >
+                    <Copy className="w-4 h-4" />
+                  </Button>
+
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    title="Hapus Produk"
+                    className="w-7 h-7 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" 
+                    onClick={() => handleDeleteProduct(p.id)}
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </CardContent>
