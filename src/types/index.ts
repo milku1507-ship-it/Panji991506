@@ -30,6 +30,7 @@ export type Variant = {
   harga_packing: number;
   min_order?: number;
   bahan: HppMaterial[];
+  biaya_lain?: AdditionalFee[];
 };
 
 export type AdditionalFee = {

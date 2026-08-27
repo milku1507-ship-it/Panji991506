@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { 
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
   Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search, Sparkles,
-  GripVertical, ChevronDown, ChevronUp, Camera
+  GripVertical, ChevronDown, ChevronUp, Camera, ClipboardCopy, Check, Files
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import ProductPhotoUpload from './ProductPhotoUpload';
@@ -68,6 +68,9 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [editingProduct, setEditingProduct] = React.useState<Product | null>(null);
   const [productPhoto, setProductPhoto] = React.useState<string>('');
   const [editingVariant, setEditingVariant] = React.useState<Variant | null>(null);
+  const [variantFees, setVariantFees] = React.useState<AdditionalFee[]>([]);
+  const [copiedProductId, setCopiedProductId] = React.useState<string | null>(null);
+  const [copiedVariantId, setCopiedVariantId] = React.useState<string | null>(null);
   
   // Detail HPP State
   const [activeHppVariant, setActiveHppVariant] = React.useState<Variant | null>(null);
@@ -162,6 +165,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       setProductPhoto('');
     }
   }, [editingProduct]);
+
+  React.useEffect(() => {
+    if (editingVariant) {
+      setVariantFees(editingVariant.biaya_lain || []);
+    } else {
+      setVariantFees([]);
+    }
+  }, [editingVariant]);
 
   // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -284,6 +295,59 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     }
   };
 
+  const handleCopyProductToClipboard = async (e: React.MouseEvent, product: Product) => {
+    e.stopPropagation();
+    try {
+      const lines: string[] = [
+        `📦 ${product.nama}`
+      ];
+      if (product.sku) {
+        lines.push(`SKU: ${product.sku}`);
+      }
+      if ((product as any).kategori) {
+        lines.push(`Kategori: ${(product as any).kategori}`);
+      }
+      
+      if (product.varian && product.varian.length > 0) {
+        lines.push(`\nVarian (${product.varian.length}):`);
+        product.varian.forEach((v, idx) => {
+          const hppPcs = calculateHpp(v.bahan, v.harga_packing, v.qty_batch);
+          const fees = calculateVariantFees(
+            [...(product.biaya_lain || []), ...(v.biaya_lain || [])],
+            v.harga_jual
+          );
+          const totalCost = hppPcs + fees;
+          const skuInfo = v.sku ? ` [SKU: ${v.sku}]` : '';
+          const hppInfo = v.bahan && v.bahan.length > 0 ? ` | HPP: ${formatCurrency(Math.round(totalCost), true)}` : '';
+          lines.push(`${idx + 1}. ${v.nama}${skuInfo} - Harga: ${formatCurrency(v.harga_jual, true)}${hppInfo}`);
+        });
+      }
+
+      const textToCopy = lines.join('\n');
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedProductId(product.id);
+      setTimeout(() => setCopiedProductId(null), 2000);
+      toast.success('Ringkasan produk disalin!', {
+        description: `Info '${product.nama}' berhasil disalin ke clipboard.`
+      });
+    } catch (err) {
+      console.error('Failed to copy product summary:', err);
+      toast.error('Gagal menyalin ringkasan produk');
+    }
+  };
+
   // Variant CRUD
   const handleSaveVariant = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,7 +374,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
       let updatedVarian;
       if (editingVariant) {
-        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing, min_order } : v);
+        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, sku, harga_jual, qty_batch, harga_packing, min_order, biaya_lain: variantFees } : v);
       } else {
         const newVariant: Variant = {
           id: 'var_' + Math.random().toString(36).substr(2, 9),
@@ -320,6 +384,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           qty_batch,
           harga_packing,
           min_order,
+          biaya_lain: variantFees,
           bahan: []
         };
         updatedVarian = [...product.varian, newVariant];
@@ -393,7 +458,54 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     toast.success(`Varian '${variant.nama}' diduplikasi`);
   };
 
-  // Fee Management
+  const handleCopyVariantToClipboard = async (e: React.MouseEvent, variant: Variant, productName?: string) => {
+    e.stopPropagation();
+    try {
+      const hppPcs = calculateHpp(variant.bahan, variant.harga_packing, variant.qty_batch);
+      const fees = calculateVariantFees(
+        [...(selectedProduct?.biaya_lain || []), ...(variant.biaya_lain || [])],
+        variant.harga_jual
+      );
+      const totalCost = hppPcs + fees;
+      const margin = variant.harga_jual > 0 ? ((variant.harga_jual - totalCost) / variant.harga_jual) * 100 : 0;
+
+      const lines: string[] = [
+        `📦 ${productName ? `${productName} - ` : ''}${variant.nama}`,
+      ];
+      if (variant.sku) lines.push(`SKU: ${variant.sku}`);
+      lines.push(`Harga Jual: ${formatCurrency(variant.harga_jual, true)}`);
+      if (variant.bahan && variant.bahan.length > 0) {
+        lines.push(`HPP/pcs: ${formatCurrency(Math.round(totalCost), true)}`);
+        lines.push(`Margin: ${margin.toFixed(1)}%`);
+        lines.push(`Batch Qty: ${variant.qty_batch || 1}`);
+      }
+
+      const textToCopy = lines.join('\n');
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedVariantId(variant.id);
+      setTimeout(() => setCopiedVariantId(null), 2000);
+      toast.success('Info varian disalin!', {
+        description: `Ringkasan '${variant.nama}' berhasil disalin ke clipboard.`
+      });
+    } catch (err) {
+      console.error('Failed to copy variant summary:', err);
+      toast.error('Gagal menyalin info varian');
+    }
+  };
+
+  // Fee Management (Product Level)
   const handleAddFee = () => {
     setProductFees([...productFees, { nama: '', tipe: 'persen', nilai: 0 }]);
   };
@@ -406,6 +518,21 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
   const handleRemoveFee = (index: number) => {
     setProductFees(productFees.filter((_, i) => i !== index));
+  };
+
+  // Fee Management (Variant Level)
+  const handleAddVariantFee = () => {
+    setVariantFees([...variantFees, { nama: '', tipe: 'persen', nilai: 0 }]);
+  };
+
+  const handleUpdateVariantFee = (index: number, field: keyof AdditionalFee, value: any) => {
+    const updated = [...variantFees];
+    updated[index] = { ...updated[index], [field]: value };
+    setVariantFees(updated);
+  };
+
+  const handleRemoveVariantFee = (index: number) => {
+    setVariantFees(variantFees.filter((_, i) => i !== index));
   };
 
   const handleMaterialChange = (index: number, field: keyof HppMaterial, value: any) => {
@@ -1012,6 +1139,16 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     return (totalMaterials + (Number(packingCost) || 0)) / qBatch;
   };
 
+  const calculateVariantFees = (fees: AdditionalFee[] = [], sellingPrice: number = 0) => {
+    if (!fees || fees.length === 0) return 0;
+    return fees.reduce((sum, fee) => {
+      if (fee.tipe === 'persen') {
+        return sum + ((Number(fee.nilai) || 0) / 100) * (Number(sellingPrice) || 0);
+      }
+      return sum + (Number(fee.nilai) || 0);
+    }, 0);
+  };
+
   const calculateBatchHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
     const totalMaterials = bahan.reduce((acc, b) => acc + getMaterialCost(b), 0);
     return totalMaterials + (Number(packingCost) || 0);
@@ -1149,15 +1286,34 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 )}
               </div>
 
-              <CardContent className="p-3 flex flex-col flex-1">
-                <div className="flex items-start justify-between gap-1 mb-1">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-black text-[#1A1A2E] line-clamp-2 leading-tight">{p.nama}</h3>
-                    {p.sku && (
-                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">SKU: {p.sku}</span>
+              <CardContent className="p-3.5 flex flex-col flex-1">
+                {/* 1. Header with full title, SKU, and Price */}
+                <div className="mb-2">
+                  <h3 className="text-sm font-black text-[#1A1A2E] line-clamp-2 leading-snug mb-1" title={p.nama}>
+                    {p.nama}
+                  </h3>
+                  <div className="flex items-center justify-between gap-1">
+                    {p.sku ? (
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate">
+                        SKU: {p.sku}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-gray-300 italic">No SKU</span>
+                    )}
+                    {p.varian.some(v => v.harga_jual > 0) && (
+                      <p className="text-xs font-black text-primary shrink-0">
+                        {p.varian.length === 1
+                          ? `Rp${p.varian[0].harga_jual.toLocaleString('id-ID')}`
+                          : `Rp${Math.min(...p.varian.map(v => v.harga_jual)).toLocaleString('id-ID')}+`}
+                      </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-0.5 flex-shrink-0">
+                </div>
+
+                {/* 2. Action buttons and Variant/Detail in clean, distinct footer row */}
+                <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto">
+                  {/* Action buttons with distinct tooltips & hover colors */}
+                  <div className="flex items-center gap-1">
                     <Button 
                       variant="ghost" 
                       size="icon" 
@@ -1167,15 +1323,36 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </Button>
+                    
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      title="Duplikat / Salin Produk"
+                      title="Salin Ringkasan ke Clipboard (Copy Text)"
+                      className={cn(
+                        "w-7 h-7 rounded-lg transition-colors",
+                        copiedProductId === p.id 
+                          ? "text-emerald-600 bg-emerald-50" 
+                          : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
+                      )}
+                      onClick={(e) => handleCopyProductToClipboard(e, p)}
+                    >
+                      {copiedProductId === p.id ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ClipboardCopy className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      title="Duplikasi Produk (Tambah Data Baru)"
                       className="w-7 h-7 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors" 
                       onClick={() => handleDuplicateProduct(p)}
                     >
                       <Copy className="w-3.5 h-3.5" />
                     </Button>
+
                     <Button 
                       variant="ghost" 
                       size="icon" 
@@ -1186,25 +1363,16 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
-                </div>
-                {p.varian.some(v => v.harga_jual > 0) && (
-                  <p className="text-xs font-black text-primary mb-2">
-                    {p.varian.length === 1
-                      ? `Rp${p.varian[0].harga_jual.toLocaleString('id-ID')}`
-                      : `Rp${Math.min(...p.varian.map(v => v.harga_jual)).toLocaleString('id-ID')}+`}
-                  </p>
-                )}
-                <div className="flex items-center justify-between mt-auto pt-1 border-t border-gray-50">
-                  <Badge className="bg-brand-100 text-primary border-none font-bold text-[9px] h-4 px-1.5">
-                    {p.varian.length} Varian
-                  </Badge>
+
+                  {/* Detail link */}
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-primary font-bold hover:bg-brand-50 rounded-lg gap-0.5 h-6 px-2 text-[10px]"
+                    className="text-primary font-bold hover:bg-brand-50 rounded-lg gap-0.5 h-7 px-2 text-[10px] shrink-0"
                     onClick={() => handleViewVariants(p.id)}
                   >
-                    Detail <ChevronRight className="w-3 h-3" />
+                    <span>{p.varian.length} Var</span>
+                    <ChevronRight className="w-3 h-3" />
                   </Button>
                 </div>
               </CardContent>
@@ -1219,7 +1387,13 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           <div className="grid grid-cols-1 gap-4">
             {selectedProduct?.varian.map(v => {
               const hppPcs = calculateHpp(v.bahan, v.harga_packing, v.qty_batch);
-              const margin = v.harga_jual > 0 ? ((v.harga_jual - hppPcs) / v.harga_jual) * 100 : 0;
+              const totalFees = calculateVariantFees(
+                [...(selectedProduct?.biaya_lain || []), ...(v.biaya_lain || [])],
+                v.harga_jual
+              );
+              const totalCost = hppPcs + totalFees;
+              const margin = v.harga_jual > 0 ? ((v.harga_jual - totalCost) / v.harga_jual) * 100 : 0;
+              const hasFees = (v.biaya_lain && v.biaya_lain.length > 0) || (selectedProduct?.biaya_lain && selectedProduct.biaya_lain.length > 0);
               
               return (
                 <Card key={v.id} className="border-none shadow-sm rounded-3xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
@@ -1231,12 +1405,20 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
+                          {hasFees && (
+                            <Badge variant="outline" className="text-[9px] border-amber-200 text-amber-600 bg-amber-50 font-bold px-1.5 py-0">
+                              +Biaya
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-primary">{v.bahan.length > 0 ? formatCurrency(Math.round(hppPcs), true) : '—'}</span></span>
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-primary">{v.bahan.length > 0 ? formatCurrency(Math.round(totalCost), true) : '—'}</span></span>
                           <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">{formatCurrency(v.harga_jual, true)}</span></span>
                           {v.bahan.length > 0 && (
-                            <Badge className="bg-green-100 text-green-700 text-[9px] md:text-[10px] border-none font-black px-2 py-0">
+                            <Badge className={cn(
+                              "text-[9px] md:text-[10px] border-none font-black px-2 py-0",
+                              margin >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            )}>
                               {margin.toFixed(1)}%
                             </Badge>
                           )}
@@ -1251,13 +1433,25 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                         Hitung HPP
                       </Button>
                       <div className="flex gap-1">
-                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => handleDuplicateVariant(v)} title="Duplikasi">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className={cn(
+                            "h-10 w-10 rounded-xl border-gray-100 transition-colors",
+                            copiedVariantId === v.id ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-gray-400 hover:text-purple-600 hover:bg-purple-50"
+                          )} 
+                          onClick={(e) => handleCopyVariantToClipboard(e, v, selectedProduct?.nama)} 
+                          title="Salin Info Varian ke Clipboard"
+                        >
+                          {copiedVariantId === v.id ? <Check className="w-4 h-4 text-emerald-600" /> : <ClipboardCopy className="w-4 h-4" />}
+                        </Button>
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-amber-600 hover:bg-amber-50" onClick={() => handleDuplicateVariant(v)} title="Duplikasi Varian (Copy Data)">
                           <Copy className="w-4 h-4" />
                         </Button>
-                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingVariant(v); setIsVariantModalOpen(true); }}>
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingVariant(v); setIsVariantModalOpen(true); }} title="Edit Varian">
                           <Edit2 className="w-4 h-4" />
                         </Button>
-                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteVariant(v.id)}>
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteVariant(v.id)} title="Hapus Varian">
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
@@ -1375,7 +1569,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       {formatCurrency(calculateBatchHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}
                     </span>
                   </div>
-                  <div className="pt-2 border-t border-dashed border-gray-100 mt-2">
+                  <div className="pt-2 border-t border-dashed border-gray-100 mt-2 space-y-2">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-gray-500 font-bold">Komponen / pcs</span>
                       <span className="font-black text-gray-900">
@@ -1388,6 +1582,33 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                         {formatCurrency((Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1), true)}
                       </span>
                     </div>
+                    {(() => {
+                      const allFees = [
+                        ...(selectedProduct?.biaya_lain || []),
+                        ...(activeHppVariant.biaya_lain || [])
+                      ];
+                      if (allFees.length === 0) return null;
+                      return (
+                        <div className="pt-2 border-t border-dashed border-gray-100 space-y-1.5">
+                          <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Biaya Tambahan / pcs</p>
+                          {allFees.map((fee, idx) => {
+                            const feeNominal = fee.tipe === 'persen' 
+                              ? ((Number(fee.nilai) || 0) / 100) * (Number(activeHppVariant.harga_jual) || 0)
+                              : (Number(fee.nilai) || 0);
+                            return (
+                              <div key={idx} className="flex justify-between items-center text-xs">
+                                <span className="text-gray-500 font-medium truncate max-w-[150px]">
+                                  {fee.nama} {fee.tipe === 'persen' && `(${fee.nilai}%)`}
+                                </span>
+                                <span className="font-bold text-amber-600">
+                                  {formatCurrency(feeNominal, true)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex justify-between items-center pt-2">
                     <span className="text-sm font-bold text-gray-500">Harga Jual</span>
@@ -1401,30 +1622,40 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       />
                     </div>
                   </div>
-                  <div className="pt-4 border-t border-dashed border-gray-100">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-bold text-gray-500 uppercase">Laba Bersih / pcs</span>
-                      <span className={cn(
-                        "text-lg font-black",
-                        (activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) >= 0 
-                          ? "text-green-600" 
-                          : "text-red-600"
-                      )}>
-                        {formatCurrency(activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch), true)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">Margin Profit</span>
-                      <Badge className={cn(
-                        "border-none font-black text-sm px-3",
-                        ((activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) / Math.max(1, activeHppVariant.harga_jual)) >= 0
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-700"
-                      )}>
-                        {activeHppVariant.harga_jual > 0 ? (((activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) / activeHppVariant.harga_jual) * 100).toFixed(1) : '0'}%
-                      </Badge>
-                    </div>
-                  </div>
+                  {(() => {
+                    const hppBase = calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch);
+                    const totalFees = calculateVariantFees(
+                      [...(selectedProduct?.biaya_lain || []), ...(activeHppVariant.biaya_lain || [])],
+                      activeHppVariant.harga_jual
+                    );
+                    const totalHppWithFees = hppBase + totalFees;
+                    const labaBersih = activeHppVariant.harga_jual - totalHppWithFees;
+                    const marginProfit = activeHppVariant.harga_jual > 0 ? (labaBersih / activeHppVariant.harga_jual) * 100 : 0;
+                    return (
+                      <div className="pt-4 border-t border-dashed border-gray-100">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-sm font-bold text-gray-500 uppercase">Laba Bersih / pcs</span>
+                          <span className={cn(
+                            "text-lg font-black",
+                            labaBersih >= 0 ? "text-green-600" : "text-red-600"
+                          )}>
+                            {formatCurrency(labaBersih, true)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">Margin Profit</span>
+                          <Badge className={cn(
+                            "border-none font-black text-sm px-3",
+                            marginProfit >= 0
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-700"
+                          )}>
+                            {marginProfit.toFixed(1)}%
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <Button 
                     onClick={handleSaveHpp}
                     disabled={isSaving}
@@ -1755,6 +1986,66 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 </div>
               );
             })()}
+
+            <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-bold text-sm">Pajak / Biaya Tambahan</Label>
+                  <p className="text-[11px] text-gray-400 font-medium">Biaya per unit (cth: Fee marketplace, Pajak)</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={handleAddVariantFee} className="rounded-xl h-8 gap-1 text-xs border-primary text-primary hover:bg-brand-50">
+                  <Plus className="w-3 h-3" />
+                  Tambah Biaya
+                </Button>
+              </div>
+              
+              <div className="space-y-3 max-h-[200px] overflow-y-auto px-1 custom-scrollbar">
+                {variantFees.length === 0 && (
+                  <p className="text-xs text-gray-400 italic text-center py-2">Belum ada biaya tambahan untuk varian ini</p>
+                )}
+                {variantFees.map((fee, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-gray-50 p-3 rounded-2xl border border-gray-100 group relative">
+                    <div className="flex-1 space-y-2">
+                      <Input 
+                        placeholder="Nama Biaya (Contoh: Admin Shopee)" 
+                        value={fee.nama} 
+                        onChange={(e) => handleUpdateVariantFee(index, 'nama', e.target.value)}
+                        className="h-8 text-xs rounded-lg border-gray-200"
+                        required
+                      />
+                      <div className="flex gap-2">
+                        <select 
+                          value={fee.tipe} 
+                          onChange={(e) => handleUpdateVariantFee(index, 'tipe', e.target.value as 'persen' | 'nominal')}
+                          className="h-8 text-xs rounded-lg border border-gray-200 bg-white px-2 focus:outline-none focus:ring-1 focus:ring-primary w-24 font-bold"
+                        >
+                          <option value="persen">% Persen</option>
+                          <option value="nominal">Rp Nominal</option>
+                        </select>
+                        <Input 
+                          type="number" 
+                          step="any"
+                          placeholder="Nilai" 
+                          value={fee.nilai || ''} 
+                          onChange={(e) => handleUpdateVariantFee(index, 'nilai', parseFloat(e.target.value) || 0)}
+                          className="h-8 text-xs rounded-lg border-gray-200 font-bold"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => handleRemoveVariantFee(index)}
+                      className="text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl h-8 w-8 shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
             <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
               <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100 active:scale-95 transition-all">
