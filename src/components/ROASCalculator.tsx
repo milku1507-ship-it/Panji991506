@@ -2,7 +2,7 @@ import React from 'react';
 import { Product, Variant, Ingredient, HppMaterial, Transaction, AdditionalFee } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 import { getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ import {
   ShieldAlert,
   Percent,
   CheckCircle2,
+  CheckCircle,
   DollarSign,
   PieChart,
   Activity,
@@ -124,6 +125,113 @@ function extractFeeRates(product?: Product, variant?: Variant) {
   }
 
   return { percentRate, nominalPerOrder, nominalPerUnit };
+}
+
+/* ==========================================================================
+   HELPER FUNCTIONS: REVERSE PRICE CALCULATION (CARI HARGA)
+   ========================================================================== */
+function roundPrice(price: number, step: number): number {
+  if (step <= 0) return Math.round(price);
+  return Math.ceil(price / step) * step;
+}
+
+interface ReverseCalcInput {
+  hppPcs: number;            // E: HPP per unit (bahan + packing)
+  minOrder: number;          // M: Minimal order (unit per order)
+  nominalPerOrder: number;   // F: Biaya proses per order (nominal)
+  nominalPerUnit: number;    // V_unit: Biaya per unit
+  percentRate: number;       // C: Fee marketplace % (0-100)
+  voucherPct: number;        // B: Voucher / Diskon % (0-100)
+  targetRoas: number;        // Target ROAS (e.g. 6.5)
+  targetProfitPct: number;   // Target Profit Bersih % (0-100, optional)
+  includePpn: boolean;       // Status PPN Iklan
+  ppnRate: number;           // Rate PPN Iklan (11%)
+  roundingStep: number;      // 0, 100, 500, 1000
+}
+
+function calculateReversePrice(input: ReverseCalcInput) {
+  const {
+    hppPcs,
+    minOrder,
+    nominalPerOrder,
+    nominalPerUnit,
+    percentRate,
+    voucherPct,
+    targetRoas,
+    targetProfitPct,
+    includePpn,
+    ppnRate,
+    roundingStep,
+  } = input;
+
+  const M = Math.max(1, minOrder);
+  const E = Math.max(0, hppPcs);
+  const F = Math.max(0, nominalPerOrder);
+  const V_unit = Math.max(0, nominalPerUnit);
+
+  // HPP Real per unit (mengalokasikan biaya proses 1 order ke M unit dalam order tersebut)
+  const realHppPerUnit = E + (F / M) + V_unit;
+
+  const B = Math.max(0, voucherPct) / 100;
+  const C = Math.max(0, percentRate) / 100;
+  const R_target = Math.max(0.01, targetRoas);
+  const T_profit = Math.max(0, targetProfitPct) / 100;
+  const t_ppn = includePpn ? Math.max(0, ppnRate) / 100 : 0;
+
+  // Rasio Biaya Iklan terhadap Omzet Real D: (1 + PPN) / Target ROAS
+  const adSpendRatio = (1 + t_ppn) / R_target;
+
+  // Faktor sisa margin dari Omzet Real D yang dapat menanggung HPP Real:
+  // Net Margin Factor = 1 - adSpendRatio - T_profit
+  const netMarginFactor = 1 - adSpendRatio - T_profit;
+
+  if (netMarginFactor <= 0) {
+    return {
+      isFeasible: false,
+      errorMessage: 'Target ROAS dan Target Profit tidak dapat dicapai secara bersamaan dengan struktur biaya saat ini.',
+      priceExact: 0,
+      priceRecommended: 0,
+      realHppPerUnit,
+      omzetRealPerUnitNeeded: 0,
+      adSpendRatio,
+      netMarginFactor,
+    };
+  }
+
+  // Omzet Real D per unit yang dibutuhkan: D = Real HPP / Net Margin Factor
+  const omzetRealPerUnitNeeded = realHppPerUnit / netMarginFactor;
+
+  // Faktor diskon dan fee marketplace: (1 - Voucher%) * (1 - Fee%)
+  const discountAndFeeFactor = (1 - B) * (1 - C);
+  if (discountAndFeeFactor <= 0) {
+    return {
+      isFeasible: false,
+      errorMessage: 'Voucher dan fee marketplace melebihi 100% omzet.',
+      priceExact: 0,
+      priceRecommended: 0,
+      realHppPerUnit,
+      omzetRealPerUnitNeeded: 0,
+      adSpendRatio,
+      netMarginFactor,
+    };
+  }
+
+  // Harga jual matematis persis P = D / ((1 - B) * (1 - C))
+  const priceExact = omzetRealPerUnitNeeded / discountAndFeeFactor;
+  // Harga jual rekomendasi setelah pembulatan
+  const priceRecommended = roundPrice(priceExact, roundingStep);
+
+  return {
+    isFeasible: true,
+    errorMessage: null,
+    priceExact,
+    priceRecommended,
+    realHppPerUnit,
+    omzetRealPerUnitNeeded,
+    discountAndFeeFactor,
+    adSpendRatio,
+    netMarginFactor,
+  };
 }
 
 /* ==========================================================================
@@ -277,12 +385,24 @@ function SummaryPill({ label, value, hint }: { label: string; value: string; hin
 export default function ROASCalculator({ products, ingredients, transactions, user }: Props) {
   // Mode Iklan: 'variant' (Mode 1), 'product' (Mode 2), 'group' (Mode 3)
   const [adMode, setAdMode] = React.useState<'variant' | 'product' | 'group'>('variant');
+  // Mode Perhitungan: 'find_roas' (Harga -> ROAS) | 'find_price' (Target ROAS -> Harga)
+  const [calcMode, setCalcMode] = React.useState<'find_roas' | 'find_price'>('find_roas');
 
   // Shared Configs: Target Profit, Buffer, PPN
   const [targetProfitPct, setTargetProfitPct] = React.useState<number>(15);
   const [bufferPct, setBufferPct] = React.useState<number>(10);
   const [includePpn, setIncludePpn] = React.useState<boolean>(false);
   const [ppnRate, setPpnRate] = React.useState<number>(11);
+
+  // ----------------------------------------------------
+  // CARI HARGA (Reverse Calculation) State
+  // ----------------------------------------------------
+  const [targetRoasInput, setTargetRoasInput] = React.useState<number>(6.5);
+  const [voucherPctInput, setVoucherPctInput] = React.useState<number>(0);
+  const [useTargetProfitInFindPrice, setUseTargetProfitInFindPrice] = React.useState<boolean>(false);
+  const [findPriceTargetProfitPct, setFindPriceTargetProfitPct] = React.useState<number>(15);
+  const [roundingOption, setRoundingOption] = React.useState<0 | 100 | 500 | 1000>(100);
+  const [simulatedPriceOverride, setSimulatedPriceOverride] = React.useState<number | null>(null);
 
   // ----------------------------------------------------
   // MODE 1: IKLAN VARIAN State
@@ -542,6 +662,39 @@ export default function ROASCalculator({ products, ingredients, transactions, us
     };
   }, [v1ActiveProduct, v1ActiveVariant, ingredients, v1OrderSim, targetProfitPct, bufferPct]);
 
+  // CARI HARGA Engine: Mode 1 (Varian)
+  const v1ReverseCalc = React.useMemo(() => {
+    if (!v1ActiveProduct || !v1ActiveVariant) return null;
+    const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
+    const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
+    const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
+
+    return calculateReversePrice({
+      hppPcs,
+      minOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      voucherPct: voucherPctInput,
+      targetRoas: targetRoasInput,
+      targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+      includePpn,
+      ppnRate,
+      roundingStep: roundingOption,
+    });
+  }, [
+    v1ActiveProduct,
+    v1ActiveVariant,
+    ingredients,
+    voucherPctInput,
+    targetRoasInput,
+    useTargetProfitInFindPrice,
+    findPriceTargetProfitPct,
+    includePpn,
+    ppnRate,
+    roundingOption,
+  ]);
+
   React.useEffect(() => {
     if (v1Calculation && v1Calculation.roasTarget > 0) {
       setV1SimRoas((prev) => (prev === 0 ? Number(v1Calculation.roasTarget.toFixed(2)) : prev));
@@ -681,6 +834,90 @@ export default function ROASCalculator({ products, ingredients, transactions, us
       setV2SimRoas((prev) => (prev === 0 ? Number(v2Calculation.roasTarget.toFixed(2)) : prev));
     }
   }, [v2Calculation]);
+
+  // CARI HARGA Engine: Mode 2 (Produk)
+  const v2ReverseCalc = React.useMemo(() => {
+    if (!v2ActiveProduct || !v2ActiveProduct.varian || v2SelectedVariantIds.length === 0) return null;
+    const selectedVariants = v2ActiveProduct.varian.filter((v) => v2SelectedVariantIds.includes(v.id));
+    if (selectedVariants.length === 0) return null;
+
+    const totalWeightSum = selectedVariants.reduce((sum, v) => sum + (v2VariantWeights[v.id] || 0), 0) || 100;
+    const normWeights: Record<string, number> = {};
+    selectedVariants.forEach((v) => {
+      normWeights[v.id] = (v2VariantWeights[v.id] || 0) / totalWeightSum;
+    });
+
+    let weightedHpp = 0;
+    let weightedMinOrder = 0;
+    const feeConfig = extractFeeRates(v2ActiveProduct);
+
+    const variantReverseDetails = selectedVariants.map((v) => {
+      const hppPcs = calcHppPerPcs(v, ingredients);
+      const minOrder = Math.max(1, Number(v.min_order) || 1);
+      const w = normWeights[v.id] || 0;
+
+      weightedHpp += hppPcs * w;
+      weightedMinOrder += minOrder * w;
+
+      const singleRev = calculateReversePrice({
+        hppPcs,
+        minOrder,
+        nominalPerOrder: feeConfig.nominalPerOrder,
+        nominalPerUnit: feeConfig.nominalPerUnit,
+        percentRate: feeConfig.percentRate,
+        voucherPct: voucherPctInput,
+        targetRoas: targetRoasInput,
+        targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+        includePpn,
+        ppnRate,
+        roundingStep: roundingOption,
+      });
+
+      return {
+        variant: v,
+        weightPct: Math.round(w * 100),
+        hppPcs,
+        minOrder,
+        rev: singleRev,
+      };
+    });
+
+    const effectiveMinOrder = Math.max(1, Math.round(weightedMinOrder));
+
+    const weightedRev = calculateReversePrice({
+      hppPcs: weightedHpp,
+      minOrder: effectiveMinOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      voucherPct: voucherPctInput,
+      targetRoas: targetRoasInput,
+      targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+      includePpn,
+      ppnRate,
+      roundingStep: roundingOption,
+    });
+
+    return {
+      weightedRev,
+      effectiveMinOrder,
+      weightedHpp,
+      feeConfig,
+      variantReverseDetails,
+    };
+  }, [
+    v2ActiveProduct,
+    v2SelectedVariantIds,
+    ingredients,
+    v2VariantWeights,
+    voucherPctInput,
+    targetRoasInput,
+    useTargetProfitInFindPrice,
+    findPriceTargetProfitPct,
+    includePpn,
+    ppnRate,
+    roundingOption,
+  ]);
 
   /* ========================================================================
      MATHEMATICAL CORE ENGINE: MODE 3 (IKLAN GRUP — BANYAK PRODUK & VARIAN)
@@ -827,6 +1064,82 @@ export default function ROASCalculator({ products, ingredients, transactions, us
     v3GroupName,
   ]);
 
+  // CARI HARGA Engine: Mode 3 (Grup)
+  const v3ReverseCalc = React.useMemo(() => {
+    if (v3SelectedProductIds.length === 0) return null;
+    const groupProds = products.filter((p) => v3SelectedProductIds.includes(p.id));
+    if (groupProds.length === 0) return null;
+
+    const totalProductWeightSum =
+      groupProds.reduce((sum, p) => sum + (v3ProductWeights[p.id] || 0), 0) || 100;
+
+    const productReverseDetails = groupProds.map((prod) => {
+      const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
+      const allVariants = prod.varian || [];
+      const activeVarIds = v3GroupProductVariants[prod.id] || allVariants.map((v) => v.id);
+      const activeVariants = allVariants.filter((v) => activeVarIds.includes(v.id));
+      const vCount = Math.max(1, activeVariants.length);
+
+      let pWeightedHpp = 0;
+      let pWeightedMinOrder = 0;
+
+      activeVariants.forEach((v) => {
+        const vHpp = calcHppPerPcs(v, ingredients);
+        const vMin = Math.max(1, Number(v.min_order) || 1);
+        const vShare = 1 / vCount;
+
+        pWeightedHpp += vHpp * vShare;
+        pWeightedMinOrder += vMin * vShare;
+      });
+
+      const pMinOrder = Math.max(1, Math.round(pWeightedMinOrder));
+      const pFeeConfig = extractFeeRates(prod);
+
+      const rev = calculateReversePrice({
+        hppPcs: pWeightedHpp,
+        minOrder: pMinOrder,
+        nominalPerOrder: pFeeConfig.nominalPerOrder,
+        nominalPerUnit: pFeeConfig.nominalPerUnit,
+        percentRate: pFeeConfig.percentRate,
+        voucherPct: voucherPctInput,
+        targetRoas: targetRoasInput,
+        targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+        includePpn,
+        ppnRate,
+        roundingStep: roundingOption,
+      });
+
+      return {
+        product: prod,
+        weightPct: Math.round(prodWeight * 100),
+        activeVariantsCount: activeVariants.length,
+        weightedHpp: pWeightedHpp,
+        minOrder: pMinOrder,
+        feeConfig: pFeeConfig,
+        rev,
+      };
+    });
+
+    return {
+      groupName: v3GroupName,
+      productReverseDetails,
+    };
+  }, [
+    v3SelectedProductIds,
+    products,
+    v3ProductWeights,
+    v3GroupProductVariants,
+    ingredients,
+    voucherPctInput,
+    targetRoasInput,
+    useTargetProfitInFindPrice,
+    findPriceTargetProfitPct,
+    includePpn,
+    ppnRate,
+    roundingOption,
+    v3GroupName,
+  ]);
+
   React.useEffect(() => {
     if (v3Calculation && v3Calculation.roasTargetGroup > 0) {
       setV3SimRoas((prev) => (prev === 0 ? Number(v3Calculation.roasTargetGroup.toFixed(2)) : prev));
@@ -858,65 +1171,103 @@ export default function ROASCalculator({ products, ingredients, transactions, us
           </div>
         </div>
 
-        {/* Tab Pilihan 3 Mode Iklan */}
-        <div className="pt-2">
-          <div className="bg-white p-1.5 rounded-2xl border border-gray-200/80 shadow-xs grid grid-cols-3 gap-1.5 max-w-xl">
-            <button
-              type="button"
-              onClick={() => {
-                setAdMode('variant');
-                savePreferences('adMode', 'variant');
-              }}
-              className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                adMode === 'variant'
-                  ? 'bg-violet-600 text-white shadow-md shadow-violet-200'
-                  : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
-              }`}
-            >
-              <Tag className="w-4 h-4 shrink-0" />
-              <span>IKLAN VARIAN</span>
-            </button>
+        {/* Dual Tab Pilihan Mode Iklan & Mode Perhitungan */}
+        <div className="pt-2 space-y-3">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-white p-2 rounded-2xl border border-gray-200/80 shadow-xs">
+            {/* 1. Pilihan Jenis Iklan */}
+            <div className="flex items-center gap-1 bg-gray-100/90 p-1 rounded-xl flex-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdMode('variant');
+                  savePreferences('adMode', 'variant');
+                }}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                  adMode === 'variant'
+                    ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
+                    : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
+                }`}
+              >
+                <Tag className="w-3.5 h-3.5 shrink-0" />
+                <span>IKLAN VARIAN</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setAdMode('product');
-                savePreferences('adMode', 'product');
-              }}
-              className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                adMode === 'product'
-                  ? 'bg-violet-600 text-white shadow-md shadow-violet-200'
-                  : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
-              }`}
-            >
-              <Package className="w-4 h-4 shrink-0" />
-              <span>IKLAN PRODUK</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdMode('product');
+                  savePreferences('adMode', 'product');
+                }}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                  adMode === 'product'
+                    ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
+                    : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5 shrink-0" />
+                <span>IKLAN PRODUK</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setAdMode('group');
-                savePreferences('adMode', 'group');
-              }}
-              className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                adMode === 'group'
-                  ? 'bg-violet-600 text-white shadow-md shadow-violet-200'
-                  : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
-              }`}
-            >
-              <Layers className="w-4 h-4 shrink-0" />
-              <span>IKLAN GRUP</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdMode('group');
+                  savePreferences('adMode', 'group');
+                }}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                  adMode === 'group'
+                    ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
+                    : 'text-gray-600 hover:text-violet-700 hover:bg-violet-50/60'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span>IKLAN GRUP</span>
+              </button>
+            </div>
+
+            {/* 2. Pilihan Mode Perhitungan (CARI ROAS vs CARI HARGA) */}
+            <div className="flex items-center gap-1 bg-gradient-to-r from-violet-100/80 to-purple-100/80 p-1 rounded-xl border border-violet-200/60 shrink-0">
+              <button
+                type="button"
+                onClick={() => setCalcMode('find_roas')}
+                className={`py-2 px-4 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                  calcMode === 'find_roas'
+                    ? 'bg-gradient-to-r from-violet-700 to-purple-700 text-white shadow-sm'
+                    : 'text-violet-800 hover:bg-white/60'
+                }`}
+              >
+                <Calculator className="w-3.5 h-3.5 shrink-0" />
+                <span>CARI ROAS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCalcMode('find_price')}
+                className={`py-2 px-4 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                  calcMode === 'find_price'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm'
+                    : 'text-emerald-800 hover:bg-white/60'
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5 shrink-0" />
+                <span>CARI HARGA</span>
+              </button>
+            </div>
           </div>
 
           {/* Penjelasan Singkat Mode Terpilih */}
-          <div className="mt-2 text-xs text-gray-500 font-medium bg-gray-50/90 border border-gray-200/70 p-2.5 rounded-xl flex items-center gap-2 max-w-xl">
+          <div className="text-xs text-gray-500 font-medium bg-gray-50/90 border border-gray-200/70 p-2.5 rounded-xl flex items-center gap-2">
             <Info className="w-4 h-4 text-violet-600 shrink-0" />
             <span>
-              {adMode === 'variant' && 'Mode 1: 1 Iklan = 1 Produk = 1 Varian Spesifik. Hanya menghitung unit economics varian yang dipilih.'}
-              {adMode === 'product' && 'Mode 2: 1 Iklan = 1 Produk = Beberapa Varian Terpilih. Menghitung rata-rata tertimbang & ROAS BEP Terburuk.'}
-              {adMode === 'group' && 'Mode 3: 1 Grup Iklan = Beberapa Produk. Menghitung ekonomi per produk lalu dikonsolidasi menjadi ekonomi grup.'}
+              {calcMode === 'find_roas' ? (
+                adMode === 'variant' ? 'Mode CARI ROAS (Varian): Pengguna memasukkan harga jual → sistem menghitung ROAS BEP & ROAS Target.'
+                : adMode === 'product' ? 'Mode CARI ROAS (Produk): Menghitung rata-rata tertimbang varian → sistem menghitung ROAS BEP Produk & BEP Terburuk.'
+                : 'Mode CARI ROAS (Grup): Konsolidasi ekonomi beberapa produk → sistem menghitung ROAS BEP Grup & BEP Terburuk.'
+              ) : (
+                adMode === 'variant' ? 'Mode CARI HARGA (Varian): Pengguna memasukkan Target ROAS → sistem menghitung harga jual yang diperlukan.'
+                : adMode === 'product' ? 'Mode CARI HARGA (Produk): Pengguna memasukkan Target ROAS → sistem menghitung harga jual rekomendasi produk & varian.'
+                : 'Mode CARI HARGA (Grup): Pengguna memasukkan Target ROAS → sistem menghitung harga jual yang diperlukan untuk setiap produk dalam grup.'
+              )}
             </span>
           </div>
         </div>
@@ -1034,9 +1385,14 @@ export default function ROASCalculator({ products, ingredients, transactions, us
       </Card>
 
       {/* ====================================================================
-          MODE 1: IKLAN VARIAN (1 Produk = 1 Varian)
+          MODE CALCULATION: CARI ROAS
           ==================================================================== */}
-      {adMode === 'variant' && (
+      {calcMode === 'find_roas' && (
+        <div className="space-y-6">
+          {/* ====================================================================
+              MODE 1: IKLAN VARIAN (1 Produk = 1 Varian)
+              ==================================================================== */}
+          {adMode === 'variant' && (
         <div className="space-y-6">
           {/* Langkah 1 & 2: Pilih Produk & Pilih Varian */}
           <Card className="rounded-3xl border-none shadow-sm bg-white">
@@ -2138,10 +2494,731 @@ export default function ROASCalculator({ products, ingredients, transactions, us
           )}
         </div>
       )}
+        </div>
+      )}
 
       {/* ====================================================================
-          EDU & METHODOLOGY SECTION: HUBUNGAN ANTARA ANGKA ROAS
+          MODE CALCULATION: CARI HARGA (REVERSE CALCULATION)
           ==================================================================== */}
+      {calcMode === 'find_price' && (
+        <div className="space-y-6">
+          {/* Header & Main Control Input Card for CARI HARGA */}
+          <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
+            <CardHeader className="p-5 md:p-6 bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 rounded-full text-[11px] font-black tracking-wider uppercase">
+                      REVERSE CALCULATION
+                    </span>
+                    <span className="text-xs text-emerald-300 font-bold">
+                      {adMode === 'variant' ? 'Iklan Varian' : adMode === 'product' ? 'Iklan Produk' : 'Iklan Grup'}
+                    </span>
+                  </div>
+                  <h2 className="text-lg font-black tracking-tight text-white flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-emerald-400" />
+                    CARI HARGA JUAL DARI TARGET ROAS
+                  </h2>
+                  <p className="text-xs text-emerald-200/90 leading-relaxed">
+                    Masukkan Target ROAS dan biaya. Sistem akan menghitung harga jual minimal dan harga rekomendasi secara presisi.
+                  </p>
+                </div>
+
+                {/* Preset Target ROAS Shortcuts */}
+                <div className="flex flex-wrap items-center gap-1.5 bg-black/30 p-2 rounded-2xl border border-white/10 shrink-0">
+                  <span className="text-[10px] uppercase font-bold text-emerald-300 tracking-wider mr-1">Preset:</span>
+                  {[3, 4, 5, 6.5, 7, 8, 10].map((roasVal) => (
+                    <button
+                      key={roasVal}
+                      type="button"
+                      onClick={() => setTargetRoasInput(roasVal)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                        targetRoasInput === roasVal
+                          ? 'bg-emerald-500 text-white shadow-sm'
+                          : 'bg-white/10 text-emerald-100 hover:bg-white/20'
+                      }`}
+                    >
+                      {roasVal}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-5 md:p-6 space-y-6">
+              {/* Form Input Parameters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Target ROAS */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 flex items-center justify-between">
+                    <span>TARGET ROAS SELLER CENTER</span>
+                    <span className="text-[10px] font-normal text-gray-400">(Wajib)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={targetRoasInput}
+                      onChange={(e) => setTargetRoasInput(Math.max(0.01, Number(e.target.value) || 1))}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-black text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">
+                      x
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500">Target ROAS platform iklan yang diinginkan.</p>
+                </div>
+
+                {/* 2. Voucher / Diskon */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700 flex items-center justify-between">
+                    <span>VOUCHER / DISKON</span>
+                    <span className="text-[10px] font-normal text-gray-400">(Opsional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="90"
+                      value={voucherPctInput}
+                      onChange={(e) => setVoucherPctInput(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">
+                      %
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500">Diskon toko / voucher yang ditanggung penjual.</p>
+                </div>
+
+                {/* 3. Pembulatan Harga */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-700">PEMBULATAN HARGA REKOMENDASI</label>
+                  <select
+                    value={roundingOption}
+                    onChange={(e) => setRoundingOption(Number(e.target.value) as 0 | 100 | 500 | 1000)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                  >
+                    <option value={0}>Tidak Dibulatkan (Eksak)</option>
+                    <option value={100}>Ke Pembulatan Rp100 (Default)</option>
+                    <option value={500}>Ke Pembulatan Rp500</option>
+                    <option value={1000}>Ke Pembulatan Rp1.000</option>
+                  </select>
+                  <p className="text-[11px] text-gray-500">Pembulatan ke atas untuk psikologi harga.</p>
+                </div>
+
+                {/* 4. Target Profit (Opsional) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={useTargetProfitInFindPrice}
+                        onChange={(e) => setUseTargetProfitInFindPrice(e.target.checked)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>TARGET PROFIT BERSIH</span>
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      disabled={!useTargetProfitInFindPrice}
+                      value={findPriceTargetProfitPct}
+                      onChange={(e) => setFindPriceTargetProfitPct(Math.max(0, Number(e.target.value) || 0))}
+                      className={`w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-sm text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${
+                        !useTargetProfitInFindPrice ? 'bg-gray-100 opacity-60' : ''
+                      }`}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">
+                      %
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    {useTargetProfitInFindPrice
+                      ? 'Harga harus memenuhi Target ROAS & Profit sekaligus.'
+                      : 'Opsional: Centang jika ingin mengunci margin profit.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status PPN Iklan Banner */}
+              <div className="p-3 bg-emerald-50/70 rounded-2xl border border-emerald-100 flex items-center justify-between gap-3 text-xs text-emerald-900">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    PPN Iklan ({ppnRate}%): <strong>{includePpn ? 'Aktif (Biaya Iklan × 1.11)' : 'Non-Aktif'}</strong>.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIncludePpn(!includePpn)}
+                  className="px-3 py-1 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 rounded-lg font-black text-xs transition-colors shrink-0"
+                >
+                  {includePpn ? 'Matikan PPN' : 'Aktifkan PPN'}
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ====================================================================
+              MODE 1: IKLAN VARIAN (CARI HARGA)
+              ==================================================================== */}
+          {adMode === 'variant' && (
+            <div className="space-y-6">
+              {/* Selector Produk & Varian */}
+              <Card className="rounded-3xl border-none shadow-sm bg-white">
+                <CardContent className="p-5 md:p-6 space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-emerald-600" />
+                    Pilih Produk & Varian Yang Dianalisis
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-gray-700 mb-1 block">Produk</label>
+                      <select
+                        value={v1SelectedProductId}
+                        onChange={(e) => {
+                          setV1SelectedProductId(e.target.value);
+                          const p = products.find((pr) => pr.id === e.target.value);
+                          if (p && p.varian && p.varian.length > 0) {
+                            setV1SelectedVariantId(p.varian[0].id);
+                          }
+                          setSimulatedPriceOverride(null);
+                        }}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-xs text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nama} ({p.varian?.length || 0} Varian)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-gray-700 mb-1 block">Varian Spesifik</label>
+                      <select
+                        value={v1SelectedVariantId}
+                        onChange={(e) => {
+                          setV1SelectedVariantId(e.target.value);
+                          setSimulatedPriceOverride(null);
+                        }}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-xs text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {(v1ActiveProduct?.varian || []).map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.nama} (HPP: {formatCurrency(calcHppPerPcs(v, ingredients))})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Reverse Calculation Result Card for Variant */}
+              {v1ReverseCalc && (
+                <div className="space-y-6">
+                  {!v1ReverseCalc.isFeasible ? (
+                    <Card className="rounded-3xl border border-red-200 bg-red-50/80">
+                      <CardContent className="p-6 text-center space-y-2">
+                        <AlertTriangle className="w-8 h-8 text-red-600 mx-auto" />
+                        <h4 className="text-sm font-black text-red-900">Perhitungan Tidak Memungkinkan</h4>
+                        <p className="text-xs text-red-700 max-w-lg mx-auto leading-relaxed">
+                          {v1ReverseCalc.errorMessage}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Cards Displaying Suggested Selling Price */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Primary Recommendation Card */}
+                        <Card className="lg:col-span-2 rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50 via-teal-50 to-white shadow-md overflow-hidden">
+                          <CardContent className="p-6 space-y-5">
+                            <div className="flex items-center justify-between border-b border-emerald-200/60 pb-3">
+                              <div>
+                                <span className="text-[10px] uppercase font-black tracking-widest text-emerald-700">
+                                  REKOMENDASI HARGA JUAL VARIAN
+                                </span>
+                                <h3 className="text-base font-black text-gray-900">
+                                  {v1ActiveProduct?.nama} - {v1ActiveVariant?.nama}
+                                </h3>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] font-bold text-gray-500 block">Target ROAS</span>
+                                <span className="text-base font-black text-emerald-700">
+                                  {targetRoasInput.toFixed(2)}x
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row items-baseline justify-between gap-4 bg-white p-5 rounded-2xl border border-emerald-200/80 shadow-xs">
+                              <div>
+                                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                  HARGA JUAL YANG DISARANKAN
+                                </p>
+                                <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
+                                  {formatCurrency(v1ReverseCalc.priceRecommended)}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Harga Matematis Aksak: <strong>{formatCurrency(v1ReverseCalc.priceExact)}</strong>
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCalcMode('find_roas');
+                                }}
+                                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-black text-xs transition-all shadow-md shadow-violet-200 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                                <span>Uji ke Mode CARI ROAS</span>
+                              </button>
+                            </div>
+
+                            {/* Alert Warnings */}
+                            {targetRoasInput > 8 && (
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                <span>Target ROAS sangat tinggi ({targetRoasInput}x). Harga yang diperlukan mungkin menjadi kurang kompetitif.</span>
+                              </div>
+                            )}
+
+                            {v1ActiveVariant && v1ActiveVariant.harga_jual > 0 && v1ReverseCalc.priceRecommended > v1ActiveVariant.harga_jual && (
+                              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center gap-2">
+                                <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                                <span>
+                                  Harga yang diperlukan ({formatCurrency(v1ReverseCalc.priceRecommended)}) lebih tinggi dari harga jual saat ini ({formatCurrency(v1ActiveVariant.harga_jual)}) untuk mencapai target ROAS {targetRoasInput}x.
+                                </span>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        {/* Parameter Breakdown Card */}
+                        <Card className="rounded-3xl border-none shadow-sm bg-white">
+                          <CardHeader className="p-5 pb-3 border-b border-gray-100">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-gray-700">
+                              Struktur Biaya Varian
+                            </h4>
+                          </CardHeader>
+                          <CardContent className="p-5 space-y-3 text-xs">
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">HPP Bahan & Packing</span>
+                              <span className="font-bold text-gray-900">
+                                {formatCurrency(calcHppPerPcs(v1ActiveVariant!, ingredients))}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">Minimal Order</span>
+                              <span className="font-bold text-gray-900">
+                                {v1ActiveVariant?.min_order || 1} pack/order
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">Biaya Proses</span>
+                              <span className="font-bold text-gray-900">
+                                {formatCurrency(extractFeeRates(v1ActiveProduct!, v1ActiveVariant!).nominalPerOrder)}/order
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">HPP Real per Unit</span>
+                              <span className="font-bold text-gray-900">
+                                {formatCurrency(v1ReverseCalc.realHppPerUnit)}
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">Fee Marketplace</span>
+                              <span className="font-bold text-gray-900">
+                                {extractFeeRates(v1ActiveProduct!, v1ActiveVariant!).percentRate}%
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between py-1 border-b border-gray-50">
+                              <span className="text-gray-500">Voucher Penjual</span>
+                              <span className="font-bold text-gray-900">{voucherPctInput}%</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* Interactive Price Simulation Slider / Control */}
+                      <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
+                        <CardHeader className="p-5 pb-3 border-b border-gray-100 bg-gray-50/70">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-gray-800 flex items-center gap-2">
+                              <TrendingUp className="w-4 h-4 text-emerald-600" />
+                              Simulasi Harga Real-Time (Harga ↔ ROAS ↔ Profit)
+                            </h3>
+                            {simulatedPriceOverride !== null && (
+                              <button
+                                type="button"
+                                onClick={() => setSimulatedPriceOverride(null)}
+                                className="text-xs font-bold text-emerald-600 hover:underline"
+                              >
+                                Reset ke Harga Rekomendasi
+                              </button>
+                            )}
+                          </div>
+                        </CardHeader>
+
+                        <CardContent className="p-5 md:p-6 space-y-6">
+                          {(() => {
+                            const activePrice = simulatedPriceOverride ?? v1ReverseCalc.priceRecommended;
+                            const feeConfig = extractFeeRates(v1ActiveProduct!, v1ActiveVariant!);
+                            const B = voucherPctInput / 100;
+                            const C = feeConfig.percentRate / 100;
+
+                            const omzetReal = activePrice * (1 - B) * (1 - C);
+                            const hppReal = v1ReverseCalc.realHppPerUnit;
+                            const profitBeforeAd = omzetReal - hppReal;
+
+                            const adSpendEst = (omzetReal / targetRoasInput) * (includePpn ? 1.11 : 1.0);
+                            const netProfit = omzetReal - hppReal - adSpendEst;
+                            const netMargin = activePrice > 0 ? (netProfit / activePrice) * 100 : 0;
+                            const actualRoas = adSpendEst > 0 ? (omzetReal / (adSpendEst / (includePpn ? 1.11 : 1.0))) : 0;
+
+                            return (
+                              <div className="space-y-5">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100">
+                                  <div className="md:col-span-1 space-y-1">
+                                    <label className="text-xs font-bold text-gray-700">HARGA SIMULASI</label>
+                                    <div className="relative">
+                                      <input
+                                        type="number"
+                                        step="100"
+                                        value={activePrice}
+                                        onChange={(e) => setSimulatedPriceOverride(Math.max(0, Number(e.target.value) || 0))}
+                                        className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-300 font-black text-lg text-emerald-700 focus:ring-2 focus:ring-emerald-500 bg-white"
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-1.5 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSimulatedPriceOverride(Math.max(0, activePrice - 1000))}
+                                        className="px-2 py-1 bg-white border border-gray-200 text-gray-700 text-[11px] font-bold rounded-md hover:bg-gray-100"
+                                      >
+                                        - Rp1.000
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSimulatedPriceOverride(activePrice + 1000)}
+                                        className="px-2 py-1 bg-white border border-gray-200 text-gray-700 text-[11px] font-bold rounded-md hover:bg-gray-100"
+                                      >
+                                        + Rp1.000
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                                    <div className="p-3 bg-white rounded-xl border border-emerald-200/80 shadow-2xs">
+                                      <p className="text-[10px] font-bold text-gray-500 uppercase">ROAS HASIL</p>
+                                      <p className="text-lg font-black text-emerald-700">{actualRoas.toFixed(2)}x</p>
+                                    </div>
+
+                                    <div className="p-3 bg-white rounded-xl border border-emerald-200/80 shadow-2xs">
+                                      <p className="text-[10px] font-bold text-gray-500 uppercase">OMZET REAL</p>
+                                      <p className="text-sm font-black text-gray-900">{formatCurrency(omzetReal)}</p>
+                                    </div>
+
+                                    <div className="p-3 bg-white rounded-xl border border-emerald-200/80 shadow-2xs">
+                                      <p className="text-[10px] font-bold text-gray-500 uppercase">PROFIT BERSIH</p>
+                                      <p className={`text-sm font-black ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {formatCurrency(netProfit)}
+                                      </p>
+                                    </div>
+
+                                    <div className="p-3 bg-white rounded-xl border border-emerald-200/80 shadow-2xs">
+                                      <p className="text-[10px] font-bold text-gray-500 uppercase">MARGIN BERSIH</p>
+                                      <p className={`text-sm font-black ${netMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {netMargin.toFixed(1)}%
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ====================================================================
+              MODE 2: IKLAN PRODUK (CARI HARGA)
+              ==================================================================== */}
+          {adMode === 'product' && (
+            <div className="space-y-6">
+              <Card className="rounded-3xl border-none shadow-sm bg-white">
+                <CardContent className="p-5 md:p-6 space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 flex items-center gap-2">
+                    <Package className="w-4 h-4 text-emerald-600" />
+                    Pilih Produk & Varian Yang Dianalisis (Weighted Average)
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-gray-700 mb-1 block">Produk</label>
+                      <select
+                        value={v2SelectedProductId}
+                        onChange={(e) => {
+                          setV2SelectedProductId(e.target.value);
+                          const p = products.find((pr) => pr.id === e.target.value);
+                          if (p && p.varian) {
+                            setV2SelectedVariantIds(p.varian.map((v) => v.id));
+                          }
+                          setSimulatedPriceOverride(null);
+                        }}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 font-bold text-xs text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nama} ({p.varian?.length || 0} Varian)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-gray-700 mb-1 block">Varian Aktif</label>
+                      <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 rounded-xl border border-gray-200 max-h-32 overflow-y-auto">
+                        {(v2ActiveProduct?.varian || []).map((v) => {
+                          const isSelected = v2SelectedVariantIds.includes(v.id);
+                          return (
+                            <button
+                              key={v.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  if (v2SelectedVariantIds.length > 1) {
+                                    setV2SelectedVariantIds(v2SelectedVariantIds.filter((id) => id !== v.id));
+                                  }
+                                } else {
+                                  setV2SelectedVariantIds([...v2SelectedVariantIds, v.id]);
+                                }
+                                setSimulatedPriceOverride(null);
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                isSelected
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                              }`}
+                            >
+                              {v.nama}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {v2ReverseCalc && (
+                <div className="space-y-6">
+                  {/* Primary Recommendation Card */}
+                  <Card className="rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50 via-teal-50 to-white shadow-md overflow-hidden">
+                    <CardContent className="p-6 space-y-5">
+                      <div className="flex items-center justify-between border-b border-emerald-200/60 pb-3">
+                        <div>
+                          <span className="text-[10px] uppercase font-black tracking-widest text-emerald-700">
+                            HARGA REKOMENDASI RATA-RATA PRODUK
+                          </span>
+                          <h3 className="text-base font-black text-gray-900">{v2ActiveProduct?.nama}</h3>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-bold text-gray-500 block">Target ROAS</span>
+                          <span className="text-base font-black text-emerald-700">{targetRoasInput.toFixed(2)}x</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-baseline justify-between gap-4 bg-white p-5 rounded-2xl border border-emerald-200/80 shadow-xs">
+                        <div>
+                          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            HARGA JUAL PRODUK REKOMENDASI (AVERAGE)
+                          </p>
+                          <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
+                            {formatCurrency(v2ReverseCalc.weightedRev.priceRecommended)}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            HPP Rata-Rata Tertimbang: <strong>{formatCurrency(v2ReverseCalc.weightedHpp)}</strong>
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalcMode('find_roas');
+                          }}
+                          className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-black text-xs transition-all shadow-md shadow-violet-200 flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span>Uji ke Mode CARI ROAS</span>
+                        </button>
+                      </div>
+
+                      {/* Detail per Varian */}
+                      <div className="space-y-3 pt-2">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-gray-700">
+                          Rincian Harga Yang Diperlukan Per Varian Spesifik:
+                        </h4>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {v2ReverseCalc.variantReverseDetails.map((vDetail) => (
+                            <div
+                              key={vDetail.variant.id}
+                              className="p-3.5 bg-white rounded-2xl border border-emerald-200/70 shadow-2xs space-y-1.5"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="font-black text-xs text-gray-900">{vDetail.variant.nama}</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                                  {vDetail.weightPct}% Sales
+                                </span>
+                              </div>
+                              <p className="text-xs font-bold text-gray-500">
+                                HPP: {formatCurrency(vDetail.hppPcs)} | Min: {vDetail.minOrder} pack
+                              </p>
+                              <div className="pt-1 flex justify-between items-baseline border-t border-gray-100">
+                                <span className="text-[10px] font-bold text-gray-400">Harga Dianjurkan:</span>
+                                <span className="font-black text-sm text-emerald-600">
+                                  {formatCurrency(vDetail.rev.priceRecommended)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ====================================================================
+              MODE 3: IKLAN GRUP (CARI HARGA)
+              ==================================================================== */}
+          {adMode === 'group' && (
+            <div className="space-y-6">
+              <Card className="rounded-3xl border-none shadow-sm bg-white">
+                <CardContent className="p-5 md:p-6 space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-emerald-600" />
+                    Pilih Produk Untuk Grup Iklan
+                  </h3>
+
+                  <div className="flex flex-wrap gap-2">
+                    {products.map((p) => {
+                      const isSelected = v3SelectedProductIds.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              if (v3SelectedProductIds.length > 1) {
+                                setV3SelectedProductIds(v3SelectedProductIds.filter((id) => id !== p.id));
+                              }
+                            } else {
+                              setV3SelectedProductIds([...v3SelectedProductIds, p.id]);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'
+                          }`}
+                        >
+                          <Package className="w-3.5 h-3.5" />
+                          <span>{p.nama}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {v3ReverseCalc && (
+                <div className="space-y-6">
+                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs text-emerald-900">
+                    <p className="font-bold">
+                      Pada Iklan Grup dengan banyak produk & struktur biaya berbeda, sistem menghitung HARGA JUAL YANG DIPERLUKAN UNTUK MASING-MASING PRODUK secara terpisah agar seluruh grup mencapai Target ROAS {targetRoasInput}x.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {v3ReverseCalc.productReverseDetails.map((pDetail) => (
+                      <Card key={pDetail.product.id} className="rounded-3xl border border-emerald-200 bg-white shadow-xs overflow-hidden">
+                        <CardHeader className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100">
+                          <div className="flex justify-between items-center">
+                            <h4 className="font-black text-sm text-gray-900">{pDetail.product.nama}</h4>
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                              {pDetail.weightPct}% Bobot
+                            </span>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-3">
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase">HARGA JUAL YANG DISARANKAN</p>
+                            <p className="text-2xl font-black text-emerald-600">
+                              {formatCurrency(pDetail.rev.priceRecommended)}
+                            </p>
+                            <p className="text-[11px] text-gray-500">
+                              Matematis: {formatCurrency(pDetail.rev.priceExact)}
+                            </p>
+                          </div>
+
+                          <div className="space-y-1 text-xs pt-2 border-t border-gray-100">
+                            <div className="flex justify-between text-gray-600">
+                              <span>HPP Rata-Rata</span>
+                              <span className="font-bold">{formatCurrency(pDetail.weightedHpp)}</span>
+                            </div>
+                            <div className="flex justify-between text-gray-600">
+                              <span>Fee Marketplace</span>
+                              <span className="font-bold">{pDetail.feeConfig.percentRate}%</span>
+                            </div>
+                            <div className="flex justify-between text-gray-600">
+                              <span>Biaya Proses</span>
+                              <span className="font-bold">{formatCurrency(pDetail.feeConfig.nominalPerOrder)}/order</span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setCalcMode('find_roas')}
+                      className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-black text-xs transition-all shadow-md shadow-violet-200 flex items-center gap-2"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Uji Seluruh Harga ini ke Mode CARI ROAS</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
         <CardContent className="p-5 md:p-6 space-y-4">
           <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
