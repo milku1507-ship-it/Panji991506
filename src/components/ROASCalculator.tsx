@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { 
   Calculator, TrendingUp, AlertTriangle, Sparkles, Megaphone, Tag, 
-  PieChart, Lightbulb, Package, Plus, Trash2, Layers, Boxes, ShoppingBag 
+  PieChart, Plus, Trash2 
 } from 'lucide-react';
 
 interface Props {
@@ -25,11 +25,10 @@ interface Props {
   user: { uid: string };
 }
 
-export interface AdItem {
+export interface AdProductGroup {
   id: string;
   productId: string;
-  variantId: string;
-  qty: number;
+  variantIds: string[]; // List of selected variant IDs for this product
 }
 
 const STORAGE_KEY = 'ceumilan_roas_defaults';
@@ -75,22 +74,22 @@ type ResultBlock = {
   F: number; // Total nominal fees
   totalPercentFeeRp: number;
   totalQty: number;
-  itemsCount: number;
+  variantsCount: number;
+  productsCount: number;
 };
 
-const createDefaultItem = (products: Product[]): AdItem => {
+const createDefaultGroup = (products: Product[]): AdProductGroup => {
   const firstProd = products[0];
   const firstVar = firstProd?.varian?.[0];
   return {
-    id: 'item_' + Math.random().toString(36).substring(2, 9),
+    id: 'grp_' + Math.random().toString(36).substring(2, 9),
     productId: firstProd?.id || '',
-    variantId: firstVar?.id || '',
-    qty: 1,
+    variantIds: firstVar ? [firstVar.id] : [],
   };
 };
 
 export default function ROASCalculator({ products, ingredients, user }: Props) {
-  const [adItems, setAdItems] = React.useState<AdItem[]>(() => [createDefaultItem(products)]);
+  const [productGroups, setProductGroups] = React.useState<AdProductGroup[]>(() => [createDefaultGroup(products)]);
   const [profitPctRaw, setProfitPctRaw] = React.useState<string>('30');
   const [voucher, setVoucher] = React.useState<string>('0');
 
@@ -110,17 +109,18 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
     } catch {}
   };
 
-  // Sync initial product if items were empty or products just loaded
+  // Sync initial product if groups were empty or products just loaded
   React.useEffect(() => {
-    if (products.length > 0 && adItems.length === 1 && !adItems[0].productId) {
-      setAdItems([createDefaultItem(products)]);
+    if (products.length > 0 && productGroups.length === 1 && !productGroups[0].productId) {
+      setProductGroups([createDefaultGroup(products)]);
     }
   }, [products]); // eslint-disable-line
 
   // Handle single item preset storage key
-  const isSingleItem = adItems.length === 1;
-  const singleKey = isSingleItem && adItems[0].productId && adItems[0].variantId
-    ? `${adItems[0].productId}::${adItems[0].variantId}`
+  const totalVariantsCount = productGroups.reduce((acc, g) => acc + g.variantIds.length, 0);
+  const isSingleItem = productGroups.length === 1 && totalVariantsCount === 1;
+  const singleKey = isSingleItem && productGroups[0].productId && productGroups[0].variantIds[0]
+    ? `${productGroups[0].productId}::${productGroups[0].variantIds[0]}`
     : 'group_roas_settings';
 
   // Apply saved defaults when single item changes
@@ -138,40 +138,76 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
   const profitPct = Number(profitPctRaw) || 0;
   const voucherNum = Number(voucher) || 0;
 
-  // Item List Management
-  const handleAddItem = () => {
-    const newItem = createDefaultItem(products);
-    // If we have products, try to pick the first product or currently selected product
-    if (products.length > 0) {
-      const currentFirstProd = products.find(p => p.id === adItems[0]?.productId) || products[0];
-      newItem.productId = currentFirstProd.id;
-      newItem.variantId = currentFirstProd.varian?.[0]?.id || '';
+  // Group & Variant Management
+  const handleAddProductGroup = () => {
+    const newGroup = createDefaultGroup(products);
+    // Prefer picking a product that isn't chosen yet, or fallback to first
+    const chosenProductIds = productGroups.map(g => g.productId);
+    const unchosenProd = products.find(p => !chosenProductIds.includes(p.id)) || products[0];
+    if (unchosenProd) {
+      newGroup.productId = unchosenProd.id;
+      newGroup.variantIds = unchosenProd.varian?.[0] ? [unchosenProd.varian[0].id] : [];
     }
-    setAdItems(prev => [...prev, newItem]);
+    setProductGroups(prev => [...prev, newGroup]);
   };
 
-  const handleUpdateItem = (id: string, field: keyof AdItem, value: any) => {
-    setAdItems(prev => prev.map(item => {
-      if (item.id !== id) return item;
-      if (field === 'productId') {
-        const selectedProd = products.find(p => p.id === value);
-        return {
-          ...item,
-          productId: value,
-          variantId: selectedProd?.varian?.[0]?.id || '',
-        };
-      }
-      if (field === 'qty') {
-        const qtyVal = Math.max(1, parseInt(value, 10) || 1);
-        return { ...item, qty: qtyVal };
-      }
-      return { ...item, [field]: value };
+  const handleUpdateProduct = (groupId: string, newProductId: string) => {
+    const selectedProd = products.find(p => p.id === newProductId);
+    const firstVarId = selectedProd?.varian?.[0]?.id;
+    setProductGroups(prev => prev.map(group => {
+      if (group.id !== groupId) return group;
+      return {
+        ...group,
+        productId: newProductId,
+        variantIds: firstVarId ? [firstVarId] : [],
+      };
     }));
   };
 
-  const handleRemoveItem = (id: string) => {
-    if (adItems.length <= 1) return;
-    setAdItems(prev => prev.filter(item => item.id !== id));
+  const handleRemoveProductGroup = (groupId: string) => {
+    if (productGroups.length <= 1) return;
+    setProductGroups(prev => prev.filter(group => group.id !== groupId));
+  };
+
+  const handleAddVariantToGroup = (groupId: string) => {
+    setProductGroups(prev => prev.map(group => {
+      if (group.id !== groupId) return group;
+      const currentProd = products.find(p => p.id === group.productId);
+      if (!currentProd || !currentProd.varian) return group;
+      
+      // Find a variant that isn't already selected in this group, or fallback to first
+      const unselectedVar = currentProd.varian.find(v => !group.variantIds.includes(v.id)) || currentProd.varian[0];
+      if (!unselectedVar) return group;
+
+      return {
+        ...group,
+        variantIds: [...group.variantIds, unselectedVar.id],
+      };
+    }));
+  };
+
+  const handleUpdateVariantInGroup = (groupId: string, varIndex: number, newVariantId: string) => {
+    setProductGroups(prev => prev.map(group => {
+      if (group.id !== groupId) return group;
+      const updatedVariantIds = [...group.variantIds];
+      updatedVariantIds[varIndex] = newVariantId;
+      return {
+        ...group,
+        variantIds: updatedVariantIds,
+      };
+    }));
+  };
+
+  const handleRemoveVariantFromGroup = (groupId: string, varIndex: number) => {
+    setProductGroups(prev => prev.map(group => {
+      if (group.id !== groupId) return group;
+      if (group.variantIds.length <= 1) return group;
+      const updatedVariantIds = group.variantIds.filter((_, idx) => idx !== varIndex);
+      return {
+        ...group,
+        variantIds: updatedVariantIds,
+      };
+    }));
   };
 
   const handleProfitChange = (v: string) => {
@@ -184,67 +220,85 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
     if (singleKey) saveDefaults(singleKey, { voucher: Number(v) || 0 });
   };
 
-  // Detailed accumulation calculation
-  const itemCalculations = React.useMemo(() => {
-    return adItems.map(item => {
-      const prod = products.find(p => p.id === item.productId);
-      const vari = prod?.varian.find(v => v.id === item.variantId) || prod?.varian[0];
-      const hargaJualPcs = Number(vari?.harga_jual) || 0;
-      const hppPcs = vari ? calcHppPerPcs(vari, ingredients) : 0;
-      const qty = Math.max(1, Number(item.qty) || 1);
+  // Detailed accumulation calculation per variant in every product group
+  const variantCalculations = React.useMemo(() => {
+    const list: Array<{
+      groupId: string;
+      product: Product;
+      variant: Variant;
+      hargaJualPcs: number;
+      hppPcs: number;
+      qty: number;
+      subtotalGross: number;
+      subtotalHpp: number;
+      percentFeeRp: number;
+      nominalFeeRp: number;
+    }> = [];
 
-      const subtotalGross = hargaJualPcs * qty;
-      const subtotalHpp = hppPcs * qty;
+    productGroups.forEach(group => {
+      const prod = products.find(p => p.id === group.productId);
+      if (!prod) return;
 
-      // Product & Variant level fees
-      const allFees = [
-        ...(prod?.biaya_lain || []),
-        ...(vari?.biaya_lain || [])
-      ];
+      group.variantIds.forEach(vId => {
+        const vari = prod.varian.find(v => v.id === vId) || prod.varian[0];
+        if (!vari) return;
 
-      let percentFeeRate = 0;
-      let nominalFeePerUnit = 0;
+        const hargaJualPcs = Number(vari.harga_jual) || 0;
+        const hppPcs = calcHppPerPcs(vari, ingredients);
+        // Default calculation uses variant minimal order or 1 pcs (setelan awal)
+        const qty = Math.max(1, Number(vari.min_order) || 1);
 
-      for (const fee of allFees) {
-        if (fee.tipe === 'persen') {
-          percentFeeRate += Number(fee.nilai) || 0;
-        } else if (fee.tipe === 'nominal') {
-          nominalFeePerUnit += Number(fee.nilai) || 0;
+        const subtotalGross = hargaJualPcs * qty;
+        const subtotalHpp = hppPcs * qty;
+
+        const allFees = [
+          ...(prod.biaya_lain || []),
+          ...(vari.biaya_lain || [])
+        ];
+
+        let percentFeeRate = 0;
+        let nominalFeePerUnit = 0;
+
+        for (const fee of allFees) {
+          if (fee.tipe === 'persen') {
+            percentFeeRate += Number(fee.nilai) || 0;
+          } else if (fee.tipe === 'nominal') {
+            nominalFeePerUnit += Number(fee.nilai) || 0;
+          }
         }
-      }
 
-      const percentFeeRp = (percentFeeRate / 100) * subtotalGross;
-      const nominalFeeRp = nominalFeePerUnit * qty;
+        const percentFeeRp = (percentFeeRate / 100) * subtotalGross;
+        const nominalFeeRp = nominalFeePerUnit * qty;
 
-      return {
-        item,
-        product: prod,
-        variant: vari,
-        hargaJualPcs,
-        hppPcs,
-        qty,
-        subtotalGross,
-        subtotalHpp,
-        percentFeeRate,
-        percentFeeRp,
-        nominalFeeRp,
-        totalFeesRp: percentFeeRp + nominalFeeRp,
-      };
+        list.push({
+          groupId: group.id,
+          product: prod,
+          variant: vari,
+          hargaJualPcs,
+          hppPcs,
+          qty,
+          subtotalGross,
+          subtotalHpp,
+          percentFeeRp,
+          nominalFeeRp,
+        });
+      });
     });
-  }, [adItems, products, ingredients]);
+
+    return list;
+  }, [productGroups, products, ingredients]);
 
   // Overall Result Block
   const result: ResultBlock | null = React.useMemo(() => {
-    const validItems = itemCalculations.filter(calc => calc.product && calc.variant);
-    if (validItems.length === 0) return null;
+    if (variantCalculations.length === 0) return null;
 
-    const A = validItems.reduce((acc, c) => acc + c.subtotalGross, 0);
-    const E = validItems.reduce((acc, c) => acc + c.subtotalHpp, 0);
-    const totalQty = validItems.reduce((acc, c) => acc + c.qty, 0);
-    const totalPercentFeeRp = validItems.reduce((acc, c) => acc + c.percentFeeRp, 0);
-    const F = validItems.reduce((acc, c) => acc + c.nominalFeeRp, 0);
+    const A = variantCalculations.reduce((acc, c) => acc + c.subtotalGross, 0);
+    const E = variantCalculations.reduce((acc, c) => acc + c.subtotalHpp, 0);
+    const totalQty = variantCalculations.reduce((acc, c) => acc + c.qty, 0);
+    const totalPercentFeeRp = variantCalculations.reduce((acc, c) => acc + c.percentFeeRp, 0);
+    const F = variantCalculations.reduce((acc, c) => acc + c.nominalFeeRp, 0);
     
-    // Total Voucher applied to order
+    // Total Voucher applied to group
     const B = Math.max(0, voucherNum);
 
     // Effective percentage fee rate
@@ -285,9 +339,10 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
       F,
       totalPercentFeeRp,
       totalQty,
-      itemsCount: validItems.length,
+      variantsCount: variantCalculations.length,
+      productsCount: productGroups.length,
     };
-  }, [itemCalculations, voucherNum, profitPct]);
+  }, [variantCalculations, voucherNum, profitPct, productGroups]);
 
   const insights: { icon: React.ReactNode; text: string; tone: 'warn' | 'info' }[] = [];
   if (result) {
@@ -322,13 +377,10 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
   // Dynamic Title for Result Card
   const resultCardTitle = React.useMemo(() => {
     if (!result) return 'Hasil Kalkulasi ROAS';
-    if (result.itemsCount <= 1) {
-      if (result.totalQty === 1) {
-        return 'Hasil Kalkulasi ROAS (1 Varian)';
-      }
-      return `Hasil Kalkulasi ROAS (1 Varian × ${result.totalQty} pcs)`;
+    if (result.variantsCount <= 1) {
+      return 'Hasil Kalkulasi ROAS (1 Varian)';
     }
-    return `Hasil Kalkulasi ROAS Grup Iklan (${result.itemsCount} Item Terpilih, Total ${result.totalQty} pcs)`;
+    return `Hasil Kalkulasi ROAS Grup Iklan (${result.variantsCount} Varian Terpilih)`;
   }, [result]);
 
   return (
@@ -347,7 +399,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
               </Badge>
             </div>
             <p className="text-sm text-gray-500 font-medium mt-0.5">
-              Hitung ROAS ideal untuk 1 varian produk maupun grup iklan (multi-item) sekaligus.
+              Hitung ROAS ideal untuk 1 varian produk maupun grup iklan (multi varian / multi produk) sekaligus.
             </p>
           </div>
         </div>
@@ -355,17 +407,17 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
 
       {/* Bagian 1: Daftar Item Iklan */}
       <Card className="rounded-3xl border-none shadow-sm bg-white overflow-hidden">
-        <CardContent className="p-5 space-y-4">
+        <CardContent className="p-5 space-y-5">
           <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-violet-600 bg-violet-50 px-2 py-0.5 rounded-md">
                 Langkah 1
               </span>
-              <span className="text-sm font-bold text-gray-800">Daftar Item Iklan</span>
+              <span className="text-sm font-bold text-gray-800">Pilih Produk & Varian Iklan</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge className="bg-violet-100 text-violet-800 border-none font-bold text-xs">
-                {adItems.length === 1 ? 'Mode Single Item' : `Mode Grup Iklan (${adItems.length} Item)`}
+                {totalVariantsCount <= 1 ? 'Mode Single Item' : `Mode Grup Iklan (${totalVariantsCount} Varian)`}
               </Badge>
             </div>
           </div>
@@ -375,126 +427,172 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
               Belum ada produk. Tambahkan produk di menu HPP terlebih dahulu.
             </div>
           ) : (
-            <div className="space-y-3">
-              {adItems.map((item, index) => {
-                const currentProduct = products.find(p => p.id === item.productId);
-                const currentVariant = currentProduct?.varian.find(v => v.id === item.variantId) || currentProduct?.varian[0];
-                const hppPcs = currentVariant ? calcHppPerPcs(currentVariant, ingredients) : 0;
-                const subtotal = (currentVariant?.harga_jual || 0) * (item.qty || 1);
+            <div className="space-y-4">
+              {productGroups.map((group, groupIndex) => {
+                const currentProduct = products.find(p => p.id === group.productId);
 
                 return (
                   <div 
-                    key={item.id} 
-                    className="p-3.5 sm:p-4 rounded-2xl bg-gray-50/80 border border-gray-200/70 hover:border-violet-300 transition-all space-y-3"
+                    key={group.id} 
+                    className="p-4 sm:p-5 rounded-2xl bg-gray-50/90 border border-gray-200/80 hover:border-violet-300 transition-all space-y-4 shadow-sm"
                   >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
+                    {/* Header Produk Group */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-gray-200/70">
+                      <div className="flex items-center gap-2.5">
                         <span className="w-6 h-6 rounded-full bg-violet-600 text-white font-black text-xs flex items-center justify-center">
-                          {index + 1}
+                          {groupIndex + 1}
                         </span>
-                        <span className="text-xs font-bold text-gray-700">
-                          Item #{index + 1}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-gray-800">
+                            Produk #{groupIndex + 1}
+                          </span>
+                          {currentProduct && (
+                            <span className="text-xs font-bold text-violet-600">
+                              ({group.variantIds.length} varian dipilih)
+                            </span>
+                          )}
+                        </div>
                       </div>
                       
-                      {adItems.length > 1 && (
+                      {productGroups.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveItem(item.id)}
+                          onClick={() => handleRemoveProductGroup(group.id)}
                           className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl h-7 px-2 text-xs font-bold gap-1"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          Hapus Baris
+                          Hapus Produk
                         </Button>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                      {/* Product Selector */}
-                      <div className="sm:col-span-5 space-y-1.5">
-                        <Label className="text-[11px] font-bold text-gray-500">Pilih Produk</Label>
-                        <Select 
-                          value={item.productId} 
-                          onValueChange={(val) => handleUpdateItem(item.id, 'productId', val)}
-                        >
-                          <SelectTrigger className="rounded-xl h-11 bg-white border-gray-200 text-xs font-bold">
-                            <SelectValue placeholder="Pilih produk..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map((p) => (
-                              <SelectItem key={p.id} value={p.id} className="text-xs">
-                                {p.nama}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Variant Selector */}
-                      <div className="sm:col-span-4 space-y-1.5">
-                        <Label className="text-[11px] font-bold text-gray-500">Pilih Varian</Label>
-                        <Select 
-                          value={item.variantId} 
-                          onValueChange={(val) => handleUpdateItem(item.id, 'variantId', val)}
-                          disabled={!currentProduct || currentProduct.varian.length === 0}
-                        >
-                          <SelectTrigger className="rounded-xl h-11 bg-white border-gray-200 text-xs font-bold">
-                            <SelectValue placeholder="Pilih varian..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {currentProduct?.varian.map((v) => (
-                              <SelectItem key={v.id} value={v.id} className="text-xs">
-                                {v.nama} — {formatCurrency(v.harga_jual || 0, true)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Quantity Input */}
-                      <div className="sm:col-span-3 space-y-1.5">
-                        <Label className="text-[11px] font-bold text-gray-500">Jumlah (Qty)</Label>
-                        <div className="flex items-center gap-1.5">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={item.qty}
-                            onChange={(e) => handleUpdateItem(item.id, 'qty', e.target.value)}
-                            className="rounded-xl h-11 bg-white border-gray-200 font-black text-center text-xs"
-                          />
-                          <span className="text-xs font-bold text-gray-400 shrink-0">pcs</span>
-                        </div>
-                      </div>
+                    {/* Pilih Produk */}
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] font-bold text-gray-500">Pilih Produk</Label>
+                      <Select 
+                        value={group.productId} 
+                        onValueChange={(val) => handleUpdateProduct(group.id, val)}
+                      >
+                        <SelectTrigger className="rounded-xl h-11 bg-white border-gray-200 text-xs font-bold">
+                          <SelectValue placeholder="Pilih produk..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={p.id} className="text-xs">
+                              {p.nama}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
-                    {/* Preview info per item */}
-                    {currentVariant && (
-                      <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-dashed border-gray-200 text-[11px]">
-                        <div className="flex items-center gap-3 text-gray-500">
-                          <span>Harga: <strong className="text-gray-900">{formatCurrency(currentVariant.harga_jual || 0, true)}</strong></span>
-                          <span>•</span>
-                          <span>HPP: <strong className="text-rose-600">{formatCurrency(Math.round(hppPcs), true)}</strong></span>
+                    {/* Daftar Varian di dalam Produk ini */}
+                    {currentProduct && currentProduct.varian.length > 0 && (
+                      <div className="space-y-2.5 pt-1">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[11px] font-bold text-gray-600">
+                            Varian yang Diiklankan:
+                          </Label>
+                          {group.variantIds.length < currentProduct.varian.length && (
+                            <button
+                              type="button"
+                              onClick={() => handleAddVariantToGroup(group.id)}
+                              className="text-[11px] font-bold text-violet-600 hover:text-violet-800 flex items-center gap-1 hover:underline"
+                            >
+                              <Plus className="w-3 h-3" />
+                              + Tambah Varian
+                            </button>
+                          )}
                         </div>
-                        <div className="font-bold text-violet-700">
-                          Subtotal ({item.qty || 1} pcs): <span className="font-black">{formatCurrency(subtotal, true)}</span>
+
+                        <div className="space-y-2">
+                          {group.variantIds.map((vId, vIndex) => {
+                            const variantObj = currentProduct.varian.find(v => v.id === vId) || currentProduct.varian[0];
+                            const hppPcs = variantObj ? calcHppPerPcs(variantObj, ingredients) : 0;
+                            const minOrder = Number(variantObj?.min_order) || 1;
+
+                            return (
+                              <div 
+                                key={`${group.id}_var_${vIndex}`}
+                                className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-gray-200/90 shadow-xs"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <Select
+                                    value={vId}
+                                    onValueChange={(val) => handleUpdateVariantInGroup(group.id, vIndex, val)}
+                                  >
+                                    <SelectTrigger className="rounded-lg h-9 border-none bg-transparent shadow-none px-2 text-xs font-bold text-gray-800 hover:bg-gray-50">
+                                      <SelectValue placeholder="Pilih varian..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {currentProduct.varian.map((v) => (
+                                        <SelectItem key={v.id} value={v.id} className="text-xs">
+                                          {v.nama} — {formatCurrency(v.harga_jual || 0, true)}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                {variantObj && (
+                                  <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500 px-2 shrink-0">
+                                    <span>Jual: <strong className="text-gray-900">{formatCurrency(variantObj.harga_jual || 0, true)}</strong></span>
+                                    <span>•</span>
+                                    <span>HPP: <strong className="text-rose-600">{formatCurrency(Math.round(hppPcs), true)}</strong></span>
+                                    {minOrder > 1 && (
+                                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-violet-200 text-violet-600 bg-violet-50">
+                                        min {minOrder} pcs
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+
+                                {group.variantIds.length > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleRemoveVariantFromGroup(group.id, vIndex)}
+                                    className="w-7 h-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0"
+                                    title="Hapus varian ini"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
+
+                        {group.variantIds.length < currentProduct.varian.length && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleAddVariantToGroup(group.id)}
+                            className="w-full h-8 rounded-xl border border-dashed border-violet-200 text-violet-700 hover:bg-violet-50 font-bold text-xs gap-1.5 mt-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            + Tambah Varian ({currentProduct.nama})
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
                 );
               })}
 
-              {/* Add item button */}
+              {/* Tombol Tambah Produk Baru */}
               <Button
                 type="button"
                 variant="outline"
-                onClick={handleAddItem}
-                className="w-full h-12 rounded-2xl border-2 border-dashed border-violet-300 bg-violet-50/40 text-violet-700 hover:bg-violet-50 hover:border-violet-400 font-bold text-xs gap-2 transition-all"
+                onClick={handleAddProductGroup}
+                className="w-full h-12 rounded-2xl border-2 border-dashed border-violet-300 bg-violet-50/50 text-violet-700 hover:bg-violet-100/60 hover:border-violet-400 font-bold text-xs gap-2 transition-all shadow-xs"
               >
                 <Plus className="w-4 h-4" />
-                + Tambah Item ke Grup Iklan
+                + Tambah Produk ke Iklan
               </Button>
             </div>
           )}
@@ -511,28 +609,26 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                   Langkah 2
                 </span>
                 <span className="text-sm font-bold text-gray-800">
-                  {adItems.length > 1 ? 'Data Akumulasi Grup Iklan' : 'Data Otomatis Produk'}
+                  {result.variantsCount > 1 ? 'Data Akumulasi Gabungan' : 'Data Otomatis Produk'}
                 </span>
               </div>
               <Badge variant="outline" className="text-xs font-bold text-gray-500">
-                Total {result.totalQty} pcs ({result.itemsCount} varian)
+                {result.variantsCount} Varian dari {result.productsCount} Produk
               </Badge>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <InfoBlock
                 icon={<Tag />}
-                label={result.totalQty > 1 ? `Total Jual (A) [${result.totalQty} pcs]` : 'Harga Jual (A)'}
+                label={result.variantsCount > 1 ? 'Total Harga Jual (A)' : 'Harga Jual (A)'}
                 value={formatCurrency(result.A)}
                 tone="violet"
-                hint={result.totalQty > 1 ? `Rata-rata: ${formatCurrency(result.A / result.totalQty, true)}/pcs` : undefined}
               />
               <InfoBlock
                 icon={<PieChart />}
-                label={result.totalQty > 1 ? `Total HPP (E) [${result.totalQty} pcs]` : 'HPP / pcs (E)'}
+                label={result.variantsCount > 1 ? 'Total HPP (E)' : 'HPP (E)'}
                 value={formatCurrency(result.E)}
                 tone="rose"
-                hint={result.totalQty > 1 ? `Rata-rata: ${formatCurrency(result.E / result.totalQty, true)}/pcs` : undefined}
               />
               <InfoBlock
                 icon={<Megaphone />}
@@ -549,45 +645,6 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 hint={result.F > 0 ? 'Total biaya tetap' : 'Belum ada biaya nominal'}
               />
             </div>
-
-            {/* Breakdown table if multiple items */}
-            {adItems.length > 1 && (
-              <div className="pt-2 border-t border-gray-100">
-                <div className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1.5">
-                  <Boxes className="w-3.5 h-3.5 text-violet-500" />
-                  Rincian Kontribusi per Item dalam Grup Iklan:
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-gray-50 text-gray-500 font-bold border-b border-gray-100">
-                      <tr>
-                        <th className="py-2 px-3 rounded-l-xl">Item</th>
-                        <th className="py-2 px-2 text-center">Qty</th>
-                        <th className="py-2 px-2 text-right">Harga Jual</th>
-                        <th className="py-2 px-2 text-right">HPP</th>
-                        <th className="py-2 px-3 text-right rounded-r-xl">Subtotal Omzet</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {itemCalculations.map((calc, i) => {
-                        if (!calc.product || !calc.variant) return null;
-                        return (
-                          <tr key={i} className="hover:bg-gray-50/50">
-                            <td className="py-2 px-3 font-bold text-gray-800">
-                              {calc.product.nama} - <span className="text-violet-600 font-medium">{calc.variant.nama}</span>
-                            </td>
-                            <td className="py-2 px-2 text-center font-black">{calc.qty}</td>
-                            <td className="py-2 px-2 text-right">{formatCurrency(calc.hargaJualPcs, true)}</td>
-                            <td className="py-2 px-2 text-right text-rose-600">{formatCurrency(Math.round(calc.hppPcs), true)}</td>
-                            <td className="py-2 px-3 text-right font-black text-gray-900">{formatCurrency(calc.subtotalGross, true)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -604,7 +661,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
             </div>
 
             <div className="space-y-3">
-              <div className="flex items-baseline justify-between">
+              <div className="flex items-center justify-between">
                 <Label className="font-bold text-sm text-gray-800">% Profit untuk Iklan (I)</Label>
                 <span className="text-2xl font-black text-violet-600">{profitPct.toFixed(0)}%</span>
               </div>
@@ -652,7 +709,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 <Label className="font-bold text-xs text-gray-700">
                   Voucher / Diskon (B)
                 </Label>
-                <span className="text-[11px] text-gray-400 font-medium">Per pesanan / bundle iklan (opsional)</span>
+                <span className="text-[11px] text-gray-400 font-medium">Per bundle / grup iklan (opsional)</span>
               </div>
               <Input
                 type="number"
@@ -675,7 +732,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
       {result && (
         <Card className="rounded-3xl border-none shadow-md bg-gradient-to-br from-violet-50 via-purple-50/60 to-fuchsia-50">
           <CardContent className="p-5 md:p-6 space-y-5">
-            <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-violet-100">
+            <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-violet-100 border-b">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-200/60 px-2 py-0.5 rounded-md">
                   Hasil
@@ -685,7 +742,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                 </h2>
               </div>
               <Badge className="bg-violet-600 text-white border-none font-bold text-xs px-3 py-1">
-                {adItems.length === 1 ? '1 Varian' : `${adItems.length} Varian (${result.totalQty} pcs)`}
+                {result.variantsCount <= 1 ? '1 Varian' : `${result.variantsCount} Varian (${result.productsCount} Produk)`}
               </Badge>
             </div>
 
@@ -700,7 +757,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                   </p>
                 </div>
               </div>
-            ) : profitPct <= 0 ? (
+            ) : profitPct === 0 ? (
               <div className="bg-white rounded-2xl p-5 border border-violet-100 text-sm text-gray-500 font-medium">
                 Tentukan nilai <strong>% Profit untuk Iklan</strong> di atas untuk melihat target ROAS.
               </div>
@@ -723,7 +780,7 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
                   <ResultCard
                     label="Profit Kotor (H)"
                     value={formatCurrency(result.H)}
-                    sub={`Margin ${((result.H / Math.max(1, result.D)) * 100).toFixed(1)}%`}
+                    sub={`Margin: ${((result.H / result.D) * 100).toFixed(1)}%`}
                     tone="emerald"
                   />
                 </div>
@@ -794,8 +851,18 @@ export default function ROASCalculator({ products, ingredients, user }: Props) {
 }
 
 function InfoBlock({
-  icon, label, value, tone, hint,
-}: { icon: React.ReactNode; label: string; value: string; tone: 'violet' | 'rose' | 'amber' | 'emerald'; hint?: string }) {
+  icon,
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: 'violet' | 'rose' | 'amber' | 'emerald';
+  hint?: string;
+}) {
   const tones: Record<string, string> = {
     violet: 'bg-violet-50 text-violet-600',
     rose: 'bg-rose-50 text-rose-600',
@@ -848,4 +915,3 @@ function RoasCard({ label, value, hint, highlight }: { label: string; value: num
     </div>
   );
 }
-
