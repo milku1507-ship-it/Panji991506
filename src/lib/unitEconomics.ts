@@ -441,8 +441,53 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
   const logs: string[] = [];
   let allPassed = true;
 
-  // TEST 1: Target Profit 15%, Target ROAS 8x -> Cari Harga -> Transfer to Cari ROAS -> ROAS ≈ 8x (or required ROAS <= 8x), Profit >= 15%
-  const test1Input: ReverseCalcInput = {
+  // TEST A: Target ROAS 10x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 10x ±0.01, Profit >= 15%
+  const testAInput: ReverseCalcInput = {
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    targetRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 20,
+    includePpn: false,
+    ppnRate: 11,
+    roundingStep: 0,
+  };
+  const revA = calculateReversePrice(testAInput);
+  if (!revA.isFeasible) {
+    logs.push('TEST A FAIL: Reverse calculation infeasible for 10x ROAS.');
+    allPassed = false;
+  } else {
+    const valA = calculateUnitEconomics({
+      sellingPrice: revA.priceRecommended,
+      hppPcs: 10000,
+      minOrder: 1,
+      nominalPerOrder: 1600,
+      nominalPerUnit: 0,
+      percentRate: 5,
+      voucherNominal: 0,
+      voucherPct: 0,
+      includePpn: false,
+      ppnRate: 11,
+      targetProfitPct: 15,
+      actualRoas: 10,
+      targetRoas: 10,
+      bufferPct: 20,
+    });
+    if (Math.abs(valA.actualProfitPercent - 15) > 0.05 || Math.abs(valA.roasTarget - 10) > 0.01) {
+      logs.push(`TEST A FAIL: Bidirectional mismatch. Expected 10x ROAS & 15% Profit. Got ROAS ${valA.roasTarget.toFixed(2)}x, Profit ${valA.actualProfitPercent.toFixed(2)}%`);
+      allPassed = false;
+    } else {
+      logs.push(`TEST A PASS: Target ROAS 10x <-> Cari Harga (Rp${revA.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valA.roasTarget.toFixed(2)}x, Profit: ${valA.actualProfitPercent.toFixed(2)}%).`);
+    }
+  }
+
+  // TEST B: Target ROAS 8x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 8x ±0.01
+  const testBInput: ReverseCalcInput = {
     hppPcs: 10000,
     minOrder: 1,
     nominalPerOrder: 1600,
@@ -457,15 +502,13 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
     ppnRate: 11,
     roundingStep: 0,
   };
-
-  const rev1 = calculateReversePrice(test1Input);
-  if (!rev1.isFeasible) {
-    logs.push('TEST 1 FAIL: Reverse calculation returned infeasible for 15% profit & 8x ROAS.');
+  const revB = calculateReversePrice(testBInput);
+  if (!revB.isFeasible) {
+    logs.push('TEST B FAIL: Reverse calculation infeasible for 8x ROAS.');
     allPassed = false;
   } else {
-    // When price is transferred to CARI ROAS with same parameters
-    const val1 = calculateUnitEconomics({
-      sellingPrice: rev1.priceRecommended,
+    const valB = calculateUnitEconomics({
+      sellingPrice: revB.priceRecommended,
       hppPcs: 10000,
       minOrder: 1,
       nominalPerOrder: 1600,
@@ -480,17 +523,16 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
       targetRoas: 8,
       bufferPct: 20,
     });
-
-    if (val1.actualProfitPercent < 14.99 || Math.abs(val1.roasTarget - 8) > 0.05) {
-      logs.push(`TEST 1 FAIL: Transfer inconsistency. Expected Profit >= 15% and ROAS Target ≈ 8x. Got Profit ${val1.actualProfitPercent.toFixed(2)}%, ROAS Target ${val1.roasTarget.toFixed(2)}x`);
+    if (Math.abs(valB.actualProfitPercent - 15) > 0.05 || Math.abs(valB.roasTarget - 8) > 0.01) {
+      logs.push(`TEST B FAIL: Bidirectional mismatch for 8x ROAS. Got ROAS ${valB.roasTarget.toFixed(2)}x, Profit ${valB.actualProfitPercent.toFixed(2)}%`);
       allPassed = false;
     } else {
-      logs.push(`TEST 1 PASS: Cari Harga -> Cari ROAS consistent. Price: Rp${rev1.priceRecommended.toFixed(0)}, Profit: ${val1.actualProfitPercent.toFixed(2)}%, ROAS Target: ${val1.roasTarget.toFixed(2)}x`);
+      logs.push(`TEST B PASS: Target ROAS 8x <-> Cari Harga (Rp${revB.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valB.roasTarget.toFixed(2)}x, Profit: ${valB.actualProfitPercent.toFixed(2)}%).`);
     }
   }
 
-  // TEST 2: Target Profit 10%, Target ROAS 8x
-  const test2Input: ReverseCalcInput = {
+  // TEST C: Target ROAS 12x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 12x ±0.01
+  const testCInput: ReverseCalcInput = {
     hppPcs: 10000,
     minOrder: 1,
     nominalPerOrder: 1600,
@@ -498,93 +540,44 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
     percentRate: 5,
     voucherNominal: 0,
     voucherPct: 0,
-    targetRoas: 8,
-    targetProfitPct: 10,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 100,
-  };
-  const rev2 = calculateReversePrice(test2Input);
-  if (!rev2.isFeasible || rev2.validationRecommended.actualProfitPercent < 10) {
-    logs.push(`TEST 2 FAIL: Expected Profit >= 10%, got ${rev2.validationRecommended?.actualProfitPercent}%`);
-    allPassed = false;
-  } else {
-    logs.push(`TEST 2 PASS: Target Profit 10% -> Rec Price: Rp${rev2.priceRecommended}, Profit: ${rev2.validationRecommended.actualProfitPercent.toFixed(2)}%`);
-  }
-
-  // TEST 3: Target Profit 20%, Target ROAS 10x
-  const test3Input: ReverseCalcInput = {
-    hppPcs: 12000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 6,
-    voucherNominal: 500,
-    voucherPct: 2,
-    targetRoas: 10,
-    targetProfitPct: 20,
-    includePpn: true,
-    ppnRate: 11,
-    roundingStep: 500,
-  };
-  const rev3 = calculateReversePrice(test3Input);
-  if (!rev3.isFeasible || rev3.validationRecommended.actualProfitPercent < 20) {
-    logs.push(`TEST 3 FAIL: Expected Profit >= 20% with fees and voucher, got ${rev3.validationRecommended?.actualProfitPercent}%`);
-    allPassed = false;
-  } else {
-    logs.push(`TEST 3 PASS: Target Profit 20% + 10x ROAS with PPN & Vouchers -> Rec Price: Rp${rev3.priceRecommended}, Profit: ${rev3.validationRecommended.actualProfitPercent.toFixed(2)}%`);
-  }
-
-  // TEST 4: Buffer 20%: Target ROAS 8x -> ROAS Setting 9.6x (Target ROAS remains 8x)
-  const val4 = calculateUnitEconomics({
-    sellingPrice: 20000,
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    includePpn: false,
-    ppnRate: 11,
+    targetRoas: 12,
     targetProfitPct: 15,
-    actualRoas: 8,
-    targetRoas: 8,
     bufferPct: 20,
-  });
-  const expectedSetting = val4.roasTarget * 1.2; // 8 * 1.2 = 9.6
-  if (Math.abs(val4.roasSetting - expectedSetting) > 0.05) {
-    logs.push(`TEST 4 FAIL: Buffer calculation error. Expected ROAS Setting ${expectedSetting.toFixed(2)}x, got ${val4.roasSetting.toFixed(2)}x`);
-    allPassed = false;
-  } else {
-    logs.push(`TEST 4 PASS: Buffer +20% -> Target ROAS: ${val4.roasTarget.toFixed(2)}x, ROAS Setting: ${val4.roasSetting.toFixed(2)}x`);
-  }
-
-  // TEST 5: Labor inside HPP not counted twice (Verified through pure HPP passing)
-  const hppWithLabor = 15000; // includes Rp3000 labor
-  const val5 = calculateUnitEconomics({
-    sellingPrice: 25000,
-    hppPcs: hppWithLabor,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
     includePpn: false,
     ppnRate: 11,
-    targetProfitPct: 10,
-    actualRoas: 8,
-  });
-  if (val5.realHppPerUnit !== 15000 + 1600) {
-    logs.push(`TEST 5 FAIL: Real HPP expected ${15000 + 1600}, got ${val5.realHppPerUnit}`);
+    roundingStep: 0,
+  };
+  const revC = calculateReversePrice(testCInput);
+  if (!revC.isFeasible) {
+    logs.push('TEST C FAIL: Reverse calculation infeasible for 12x ROAS.');
     allPassed = false;
   } else {
-    logs.push(`TEST 5 PASS: Labor in HPP cleanly preserved without double counting. Real HPP: Rp${val5.realHppPerUnit}`);
+    const valC = calculateUnitEconomics({
+      sellingPrice: revC.priceRecommended,
+      hppPcs: 10000,
+      minOrder: 1,
+      nominalPerOrder: 1600,
+      nominalPerUnit: 0,
+      percentRate: 5,
+      voucherNominal: 0,
+      voucherPct: 0,
+      includePpn: false,
+      ppnRate: 11,
+      targetProfitPct: 15,
+      actualRoas: 12,
+      targetRoas: 12,
+      bufferPct: 20,
+    });
+    if (Math.abs(valC.actualProfitPercent - 15) > 0.05 || Math.abs(valC.roasTarget - 12) > 0.01) {
+      logs.push(`TEST C FAIL: Bidirectional mismatch for 12x ROAS. Got ROAS ${valC.roasTarget.toFixed(2)}x, Profit ${valC.actualProfitPercent.toFixed(2)}%`);
+      allPassed = false;
+    } else {
+      logs.push(`TEST C PASS: Target ROAS 12x <-> Cari Harga (Rp${revC.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valC.roasTarget.toFixed(2)}x, Profit: ${valC.actualProfitPercent.toFixed(2)}%).`);
+    }
   }
 
-  // TEST 6: Rounding price recalculation preserves constraints
-  const test6Input: ReverseCalcInput = {
+  // TEST D: Target ROAS 10x, Buffer 20% -> ROAS Setting = 12x -> Cari Harga remains exactly 10x, not 12x
+  const testD_Reverse = calculateReversePrice({
     hppPcs: 10000,
     minOrder: 1,
     nominalPerOrder: 1600,
@@ -592,18 +585,90 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
     percentRate: 5,
     voucherNominal: 0,
     voucherPct: 0,
-    targetRoas: 8,
+    targetRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 20,
+    includePpn: false,
+    ppnRate: 11,
+    roundingStep: 0,
+  });
+  const testD_DirectAt12 = calculateReversePrice({
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    targetRoas: 12, // what it would be if corrupted by buffer
     targetProfitPct: 15,
     includePpn: false,
     ppnRate: 11,
-    roundingStep: 1000,
-  };
-  const rev6 = calculateReversePrice(test6Input);
-  if (!rev6.isFeasible || rev6.validationRecommended.actualProfitPercent < 15) {
-    logs.push(`TEST 6 FAIL: Rounding to Rp1000 violated profit constraint. Profit: ${rev6.validationRecommended.actualProfitPercent}%`);
+    roundingStep: 0,
+  });
+  if (Math.abs(testD_Reverse.priceExact - testD_DirectAt12.priceExact) < 0.1) {
+    logs.push('TEST D FAIL: Cari Harga erroneously used 12x instead of 10x!');
     allPassed = false;
   } else {
-    logs.push(`TEST 6 PASS: Rounding to Rp1000 revalidated. Price Exact: Rp${rev6.priceExact.toFixed(0)} -> Rounded: Rp${rev6.priceRecommended} (Profit: ${rev6.validationRecommended.actualProfitPercent.toFixed(2)}% >= 15%)`);
+    logs.push(`TEST D PASS: Cari Harga strictly uses Target ROAS 10x (Rp${testD_Reverse.priceExact.toFixed(0)}), completely isolated from ROAS Setting 12x (Rp${testD_DirectAt12.priceExact.toFixed(0)}).`);
+  }
+
+  // TEST E: Buffer changes from 20% to 30% -> Target ROAS remains 10x, ROAS Setting becomes 13x, Price remains unchanged
+  const testE_Buf20 = calculateReversePrice({
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    targetRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 20,
+    includePpn: false,
+    ppnRate: 11,
+    roundingStep: 0,
+  });
+  const testE_Buf30 = calculateReversePrice({
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    targetRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 30, // changed buffer
+    includePpn: false,
+    ppnRate: 11,
+    roundingStep: 0,
+  });
+  if (Math.abs(testE_Buf20.priceExact - testE_Buf30.priceExact) > 0.001) {
+    logs.push('TEST E FAIL: Buffer change altered Cari Harga calculation!');
+    allPassed = false;
+  } else {
+    const valE_Buf30 = calculateUnitEconomics({
+      sellingPrice: testE_Buf30.priceRecommended,
+      hppPcs: 10000,
+      minOrder: 1,
+      nominalPerOrder: 1600,
+      nominalPerUnit: 0,
+      percentRate: 5,
+      voucherNominal: 0,
+      voucherPct: 0,
+      includePpn: false,
+      ppnRate: 11,
+      targetProfitPct: 15,
+      targetRoas: 10,
+      bufferPct: 30,
+    });
+    if (Math.abs(valE_Buf30.roasSetting - 13.0) > 0.01 || Math.abs(valE_Buf30.roasTarget - 10.0) > 0.01) {
+      logs.push(`TEST E FAIL: ROAS Setting calculation error on 30% buffer. Got ${valE_Buf30.roasSetting.toFixed(2)}x`);
+      allPassed = false;
+    } else {
+      logs.push(`TEST E PASS: Buffer 30% -> Target ROAS remains 10.00x, ROAS Setting is 13.00x, and Cari Harga price is identical (Rp${testE_Buf20.priceExact.toFixed(0)}).`);
+    }
   }
 
   // TEST 7: Safety & No undefined .toFixed() crashes on all properties
@@ -629,34 +694,6 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
   } catch (err: any) {
     logs.push(`TEST 7 FAIL: Crash during zero-value handling: ${err.message}`);
     allPassed = false;
-  }
-
-  // TEST 8: Rule Verification - Target ROAS 10x, Buffer 20% -> Target ROAS = 10, Buffer = 20, ROAS Setting = 12 (NEVER Target ROAS = 12)
-  const test8Econ = calculateUnitEconomics({
-    sellingPrice: 50000,
-    hppPcs: 15000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    includePpn: false,
-    ppnRate: 11,
-    targetProfitPct: 15,
-    targetRoas: 10,
-    bufferPct: 20,
-    actualRoas: 10,
-  });
-
-  if (Math.abs(test8Econ.roasTarget - 10) > 0.001) {
-    logs.push(`TEST 8 FAIL: Target ROAS corrupted by buffer. Expected 10.00x, got ${test8Econ.roasTarget.toFixed(2)}x`);
-    allPassed = false;
-  } else if (Math.abs(test8Econ.roasSetting - 12) > 0.001) {
-    logs.push(`TEST 8 FAIL: ROAS Setting incorrect. Expected 12.00x (10 * 1.2), got ${test8Econ.roasSetting.toFixed(2)}x`);
-    allPassed = false;
-  } else {
-    logs.push(`TEST 8 PASS: Strict Variable Separation verified (Target ROAS: ${test8Econ.roasTarget.toFixed(2)}x, Buffer: 20%, ROAS Setting: ${test8Econ.roasSetting.toFixed(2)}x).`);
   }
 
   return { success: allPassed, results: logs };

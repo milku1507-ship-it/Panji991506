@@ -1052,7 +1052,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
       voucherNominal: voucherNominalInput,
-      voucherPct: 0,
+      voucherPct: voucherPctInput,
       includePpn,
       ppnRate,
       targetProfitPct,
@@ -1092,6 +1092,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
+    voucherPctInput,
     includePpn,
     ppnRate,
   ]);
@@ -1210,7 +1211,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         nominalPerUnit: feeConfig.nominalPerUnit,
         percentRate: feeConfig.percentRate,
         voucherNominal: voucherNominalInput,
-        voucherPct: 0,
+        voucherPct: voucherPctInput,
         includePpn,
         ppnRate,
         targetProfitPct,
@@ -1240,7 +1241,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
       voucherNominal: voucherNominalInput,
-      voucherPct: 0,
+      voucherPct: voucherPctInput,
       includePpn,
       ppnRate,
       targetProfitPct,
@@ -1280,6 +1281,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
+    voucherPctInput,
     includePpn,
     ppnRate,
   ]);
@@ -1455,7 +1457,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         nominalPerUnit: pFeeConfig.nominalPerUnit,
         percentRate: pFeeConfig.percentRate,
         voucherNominal: voucherNominalInput,
-        voucherPct: 0,
+        voucherPct: voucherPctInput,
         includePpn,
         ppnRate,
         targetProfitPct,
@@ -1487,7 +1489,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerUnit: defaultFeeConfig.nominalPerUnit,
       percentRate: defaultFeeConfig.percentRate,
       voucherNominal: voucherNominalInput,
-      voucherPct: 0,
+      voucherPct: voucherPctInput,
       includePpn,
       ppnRate,
       targetProfitPct,
@@ -1526,6 +1528,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
+    voucherPctInput,
     includePpn,
     ppnRate,
     v3GroupName,
@@ -2422,7 +2425,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                     onChange={(e) => setTargetRoasInput(Math.max(0.1, Number(e.target.value) || 0.1))}
                     className="rounded-xl h-11 font-bold text-sm text-emerald-700"
                   />
-                  <p className="text-[11px] text-gray-400">Target ROAS di Seller Center (misal 8.4x).</p>
+                  <p className="text-[11px] text-emerald-700 font-semibold">Perhitungan menggunakan Target ROAS, bukan ROAS Setting Iklan.</p>
                 </div>
 
 
