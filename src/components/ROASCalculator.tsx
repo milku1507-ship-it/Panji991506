@@ -374,27 +374,31 @@ function ROASResultDisplay({
   const totalSimAdSpendBurden = simAdSpendTotalBurdenOrder * nOrders;
   const totalSimProfitAfterAds = simProfitAfterAdsOrder * nOrders;
 
-  // Determine automatic status
-  let statusBadge = '🟢 AMAN';
+  // Determine automatic status based on strict intent rules:
+  // Target Profit = Target Minimum (%)
+  // Profit Aktual = Calculated actual net profit (%)
+  const selisihPct = simMarginAfterAdsPct - targetProfitPct;
+
+  let statusBadge = '✓ DI ATAS TARGET';
   let statusColor = 'bg-emerald-50 border-emerald-200 text-emerald-900';
-  let statusDesc = `ROAS Aktual (${simRoas.toFixed(2)}x) ≥ ROAS Setting (${roasSetting.toFixed(2)}x). Target profit bersih ${targetProfitPct}% tercapai aman dengan buffer pengaman.`;
+  let statusDesc = `Profit bersih aktual (${simMarginAfterAdsPct.toFixed(1)}%) berada di atas target minimum (${targetProfitPct}%). Performa iklan sangat baik dengan selisih +${selisihPct.toFixed(1)}%.`;
 
   if (!isTargetFeasible) {
-    statusBadge = '🔴 TIDAK AMAN';
+    statusBadge = '✕ STRUKTUR BIAYA MELEBIHI TARGET';
     statusColor = 'bg-rose-50 border-rose-200 text-rose-900';
-    statusDesc = `Target profit ${targetProfitPct}% tidak dapat dicapai karena Margin Sebelum Iklan (${marginSebelumIklanPct.toFixed(1)}%) lebih kecil dari target profit!`;
-  } else if (simRoas >= roasSetting) {
-    statusBadge = '🟢 AMAN';
+    statusDesc = 'Tidak memungkinkan mencapai target profit dengan struktur biaya saat ini.';
+  } else if (simMarginAfterAdsPct < 0) {
+    statusBadge = '✕ RUGI';
+    statusColor = 'bg-rose-50 border-rose-200 text-rose-900';
+    statusDesc = `Biaya total iklan & operasional melebihi omzet. Transaksi mengalami kerugian (${simMarginAfterAdsPct.toFixed(1)}%).`;
+  } else if (Math.abs(selisihPct) < 0.01) {
+    statusBadge = '✓ SESUAI TARGET';
     statusColor = 'bg-emerald-50 border-emerald-200 text-emerald-900';
-    statusDesc = `ROAS Aktual (${simRoas.toFixed(2)}x) ≥ ROAS Setting (${roasSetting.toFixed(2)}x). Performa iklan sangat baik & target profit ${targetProfitPct}% terlampaui.`;
-  } else if (simRoas >= roasTarget) {
-    statusBadge = '🟡 PERLU PERHATIAN';
+    statusDesc = `Profit bersih aktual (${simMarginAfterAdsPct.toFixed(1)}%) tepat sesuai target minimum (${targetProfitPct}%).`;
+  } else if (simMarginAfterAdsPct < targetProfitPct) {
+    statusBadge = '⚠ DI BAWAH TARGET';
     statusColor = 'bg-amber-50 border-amber-200 text-amber-900';
-    statusDesc = `ROAS Aktual (${simRoas.toFixed(2)}x) ≥ ROAS Target (${roasTarget.toFixed(2)}x) tetapi < ROAS Setting (${roasSetting.toFixed(2)}x). Target profit ${targetProfitPct}% tercapai, namun ruang buffer pengaman menipis.`;
-  } else {
-    statusBadge = '🔴 TIDAK AMAN';
-    statusColor = 'bg-rose-50 border-rose-200 text-rose-900';
-    statusDesc = `ROAS Aktual (${simRoas.toFixed(2)}x) < ROAS Target (${roasTarget.toFixed(2)}x). Biaya iklan melebihi batas aman, profit bersih jatuh di bawah target ${targetProfitPct}%.`;
+    statusDesc = `Profit bersih aktual (${simMarginAfterAdsPct.toFixed(1)}%) berada di bawah target minimum (${targetProfitPct}%). Selisih: ${selisihPct.toFixed(1)}%.`;
   }
 
   return (
@@ -546,41 +550,71 @@ function ROASResultDisplay({
           </div>
         </div>
 
-        {/* 3. TARGET PROFIT & BIAYA IKLAN MAKSIMAL (PER ORDER) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 space-y-2">
+        {/* BANNER CLARIFICATION: TARGET VS PROFIT AKTUAL */}
+        <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 flex items-start gap-2.5 text-xs text-blue-900">
+          <HelpCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            <strong>Target Profit Bersih ({targetProfitPct}%)</strong> adalah profit minimum yang ingin Anda pertahankan. 
+            <strong> Profit Bersih Aktual ({simMarginAfterAdsPct.toFixed(1)}%)</strong> dihitung murni berdasarkan biaya iklan aktual. jika biaya iklan lebih hemat, profit aktual akan lebih tinggi dari target minimum.
+          </p>
+        </div>
+
+        {/* 3. TERAPKAN 3 KONSEP UTAMA & BIAYA IKLAN MAKSIMAL */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+          {/* KONSEP A: TARGET PROFIT BERSIH */}
+          <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black uppercase text-emerald-800">TARGET PROFIT SETELAH IKLAN / ORDER</p>
+              <p className="text-[11px] font-black uppercase text-emerald-800 tracking-wider">TARGET PROFIT BERSIH</p>
               <Badge className="bg-emerald-600 text-white border-none font-bold text-xs">{targetProfitPct}%</Badge>
             </div>
-            <p className="text-2xl font-black text-emerald-700">{formatCurrency(targetProfitNominalOrder)}</p>
-            <p className="text-[11px] text-emerald-600">
-              Keuntungan bersih per 1 order ({minOrder} pcs) yang wajib tersisa setelah biaya iklan & operasional.
+            <p className="text-2xl font-black text-emerald-700">{formatCurrency(totalSimTargetProfit)}</p>
+            <p className="text-[11px] text-emerald-600 leading-tight">
+              Profit minimum yang wajib tersisa setelah biaya iklan & operasional ({nOrders} order).
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-2">
+          {/* KONSEP B: BIAYA IKLAN MAKSIMAL */}
+          <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200/80 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black uppercase text-indigo-800">MAKSIMAL BIAYA IKLAN / ORDER</p>
-              <span className="text-[11px] font-bold text-indigo-600">
-                {includePpn ? `Sebelum PPN ${ppnRate}%` : 'Tanpa PPN'}
+              <p className="text-[11px] font-black uppercase text-indigo-800 tracking-wider">BIAYA IKLAN MAKSIMAL</p>
+              <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-md">
+                {includePpn ? `Beban PPN ${ppnRate}%` : 'Tanpa PPN'}
               </span>
             </div>
-            <p className="text-2xl font-black text-indigo-700">{formatCurrency(maxAdSpendOrder)}</p>
-            <p className="text-[11px] text-indigo-600 leading-relaxed">
-              Batas maksimal biaya iklan per 1 order agar target profit {targetProfitPct}% tetap tercapai.
+            <p className="text-2xl font-black text-indigo-700">{formatCurrency(totalSimMaxAdSpend)}</p>
+            <p className="text-[11px] text-indigo-600 leading-tight">
+              Maksimal biaya iklan agar profit bersih tetap minimum {targetProfitPct}%.
             </p>
+          </div>
+
+          {/* KONSEP C: PROFIT BERSIH AKTUAL & SELISIH */}
+          <div className={`p-4 rounded-2xl border space-y-2 ${simMarginAfterAdsPct >= targetProfitPct ? 'bg-teal-50/60 border-teal-200' : simMarginAfterAdsPct >= 0 ? 'bg-amber-50/60 border-amber-200' : 'bg-rose-50/60 border-rose-200'}`}>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-black uppercase tracking-wider text-gray-800">PROFIT BERSIH AKTUAL</p>
+              <Badge className={`border-none font-bold text-xs text-white ${simMarginAfterAdsPct >= targetProfitPct ? 'bg-teal-600' : simMarginAfterAdsPct >= 0 ? 'bg-amber-600' : 'bg-rose-600'}`}>
+                {simMarginAfterAdsPct.toFixed(1)}%
+              </Badge>
+            </div>
+            <p className={`text-2xl font-black ${simMarginAfterAdsPct >= targetProfitPct ? 'text-teal-700' : simMarginAfterAdsPct >= 0 ? 'text-amber-700' : 'text-rose-700'}`}>
+              {formatCurrency(totalSimProfitAfterAds)}
+            </p>
+            <div className="flex items-center justify-between text-[11px] pt-0.5">
+              <span className="font-bold text-gray-600">Selisih dari Target:</span>
+              <span className={`font-black ${selisihPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {selisihPct >= 0 ? '+' : ''}{selisihPct.toFixed(1)}%
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* 4. METRIK ROAS (CARDS) */}
+        {/* 4. METRIK ROAS (TARGET VS AKTUAL TERPISAH) */}
         {!isTargetFeasible ? (
           <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <p className="text-xs font-black text-rose-700">Target Profit Tidak Dapat Dicapai</p>
               <p className="text-xs text-rose-600 leading-relaxed">
-                Margin Sebelum Iklan ({marginSebelumIklanPct.toFixed(1)}%) lebih kecil dari Target Profit Bersih ({targetProfitPct}%). Kurangi HPP / biaya proses, atau naikkan harga jual.
+                Tidak memungkinkan mencapai target profit dengan struktur biaya saat ini. Margin Sebelum Iklan ({marginSebelumIklanPct.toFixed(1)}%) lebih kecil dari Target Profit Bersih ({targetProfitPct}%).
               </p>
             </div>
           </div>
@@ -588,34 +622,43 @@ function ROASResultDisplay({
           <div className="space-y-3">
             <h4 className="text-xs font-black uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
               <BarChart3 className="w-4 h-4 text-violet-600" />
-              REKOMENDASI METRIK ROAS (UNIT ECONOMICS CONSISTENT)
+              PERBANDINGAN METRIK ROAS (TARGET VS AKTUAL TERPISAH)
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-2xl bg-violet-50/80 border border-violet-200 space-y-1">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-blue-700">ROAS BEP</p>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">Impas</span>
-                </div>
-                <p className="text-2xl font-black text-blue-900">{roasBep.toFixed(2)}x</p>
-                <p className="text-[11px] text-blue-700 leading-tight">Batas minimal agar tidak rugi (0 profit).</p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-violet-50/70 border border-violet-200 space-y-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-violet-700">ROAS TARGET</p>
-                  <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">Utama</span>
+                  <p className="text-xs font-bold text-violet-800">TARGET ROAS</p>
+                  <span className="text-[10px] bg-violet-200 text-violet-900 font-bold px-1.5 py-0.5 rounded">Batas Target</span>
                 </div>
                 <p className="text-2xl font-black text-violet-900">{roasTarget.toFixed(2)}x</p>
-                <p className="text-[11px] text-violet-700 leading-tight">ROAS agar target profit {targetProfitPct}% tercapai.</p>
+                <p className="text-[10px] text-violet-700 leading-tight">ROAS minimal agar target profit {targetProfitPct}% tercapai.</p>
               </div>
 
-              <div className="p-4 rounded-2xl bg-purple-50/70 border border-purple-200 space-y-1">
+              <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-purple-700">ROAS SETTING</p>
-                  <span className="text-[10px] bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">Buffer</span>
+                  <p className="text-xs font-bold text-emerald-800">ROAS AKTUAL</p>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">Diuji</span>
+                </div>
+                <p className="text-2xl font-black text-emerald-900">{simRoas.toFixed(2)}x</p>
+                <p className="text-[10px] text-emerald-700 leading-tight">Performa iklan aktual yang diuji di dashboard iklan.</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-purple-800">ROAS SETTING</p>
+                  <span className="text-[10px] bg-purple-200 text-purple-900 font-bold px-1.5 py-0.5 rounded">Buffer</span>
                 </div>
                 <p className="text-2xl font-black text-purple-900">{roasSetting.toFixed(2)}x</p>
-                <p className="text-[11px] text-purple-700 leading-tight">Setting awal iklan dengan ruang pengaman.</p>
+                <p className="text-[10px] text-purple-700 leading-tight">Setting awal iklan di Seller Center dengan buffer.</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-blue-800">ROAS BEP</p>
+                  <span className="text-[10px] bg-blue-100 text-blue-900 font-bold px-1.5 py-0.5 rounded">Impas</span>
+                </div>
+                <p className="text-2xl font-black text-blue-900">{roasBep.toFixed(2)}x</p>
+                <p className="text-[10px] text-blue-700 leading-tight">Batas minimal agar tidak rugi (0 profit).</p>
               </div>
             </div>
 
@@ -631,14 +674,14 @@ function ROASResultDisplay({
           </div>
         )}
 
-        {/* 5. SIMULASI JUMLAH ORDER & ROAS AKTUAL (ATURAN UTAMA 3) */}
+        {/* 5. SIMULASI TRANSAKSI JUMLAH ORDER & ROAS AKTUAL */}
         {isTargetFeasible && (
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-gray-200/80">
               <div className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-violet-600" />
                 <span className="text-xs font-black text-gray-900 uppercase">
-                  SIMULASI TRANSAKSI JUMLAH ORDER
+                  SIMULASI INTERAKTIF ROAS AKTUAL & JUMLAH ORDER
                 </span>
               </div>
               
@@ -703,19 +746,23 @@ function ROASResultDisplay({
                 className="w-full h-2 rounded-lg bg-violet-200 appearance-none cursor-pointer accent-violet-600"
               />
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-center text-xs">
                 <div className="p-3 bg-white rounded-xl border border-gray-200">
                   <p className="text-[10px] text-gray-400 font-bold uppercase">Biaya Iklan Total ({nOrders} Order)</p>
                   <p className="font-black text-gray-900 mt-0.5">{formatCurrency(totalSimAdSpendBurden)}</p>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-gray-200">
-                  <p className="text-[10px] text-gray-400 font-bold uppercase">Profit Bersih Akhir ({nOrders} Order)</p>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Target Profit ({targetProfitPct}%)</p>
+                  <p className="font-black text-emerald-700 mt-0.5">{formatCurrency(totalSimTargetProfit)}</p>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-gray-200">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Profit Bersih Aktual</p>
                   <p className={`font-black mt-0.5 ${totalSimProfitAfterAds >= totalSimTargetProfit ? 'text-emerald-600' : totalSimProfitAfterAds >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
                     {formatCurrency(totalSimProfitAfterAds)}
                   </p>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-gray-200">
-                  <p className="text-[10px] text-gray-400 font-bold uppercase">Margin Profit Bersih</p>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Margin Profit Aktual</p>
                   <p className={`font-black mt-0.5 ${simMarginAfterAdsPct >= targetProfitPct ? 'text-emerald-600' : simMarginAfterAdsPct >= 0 ? 'text-amber-600' : 'text-rose-600'}`}>
                     {simMarginAfterAdsPct.toFixed(1)}%
                   </p>
@@ -724,7 +771,7 @@ function ROASResultDisplay({
 
               {/* STATUS ANNOUNCEMENT */}
               <div className={`p-3 rounded-xl border text-xs leading-relaxed font-medium ${statusColor}`}>
-                <span className="font-black mr-1">{statusBadge}:</span>
+                <span className="font-black mr-1">STATUS: {statusBadge}:</span>
                 {statusDesc}
               </div>
             </div>
@@ -1638,7 +1685,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
             {/* Target Profit Bersih Setelah Iklan */}
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-gray-700 flex items-center justify-between">
-                <span>Target Profit Bersih</span>
+                <span>Target Profit Bersih (%)</span>
                 <span className="text-violet-700 font-black">{targetProfitPct}%</span>
               </Label>
               <div className="flex items-center gap-1.5">
@@ -1672,7 +1719,9 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-400">Default: 10% dari Harga Jual yang ingin dipertahankan setelah iklan.</p>
+              <p className="text-[11px] text-gray-500 leading-tight">
+                Target Profit Bersih adalah profit minimum yang ingin dipertahankan setelah seluruh biaya. Profit aktual dapat lebih tinggi dari target.
+              </p>
             </div>
 
             {/* Buffer ROAS */}
