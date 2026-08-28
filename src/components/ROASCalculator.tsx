@@ -561,11 +561,11 @@ function ROASResultDisplay({
 
               <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-emerald-800">ROAS AKTUAL</p>
+                  <p className="text-xs font-bold text-emerald-800">ROAS SIMULASI</p>
                   <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">Diuji</span>
                 </div>
                 <p className="text-2xl font-black text-emerald-900">{simRoas.toFixed(2)}x</p>
-                <p className="text-[10px] text-emerald-700 leading-tight">Performa iklan aktual yang diuji di dashboard iklan.</p>
+                <p className="text-[10px] text-emerald-700 leading-tight">Nilai ROAS yang sedang diuji untuk simulasi performa.</p>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-200 space-y-1">
@@ -847,6 +847,17 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       setIsApplyingPrice(false);
     }
   }, [confirmModalData, user?.uid]);
+
+  const handleTransferToFindRoas = React.useCallback((targetPrice?: number) => {
+    if (targetPrice !== undefined && targetPrice > 0) {
+      setSimulatedPriceOverride(targetPrice);
+    }
+    setV1SimRoas(targetRoasInput);
+    setV2SimRoas(targetRoasInput);
+    setV3SimRoas(targetRoasInput);
+    setCalcMode('find_roas');
+    toast.success(`Parameter berhasil diuji ke mode CARI ROAS (Target ROAS: ${targetRoasInput}x, Target Profit: ${targetProfitPct}%)`);
+  }, [targetRoasInput, targetProfitPct]);
 
   // Load Preferences
   React.useEffect(() => {
@@ -1888,7 +1899,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <Select
                           value={v1SelectedProductId}
                           onValueChange={(val) => {
-                            if (typeof val === 'string') setV1SelectedProductId(val);
+                            if (typeof val === 'string') {
+                              setV1SelectedProductId(val);
+                              setSimulatedPriceOverride(null);
+                            }
                           }}
                         >
                           <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
@@ -1909,7 +1923,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <Select
                           value={v1SelectedVariantId}
                           onValueChange={(val) => {
-                            if (typeof val === 'string') setV1SelectedVariantId(val);
+                            if (typeof val === 'string') {
+                              setV1SelectedVariantId(val);
+                              setSimulatedPriceOverride(null);
+                            }
                           }}
                         >
                           <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
@@ -1923,6 +1940,37 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                    </div>
+                  )}
+
+                  {simulatedPriceOverride !== null && (
+                    <div className="p-4 rounded-2xl bg-emerald-50/90 border border-emerald-200 flex items-center justify-between flex-wrap gap-2.5 text-xs text-emerald-900 shadow-xs">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          Sedang menguji <strong>Harga Simulasi CARI HARGA: {formatCurrency(simulatedPriceOverride)}</strong> (Target ROAS: <strong>{targetRoasInput}x</strong>, Target Profit: <strong>{targetProfitPct}%</strong>)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {v1ActiveProduct && v1ActiveVariant && (
+                          <Button
+                            type="button"
+                            onClick={() => handleApplyPriceRequest(v1ActiveProduct, v1ActiveVariant, simulatedPriceOverride)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl h-8 px-3"
+                          >
+                            <Tag className="w-3.5 h-3.5 mr-1" />
+                            Terapkan Permanen
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setSimulatedPriceOverride(null)}
+                          className="text-xs font-bold rounded-xl h-8 px-3 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                        >
+                          Reset ke Harga Asli ({formatCurrency(Number(v1ActiveVariant?.harga_jual) || 0)})
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -2322,13 +2370,17 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           {/* MODE 1: CARI HARGA VARIAN */}
           {adMode === 'variant' && v1ReverseCalc && (
             <Card className="rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/80 via-teal-50/40 to-white shadow-md">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-6 space-y-5">
                 {!v1ReverseCalc.isFeasible ? (
-                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold">
-                    {v1ReverseCalc.errorMessage}
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold space-y-2">
+                    <p className="font-black text-sm">Target Tidak Dapat Dicapai</p>
+                    <p>{v1ReverseCalc.errorMessage}</p>
+                    <p className="text-[11px] text-rose-600 font-normal">
+                      Saran: Turunkan Target Profit Bersih, naikkan Target ROAS, atau kurangi beban HPP / Biaya Marketplace.
+                    </p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">
@@ -2340,17 +2392,17 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                       </div>
                       <Button
                         type="button"
-                        onClick={() => setCalcMode('find_roas')}
-                        className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"
+                        onClick={() => handleTransferToFindRoas(v1ReverseCalc.priceRecommended)}
+                        className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm h-9 px-4 flex items-center gap-1.5"
                       >
-                        <CheckCircle className="w-4 h-4 mr-1.5" />
-                        Uji ke Mode CARI ROAS
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Uji ke Mode CARI ROAS</span>
                       </Button>
                     </div>
 
                     <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row items-baseline justify-between gap-4">
                       <div>
-                        <p className="text-xs font-bold text-gray-500 uppercase">HARGA JUAL DISARANKAN</p>
+                        <p className="text-xs font-bold text-gray-500 uppercase">HARGA JUAL REKOMENDASI (MINIMUM)</p>
                         <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
                           {formatCurrency(v1ReverseCalc.priceRecommended)}
                         </p>
@@ -2369,10 +2421,89 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                             <span>TERAPKAN HARGA</span>
                           </Button>
                         )}
-                        <div className="text-right text-xs space-y-1">
+                        <div className="text-right text-xs space-y-0.5">
                           <p className="text-gray-500">HPP Real: <strong>{formatCurrency(v1ReverseCalc.realHppPerUnit)}</strong></p>
                           <p className="text-gray-500">Target ROAS: <strong>{targetRoasInput}x</strong></p>
                           <p className="text-gray-500">Target Net Profit: <strong>{targetProfitPct}%</strong></p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TRANSPARENT VALIDATION BREAKDOWN (SECTION 14 & 15) */}
+                    <div className="p-4 bg-white/90 rounded-2xl border border-emerald-200/80 space-y-3">
+                      <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+                          <CheckCircle className="w-4 h-4 text-emerald-600" />
+                          VERIFIKASI & TRANSPARANSI EKONOMI (100% KONSISTEN DENGAN CARI ROAS)
+                        </span>
+                        <Badge className="bg-emerald-100 text-emerald-800 border-none font-bold text-[10px]">
+                          VALIDASI LOLOS
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">Profit Bersih Terverifikasi</p>
+                          <p className="text-base font-black text-emerald-700 mt-0.5">
+                            {v1ReverseCalc.validation.actualProfitPercent.toFixed(2)}%
+                          </p>
+                          <p className="text-[10px] text-gray-400">Target min: {targetProfitPct}%</p>
+                        </div>
+
+                        <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">ROAS Simulasi Terverifikasi</p>
+                          <p className="text-base font-black text-emerald-700 mt-0.5">
+                            {v1ReverseCalc.validation.roasTarget.toFixed(2)}x
+                          </p>
+                          <p className="text-[10px] text-gray-400">Sesuai Target ROAS</p>
+                        </div>
+
+                        <div className="p-3 bg-purple-50/60 rounded-xl border border-purple-100">
+                          <p className="text-[10px] font-bold text-purple-800 uppercase">ROAS Setting (Seller Center)</p>
+                          <p className="text-base font-black text-purple-900 mt-0.5">
+                            {(targetRoasInput * (1 + bufferPct / 100)).toFixed(2)}x
+                          </p>
+                          <p className="text-[10px] text-purple-600">Buffer +{bufferPct}%</p>
+                        </div>
+
+                        <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100">
+                          <p className="text-[10px] font-bold text-blue-800 uppercase">ROAS BEP (Impas)</p>
+                          <p className="text-base font-black text-blue-900 mt-0.5">
+                            {v1ReverseCalc.validation.roasBep.toFixed(2)}x
+                          </p>
+                          <p className="text-[10px] text-blue-600">Batas 0 Profit</p>
+                        </div>
+
+                        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">Max Biaya Iklan / Unit</p>
+                          <p className="text-sm font-black text-gray-900 mt-0.5">
+                            {formatCurrency(v1ReverseCalc.validation.maxAdSpendPerUnit)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">Beban Iklan Aman</p>
+                        </div>
+
+                        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">Profit Sebelum Iklan</p>
+                          <p className="text-sm font-black text-gray-900 mt-0.5">
+                            {formatCurrency(v1ReverseCalc.validation.profitBeforeAdsPerUnit)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">{v1ReverseCalc.validation.marginBeforeAdsPct.toFixed(1)}% margin</p>
+                        </div>
+
+                        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">Fee Marketplace / Unit</p>
+                          <p className="text-sm font-bold text-amber-600 mt-0.5">
+                            {formatCurrency(v1ReverseCalc.validation.marketplaceFeePerUnit)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">Termasuk Admin & Proses</p>
+                        </div>
+
+                        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase">HPP Real / Unit</p>
+                          <p className="text-sm font-bold text-rose-600 mt-0.5">
+                            {formatCurrency(v1ReverseCalc.realHppPerUnit)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">HPP Produk + Biaya / Unit</p>
                         </div>
                       </div>
                     </div>
@@ -2395,11 +2526,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   </div>
                   <Button
                     type="button"
-                    onClick={() => setCalcMode('find_roas')}
-                    className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold"
+                    onClick={() => handleTransferToFindRoas()}
+                    className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm h-9 px-4 flex items-center gap-1.5"
                   >
-                    <CheckCircle className="w-4 h-4 mr-1.5" />
-                    Uji ke Mode CARI ROAS
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Uji ke Mode CARI ROAS</span>
                   </Button>
                 </div>
 
@@ -2481,11 +2612,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               <div className="flex justify-end pt-2">
                 <Button
                   type="button"
-                  onClick={() => setCalcMode('find_roas')}
-                  className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold px-5"
+                  onClick={() => handleTransferToFindRoas()}
+                  className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold px-5 shadow-sm h-10 flex items-center gap-2"
                 >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Uji Seluruh Harga ke Mode CARI ROAS
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Uji Seluruh Harga ke Mode CARI ROAS</span>
                 </Button>
               </div>
             </div>
