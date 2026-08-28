@@ -32,6 +32,7 @@ export interface UnitEconomicsResult {
   voucherPerUnit: number;
   priceAfterVoucher: number;
   adminFeePerUnit: number;
+  marketplaceFeePerUnit: number;
   omzetRealPerUnit: number;
   realHppPerUnit: number;
   profitBeforeAdsPerUnit: number;
@@ -46,10 +47,11 @@ export interface UnitEconomicsResult {
   maxAdSpendPerUnit: number;        // Before PPN
   maxAdSpendBurdenPerUnit: number;  // With PPN
   
-  // ROAS Benchmark Metrics
-  roasBep: number;
-  roasTarget: number;
-  roasSetting: number;
+  // ROAS Benchmark Metrics (STRICTLY SEPARATED)
+  roasBep: number;                  // Break-even ROAS (0 profit)
+  roasTarget: number;               // Pure Target ROAS from user (NOT modified by buffer)
+  roasSetting: number;              // Target ROAS × (1 + bufferPct / 100) for Seller Center
+  requiredRoasForPrice?: number;    // Break-even required ROAS for current price
   
   // Actual/Simulated ROAS Result
   actualRoas: number;
@@ -91,11 +93,6 @@ export function calculateUnitEconomics(params: UnitEconomicsParams): UnitEconomi
   const ppnRate = Math.max(0, params.ppnRate ?? 11);
   const targetProfitPct = Math.max(0, params.targetProfitPct || 0);
   const bufferPct = Math.max(0, params.bufferPct || 0);
-  
-  // Default actualRoas to targetRoas if provided, or 10 as fallback
-  const actualRoas = params.actualRoas && params.actualRoas > 0 
-    ? params.actualRoas 
-    : (params.targetRoas && params.targetRoas > 0 ? params.targetRoas : 10);
 
   const t_ppn = includePpn ? ppnRate / 100 : 0;
   const C = percentRate / 100;
@@ -105,6 +102,7 @@ export function calculateUnitEconomics(params: UnitEconomicsParams): UnitEconomi
   const voucherPerUnit = voucherNominal + (sellingPrice * V_pct);
   const priceAfterVoucher = Math.max(0, sellingPrice - voucherPerUnit);
   const adminFeePerUnit = priceAfterVoucher * C;
+  const marketplaceFeePerUnit = adminFeePerUnit + (nominalPerOrder / minOrder) + nominalPerUnit;
   const omzetRealPerUnit = priceAfterVoucher - adminFeePerUnit;
 
   // 2. HPP Real & Margin Before Ads
@@ -134,12 +132,31 @@ export function calculateUnitEconomics(params: UnitEconomicsParams): UnitEconomi
   const maxAdSpendBurdenPerUnit = isTargetFeasible ? Math.max(0, profitAvailableForAdsPerUnit) : 0;
   const maxAdSpendPerUnit = isTargetFeasible ? maxAdSpendBurdenPerUnit / (1 + t_ppn) : 0;
 
-  // 4. ROAS Metrics
+  // 4. ROAS Metrics (STRICT SINGLE SOURCE OF TRUTH & VARIABLE SEPARATION)
+  // - roasBep: Break-even ROAS (0 profit)
   const roasBep = profitBeforeAdsPerUnit > 0 ? (sellingPrice * (1 + t_ppn)) / profitBeforeAdsPerUnit : 0;
-  const roasTarget = isTargetFeasible && maxAdSpendPerUnit > 0 ? sellingPrice / maxAdSpendPerUnit : 0;
+
+  // - requiredRoasForPrice: Break-even ROAS required to achieve target profit at current selling price
+  const requiredRoasForPrice = isTargetFeasible && maxAdSpendPerUnit > 0 ? sellingPrice / maxAdSpendPerUnit : 0;
+
+  // - roasTarget: The pure target ROAS requested by the user.
+  //   Rule 1: targetROAS is the original target ROAS inputted by user.
+  //   Rule 2: bufferROAS does NOT alter targetROAS.
+  //   Rule 5: NEVER use roasSetting as targetROAS.
+  const roasTarget = params.targetRoas && params.targetRoas > 0
+    ? params.targetRoas
+    : requiredRoasForPrice;
+
+  // - roasSetting: Computed separately for Seller Center recommendation:
+  //   Rule 3: roasSetting = targetROAS × (1 + bufferROAS / 100)
   const roasSetting = roasTarget > 0 ? roasTarget * (1 + bufferPct / 100) : 0;
 
   // 5. Actual / Simulated ROAS Performance
+  // - actualRoas: The ROAS value currently tested in simulation (defaults to roasTarget)
+  const actualRoas = params.actualRoas && params.actualRoas > 0 
+    ? params.actualRoas 
+    : (roasTarget > 0 ? roasTarget : 10);
+
   const actualAdSpendPerUnit = actualRoas > 0 ? sellingPrice / actualRoas : 0;
   const actualAdSpendBurdenPerUnit = actualAdSpendPerUnit * (1 + t_ppn);
   const actualProfitPerUnit = profitBeforeAdsPerUnit - actualAdSpendBurdenPerUnit;
@@ -192,6 +209,7 @@ export function calculateUnitEconomics(params: UnitEconomicsParams): UnitEconomi
     voucherPerUnit,
     priceAfterVoucher,
     adminFeePerUnit,
+    marketplaceFeePerUnit: adminFeePerUnit + nominalPerUnit + (nominalPerOrder / minOrder),
     omzetRealPerUnit,
     realHppPerUnit,
     profitBeforeAdsPerUnit,
@@ -611,6 +629,34 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
   } catch (err: any) {
     logs.push(`TEST 7 FAIL: Crash during zero-value handling: ${err.message}`);
     allPassed = false;
+  }
+
+  // TEST 8: Rule Verification - Target ROAS 10x, Buffer 20% -> Target ROAS = 10, Buffer = 20, ROAS Setting = 12 (NEVER Target ROAS = 12)
+  const test8Econ = calculateUnitEconomics({
+    sellingPrice: 50000,
+    hppPcs: 15000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    includePpn: false,
+    ppnRate: 11,
+    targetProfitPct: 15,
+    targetRoas: 10,
+    bufferPct: 20,
+    actualRoas: 10,
+  });
+
+  if (Math.abs(test8Econ.roasTarget - 10) > 0.001) {
+    logs.push(`TEST 8 FAIL: Target ROAS corrupted by buffer. Expected 10.00x, got ${test8Econ.roasTarget.toFixed(2)}x`);
+    allPassed = false;
+  } else if (Math.abs(test8Econ.roasSetting - 12) > 0.001) {
+    logs.push(`TEST 8 FAIL: ROAS Setting incorrect. Expected 12.00x (10 * 1.2), got ${test8Econ.roasSetting.toFixed(2)}x`);
+    allPassed = false;
+  } else {
+    logs.push(`TEST 8 PASS: Strict Variable Separation verified (Target ROAS: ${test8Econ.roasTarget.toFixed(2)}x, Buffer: 20%, ROAS Setting: ${test8Econ.roasSetting.toFixed(2)}x).`);
   }
 
   return { success: allPassed, results: logs };

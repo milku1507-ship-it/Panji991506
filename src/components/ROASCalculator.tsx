@@ -226,6 +226,7 @@ interface ROASResultDisplayProps {
   roasBep: number;
   roasTarget: number;
   roasSetting: number;
+  bufferPct?: number;
   roasWorst?: number;
   worstName?: string;
   isTargetFeasible: boolean;
@@ -262,6 +263,7 @@ function ROASResultDisplay({
   roasBep,
   roasTarget,
   roasSetting,
+  bufferPct = 15,
   roasWorst,
   worstName,
   isTargetFeasible,
@@ -547,16 +549,16 @@ function ROASResultDisplay({
           <div className="space-y-3">
             <h4 className="text-xs font-black uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
               <BarChart3 className="w-4 h-4 text-violet-600" />
-              PERBANDINGAN METRIK ROAS (TARGET VS AKTUAL TERPISAH)
+              PERBANDINGAN METRIK ROAS (TARGET, SETTING & SIMULASI TERPISAH)
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div className="p-3.5 rounded-2xl bg-violet-50/80 border border-violet-200 space-y-1">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-violet-800">TARGET ROAS</p>
-                  <span className="text-[10px] bg-violet-200 text-violet-900 font-bold px-1.5 py-0.5 rounded">Batas Target</span>
+                  <span className="text-[10px] bg-violet-200 text-violet-900 font-bold px-1.5 py-0.5 rounded">Target User</span>
                 </div>
                 <p className="text-2xl font-black text-violet-900">{roasTarget.toFixed(2)}x</p>
-                <p className="text-[10px] text-violet-700 leading-tight">ROAS minimal agar target profit {targetProfitPct}% tercapai.</p>
+                <p className="text-[10px] text-violet-700 leading-tight">Target ROAS asli yang diminta user ({targetProfitPct}% net profit).</p>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
@@ -571,10 +573,10 @@ function ROASResultDisplay({
               <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-200 space-y-1">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-purple-800">ROAS SETTING</p>
-                  <span className="text-[10px] bg-purple-200 text-purple-900 font-bold px-1.5 py-0.5 rounded">Buffer</span>
+                  <span className="text-[10px] bg-purple-200 text-purple-900 font-bold px-1.5 py-0.5 rounded">Buffer +{bufferPct}%</span>
                 </div>
                 <p className="text-2xl font-black text-purple-900">{roasSetting.toFixed(2)}x</p>
-                <p className="text-[10px] text-purple-700 leading-tight">Setting awal iklan di Seller Center dengan buffer.</p>
+                <p className="text-[10px] text-purple-700 leading-tight">Rekomendasi setting Seller Center: Target ROAS × (1 + {bufferPct}%).</p>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200 space-y-1">
@@ -599,14 +601,14 @@ function ROASResultDisplay({
           </div>
         )}
 
-        {/* 5. SIMULASI TRANSAKSI JUMLAH ORDER & ROAS AKTUAL */}
+        {/* 5. SIMULASI TRANSAKSI JUMLAH ORDER & ROAS SIMULASI */}
         {isTargetFeasible && (
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-gray-200/80">
               <div className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-violet-600" />
                 <span className="text-xs font-black text-gray-900 uppercase">
-                  SIMULASI INTERAKTIF ROAS AKTUAL & JUMLAH ORDER
+                  SIMULASI INTERAKTIF ROAS & JUMLAH ORDER
                 </span>
               </div>
               
@@ -655,9 +657,9 @@ function ROASResultDisplay({
 
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-bold text-gray-800">Uji ROAS Aktual di Dashboard Iklan:</span>
+                <span className="text-xs font-bold text-gray-800">Uji ROAS Simulasi di Dashboard Iklan:</span>
                 <span className="text-xs font-black text-violet-700 bg-violet-100 px-2.5 py-1 rounded-lg">
-                  ROAS Input: {simRoas.toFixed(2)}x
+                  ROAS Simulasi: {simRoas.toFixed(2)}x
                 </span>
               </div>
 
@@ -852,12 +854,14 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     if (targetPrice !== undefined && targetPrice > 0) {
       setSimulatedPriceOverride(targetPrice);
     }
+    // Set simulation ROAS to user's exact Target ROAS
     setV1SimRoas(targetRoasInput);
     setV2SimRoas(targetRoasInput);
     setV3SimRoas(targetRoasInput);
     setCalcMode('find_roas');
-    toast.success(`Parameter berhasil diuji ke mode CARI ROAS (Target ROAS: ${targetRoasInput}x, Target Profit: ${targetProfitPct}%)`);
-  }, [targetRoasInput, targetProfitPct]);
+    const settingRoas = (targetRoasInput * (1 + bufferPct / 100)).toFixed(2);
+    toast.success(`Parameter berhasil diuji ke mode CARI ROAS (Target ROAS: ${targetRoasInput}x, Buffer: +${bufferPct}%, ROAS Setting: ${settingRoas}x)`);
+  }, [targetRoasInput, bufferPct]);
 
   // Load Preferences
   React.useEffect(() => {
@@ -866,11 +870,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       if (saved) {
         const data = JSON.parse(saved);
         if (data.adMode) setAdMode(data.adMode);
+        if (data.targetRoasInput !== undefined) setTargetRoasInput(data.targetRoasInput);
         if (data.targetProfitPct !== undefined) setTargetProfitPct(data.targetProfitPct);
         if (data.bufferPct !== undefined) setBufferPct(data.bufferPct);
         if (data.voucherNominalInput !== undefined) setVoucherNominalInput(data.voucherNominalInput);
         if (data.includePpn !== undefined) setIncludePpn(data.includePpn);
         if (data.ppnRate !== undefined) setPpnRate(data.ppnRate);
+        if (data.roundingOption !== undefined) setRoundingOption(data.roundingOption);
         if (data.v1OrderSim !== undefined) setV1OrderSim(data.v1OrderSim);
         if (data.v2OrderSim !== undefined) setV2OrderSim(data.v2OrderSim);
         if (data.v3OrderSim !== undefined) setV3OrderSim(data.v3OrderSim);
@@ -1050,8 +1056,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       includePpn,
       ppnRate,
       targetProfitPct,
-      actualRoas: v1SimRoas,
-      targetRoas: v1SimRoas,
+      actualRoas: v1SimRoas > 0 ? v1SimRoas : targetRoasInput,
+      targetRoas: targetRoasInput,
       bufferPct,
       numOrders,
     });
@@ -1082,6 +1088,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ingredients,
     v1OrderSim,
     v1SimRoas,
+    targetRoasInput,
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
@@ -1126,6 +1133,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       targetProfitPct,
       actualRoas: targetRoasInput,
       targetRoas: targetRoasInput,
+      bufferPct,
     });
 
     return {
@@ -1148,6 +1156,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherPctInput,
     targetRoasInput,
     targetProfitPct,
+    bufferPct,
     includePpn,
     ppnRate,
     roundingOption,
@@ -1155,9 +1164,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
   React.useEffect(() => {
     if (v1Calculation && v1Calculation.unitEcon.roasTarget > 0) {
-      setV1SimRoas((prev) => (prev === 0 ? Number(v1Calculation.unitEcon.roasTarget.toFixed(2)) : prev));
+      setV1SimRoas((prev) => (prev === 0 ? targetRoasInput : prev));
     }
-  }, [v1Calculation]);
+  }, [v1Calculation, targetRoasInput]);
 
   /* ========================================================================
      MATHEMATICAL ENGINE: MODE 2 (IKLAN PRODUK — CONSERVATIVE MULTI-VARIANT)
@@ -1205,8 +1214,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         includePpn,
         ppnRate,
         targetProfitPct,
-        actualRoas: v2SimRoas,
-        targetRoas: v2SimRoas,
+        actualRoas: v2SimRoas > 0 ? v2SimRoas : targetRoasInput,
+        targetRoas: targetRoasInput,
         bufferPct,
         numOrders,
       });
@@ -1235,8 +1244,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       includePpn,
       ppnRate,
       targetProfitPct,
-      actualRoas: v2SimRoas,
-      targetRoas: v2SimRoas,
+      actualRoas: v2SimRoas > 0 ? v2SimRoas : targetRoasInput,
+      targetRoas: targetRoasInput,
       bufferPct,
       numOrders,
     });
@@ -1267,6 +1276,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     v2VariantWeights,
     v2OrderSim,
     v2SimRoas,
+    targetRoasInput,
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
@@ -1449,8 +1459,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         includePpn,
         ppnRate,
         targetProfitPct,
-        actualRoas: v3SimRoas,
-        targetRoas: v3SimRoas,
+        actualRoas: v3SimRoas > 0 ? v3SimRoas : targetRoasInput,
+        targetRoas: targetRoasInput,
         bufferPct,
         numOrders,
       });
@@ -1481,8 +1491,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       includePpn,
       ppnRate,
       targetProfitPct,
-      actualRoas: v3SimRoas,
-      targetRoas: v3SimRoas,
+      actualRoas: v3SimRoas > 0 ? v3SimRoas : targetRoasInput,
+      targetRoas: targetRoasInput,
       bufferPct,
       numOrders,
     });
@@ -1512,6 +1522,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ingredients,
     v3OrderSim,
     v3SimRoas,
+    targetRoasInput,
     targetProfitPct,
     bufferPct,
     voucherNominalInput,
@@ -1740,7 +1751,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         </div>
       </div>
 
-      {/* PARAMETER STRATEGI (TARGET PROFIT BERSIH, BUFFER, VOUCHER, PPN) */}
+      {/* PARAMETER STRATEGI (TARGET ROAS, TARGET PROFIT BERSIH, BUFFER, VOUCHER, PPN) */}
       <Card className="rounded-3xl border border-violet-100 shadow-sm bg-white">
         <CardContent className="p-5 md:p-6 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
@@ -1748,11 +1759,53 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
                 Parameter Strategi Iklan
               </span>
-              <h2 className="text-sm font-bold text-gray-900">Target Profit Bersih & Pengaturan Iklan</h2>
+              <h2 className="text-sm font-bold text-gray-900">Target ROAS, Target Profit Bersih & Pengaturan Iklan</h2>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Target ROAS (Asli dari User) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-gray-700 flex items-center justify-between">
+                <span>Target ROAS (x)</span>
+                <span className="text-violet-700 font-black">{targetRoasInput.toFixed(1)}x</span>
+              </Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  min={0.1}
+                  step={0.5}
+                  value={targetRoasInput}
+                  onChange={(e) => {
+                    const val = Math.max(0.1, Number(e.target.value) || 0.1);
+                    setTargetRoasInput(val);
+                    savePreferences('targetRoasInput', val);
+                  }}
+                  className="rounded-xl h-10 font-bold text-xs"
+                />
+                {[5, 6.5, 8, 10].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setTargetRoasInput(preset);
+                      savePreferences('targetRoasInput', preset);
+                    }}
+                    className={`h-10 px-2 rounded-xl text-xs font-bold transition-all ${
+                      targetRoasInput === preset
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {preset}x
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500 leading-tight">
+                Target ROAS asli minimum yang diinginkan seller.
+              </p>
+            </div>
+
             {/* Target Profit Bersih Setelah Iklan */}
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-gray-700 flex items-center justify-between">
@@ -1791,7 +1844,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 ))}
               </div>
               <p className="text-[11px] text-gray-500 leading-tight">
-                Target Profit Bersih adalah profit minimum yang ingin dipertahankan setelah seluruh biaya. Profit aktual dapat lebih tinggi dari target.
+                Target profit minimum yang ingin dipertahankan setelah seluruh biaya.
               </p>
             </div>
 
@@ -1820,7 +1873,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-400">Ruang keamanan untuk diinput di Seller Center (Default: 15%).</p>
+              <p className="text-[11px] text-gray-400">Ruang keamanan Seller Center tanpa mengubah Target ROAS.</p>
             </div>
 
             {/* Voucher Nominal */}
@@ -1867,6 +1920,27 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               </button>
               <p className="text-[11px] text-gray-400">Centang jika tagihan iklan platform dipotong PPN 11%.</p>
             </div>
+          </div>
+
+          {/* Separation Formula Summary Bar */}
+          <div className="p-3 bg-violet-50/60 rounded-2xl border border-violet-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-gray-600">Rumus Pemisahan Parameter:</span>
+              <span className="bg-white px-2 py-0.5 rounded-lg border border-violet-200 font-black text-violet-900">
+                Target ROAS = {targetRoasInput.toFixed(2)}x
+              </span>
+              <span className="text-gray-400 font-bold">×</span>
+              <span className="bg-white px-2 py-0.5 rounded-lg border border-purple-200 font-black text-purple-900">
+                (1 + Buffer {bufferPct}%)
+              </span>
+              <span className="text-gray-400 font-bold">=</span>
+              <span className="bg-purple-600 text-white px-2.5 py-0.5 rounded-lg font-black shadow-xs">
+                ROAS Setting = {(targetRoasInput * (1 + bufferPct / 100)).toFixed(2)}x
+              </span>
+            </div>
+            <p className="text-[11px] text-violet-700 font-medium">
+              💡 Target ROAS adalah target profit {targetProfitPct}%. ROAS Setting adalah input rekomendasi ke Seller Center.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -2003,6 +2077,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   roasBep={v1Calculation.unitEcon.roasBep}
                   roasTarget={v1Calculation.unitEcon.roasTarget}
                   roasSetting={v1Calculation.unitEcon.roasSetting}
+                  bufferPct={bufferPct}
                   isTargetFeasible={v1Calculation.unitEcon.isTargetFeasible}
                   simRoas={v1SimRoas}
                   setSimRoas={setV1SimRoas}
@@ -2157,6 +2232,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   roasBep={v2Calculation.productEcon.roasBep}
                   roasTarget={v2Calculation.productEcon.roasTarget}
                   roasSetting={v2Calculation.productEcon.roasSetting}
+                  bufferPct={bufferPct}
                   roasWorst={v2Calculation.roasWorst}
                   worstName={v2Calculation.worstVariantName}
                   isTargetFeasible={v2Calculation.productEcon.isTargetFeasible}
@@ -2302,6 +2378,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   roasBep={v3Calculation.groupEcon.roasBep}
                   roasTarget={v3Calculation.groupEcon.roasTarget}
                   roasSetting={v3Calculation.groupEcon.roasSetting}
+                  bufferPct={bufferPct}
                   roasWorst={v3Calculation.roasWorstGroup}
                   worstName={v3Calculation.worstProductName}
                   isTargetFeasible={v3Calculation.groupEcon.isTargetFeasible}
