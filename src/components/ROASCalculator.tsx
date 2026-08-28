@@ -95,7 +95,7 @@ function getMaterialCost(b: HppMaterial, ingredients: Ingredient[] = []): number
 
 function calcHppPerPcs(variant: Variant, ingredients: Ingredient[]): number {
   if (!variant) return 0;
-  const totalMaterials = (variant.bahan || []).reduce(
+  const totalMaterials = (Array.isArray(variant.bahan) ? variant.bahan : []).reduce(
     (acc, b) => acc + getMaterialCost(b, ingredients),
     0
   );
@@ -107,10 +107,9 @@ function calcHppPerPcs(variant: Variant, ingredients: Ingredient[]): number {
  * Ekstraksi konfigurasi fee dari produk dan varian
  */
 function extractFeeRates(product?: Product, variant?: Variant) {
-  const allFees: AdditionalFee[] = [
-    ...(product?.biaya_lain || []),
-    ...(variant?.biaya_lain || []),
-  ];
+  const pFees = Array.isArray(product?.biaya_lain) ? product.biaya_lain : [];
+  const vFees = Array.isArray(variant?.biaya_lain) ? variant.biaya_lain : [];
+  const allFees: AdditionalFee[] = [...pFees, ...vFees];
 
   let percentRate = 0;
   let nominalPerOrder = 0;
@@ -860,45 +859,47 @@ export function ROASCalculator({ products = [], ingredients = [], transactions =
 
   // Sync Products & Variants
   React.useEffect(() => {
-    if (products.length > 0) {
-      if (!products.some((p) => p.id === v1SelectedProductId)) {
-        setV1SelectedProductId(products[0].id);
+    if (Array.isArray(products) && products.length > 0) {
+      if (!products.some((p) => p?.id === v1SelectedProductId)) {
+        setV1SelectedProductId(products[0]?.id || '');
       }
-      if (!products.some((p) => p.id === v2SelectedProductId)) {
-        setV2SelectedProductId(products[0].id);
+      if (!products.some((p) => p?.id === v2SelectedProductId)) {
+        setV2SelectedProductId(products[0]?.id || '');
       }
       if (v3SelectedProductIds.length === 0) {
-        setV3SelectedProductIds(products.slice(0, Math.min(3, products.length)).map((p) => p.id));
+        setV3SelectedProductIds(products.slice(0, Math.min(3, products.length)).map((p) => p?.id).filter(Boolean));
       }
     }
   }, [products, v1SelectedProductId, v2SelectedProductId, v3SelectedProductIds.length]);
 
   const v1ActiveProduct = React.useMemo(() => {
-    return products.find((p) => p.id === v1SelectedProductId) || products[0];
+    if (!Array.isArray(products) || products.length === 0) return null;
+    return products.find((p) => p?.id === v1SelectedProductId) || products[0];
   }, [products, v1SelectedProductId]);
 
   React.useEffect(() => {
-    if (v1ActiveProduct && v1ActiveProduct.varian && v1ActiveProduct.varian.length > 0) {
-      if (!v1ActiveProduct.varian.some((v) => v.id === v1SelectedVariantId)) {
-        setV1SelectedVariantId(v1ActiveProduct.varian[0].id);
+    if (v1ActiveProduct && Array.isArray(v1ActiveProduct.varian) && v1ActiveProduct.varian.length > 0) {
+      if (!v1ActiveProduct.varian.some((v) => v?.id === v1SelectedVariantId)) {
+        setV1SelectedVariantId(v1ActiveProduct.varian[0]?.id || '');
       }
     }
   }, [v1ActiveProduct, v1SelectedVariantId]);
 
   const v1ActiveVariant = React.useMemo(() => {
-    if (!v1ActiveProduct || !v1ActiveProduct.varian) return null;
-    return v1ActiveProduct.varian.find((v) => v.id === v1SelectedVariantId) || v1ActiveProduct.varian[0];
+    if (!v1ActiveProduct || !Array.isArray(v1ActiveProduct.varian) || v1ActiveProduct.varian.length === 0) return null;
+    return v1ActiveProduct.varian.find((v) => v?.id === v1SelectedVariantId) || v1ActiveProduct.varian[0];
   }, [v1ActiveProduct, v1SelectedVariantId]);
 
   const v2ActiveProduct = React.useMemo(() => {
-    return products.find((p) => p.id === v2SelectedProductId) || products[0];
+    if (!Array.isArray(products) || products.length === 0) return null;
+    return products.find((p) => p?.id === v2SelectedProductId) || products[0];
   }, [products, v2SelectedProductId]);
 
   React.useEffect(() => {
-    if (v2ActiveProduct && v2ActiveProduct.varian) {
-      const allIds = v2ActiveProduct.varian.map((v) => v.id);
+    if (v2ActiveProduct && Array.isArray(v2ActiveProduct.varian)) {
+      const allIds = v2ActiveProduct.varian.map((v) => v?.id).filter(Boolean);
       setV2SelectedVariantIds((prev) => {
-        const validPrev = prev.filter((id) => allIds.includes(id));
+        const validPrev = Array.isArray(prev) ? prev.filter((id) => allIds.includes(id)) : [];
         return validPrev.length > 0 ? validPrev : allIds;
       });
     }
@@ -2589,3 +2590,4 @@ export function ROASCalculator({ products = [], ingredients = [], transactions =
 }
 
 export default ROASCalculator;
+// Trigger GitHub Sync Fri Aug 28 03:15:34 PM UTC 2026
