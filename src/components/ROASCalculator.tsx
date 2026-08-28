@@ -2,6 +2,14 @@ import React from 'react';
 import { Product, Variant, Ingredient, HppMaterial, Transaction, AdditionalFee } from '../types';
 import { formatCurrency, calculateDiscountFromCoret } from '../lib/formatUtils';
 import { getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
+import {
+  calculateUnitEconomics,
+  calculateReversePrice,
+  roundPrice,
+  runUnitEconomicsSelfTests,
+  UnitEconomicsResult,
+  ReverseCalcResult,
+} from '../lib/unitEconomics';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, sanitizeData } from '../lib/firebase';
 import { toast } from 'sonner';
@@ -127,93 +135,6 @@ function extractFeeRates(product?: Product, variant?: Variant) {
   }
 
   return { percentRate, nominalPerOrder, nominalPerUnit };
-}
-
-/* ==========================================================================
-   HELPER FUNCTIONS: REVERSE PRICE CALCULATION (CARI HARGA)
-   ========================================================================== */
-function roundPrice(price: number, step: number): number {
-  if (step <= 0) return Math.round(price);
-  return Math.ceil(price / step) * step;
-}
-
-interface ReverseCalcInput {
-  hppPcs: number;            // HPP per unit (bahan + packing)
-  minOrder: number;          // Minimal order per transaksi (unit)
-  nominalPerOrder: number;   // Biaya proses per order (Rp)
-  nominalPerUnit: number;    // Biaya per unit (Rp)
-  percentRate: number;       // Fee marketplace % (0-100)
-  voucherNominal: number;    // Voucher Rp per unit
-  voucherPct: number;        // Voucher % (0-100)
-  targetRoas: number;        // Target ROAS (misal 8.4)
-  targetProfitPct: number;   // Target Profit Bersih Setelah Iklan %
-  includePpn: boolean;       // Status PPN Iklan
-  ppnRate: number;           // Rate PPN Iklan (11%)
-  roundingStep: number;      // 0, 100, 500, 1000
-}
-
-function calculateReversePrice(input: ReverseCalcInput) {
-  const {
-    hppPcs,
-    minOrder,
-    nominalPerOrder,
-    nominalPerUnit,
-    percentRate,
-    voucherNominal,
-    voucherPct,
-    targetRoas,
-    targetProfitPct,
-    includePpn,
-    ppnRate,
-    roundingStep,
-  } = input;
-
-  const M = Math.max(1, minOrder);
-  const E = Math.max(0, hppPcs);
-  const F = Math.max(0, nominalPerOrder);
-  const V_unit = Math.max(0, nominalPerUnit);
-
-  // HPP Real per unit (mengalokasikan biaya proses 1 order ke M unit)
-  const realHppPerUnit = E + (F / M) + V_unit;
-
-  const C = Math.max(0, percentRate) / 100;
-  const V_pct = Math.max(0, voucherPct) / 100;
-  const V_nom = Math.max(0, voucherNominal);
-  const R_target = Math.max(0.01, targetRoas);
-  const T_profit = Math.max(0, targetProfitPct) / 100;
-  const t_ppn = includePpn ? Math.max(0, ppnRate) / 100 : 0;
-
-  // Rasio Beban Biaya Iklan terhadap Harga Jual = (1 + t_ppn) / R_target
-  const adSpendRatio = (1 + t_ppn) / R_target;
-
-  // Koefisien Harga Jual pada sisi kiri persamaan omzet & profit:
-  // (1 - V_pct) * (1 - C) - adSpendRatio - T_profit
-  const priceCoefficient = (1 - V_pct) * (1 - C) - adSpendRatio - T_profit;
-
-  if (priceCoefficient <= 0) {
-    return {
-      isFeasible: false,
-      errorMessage: 'Target ROAS dan Target Profit tidak dapat dicapai secara bersamaan dengan struktur biaya saat ini.',
-      priceExact: 0,
-      priceRecommended: 0,
-      realHppPerUnit,
-      priceCoefficient,
-    };
-  }
-
-  // Pembilang = HPP Real + Voucher Nominal * (1 - Fee%)
-  const numerator = realHppPerUnit + V_nom * (1 - C);
-  const priceExact = numerator / priceCoefficient;
-  const priceRecommended = roundPrice(priceExact, roundingStep);
-
-  return {
-    isFeasible: true,
-    errorMessage: null,
-    priceExact,
-    priceRecommended,
-    realHppPerUnit,
-    priceCoefficient,
-  };
 }
 
 /* ==========================================================================
@@ -1058,81 +979,78 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     setV3ProductWeights(newWeights);
   }, [v3SelectedProductIds, v3HistProductWeights]);
 
+  // Run engine self-tests on mount
+  React.useEffect(() => {
+    const testResults = runUnitEconomicsSelfTests();
+    if (!testResults.success) {
+      console.warn('Unit Economics Self-Test WARNING:', testResults.results);
+    }
+  }, []);
+
   /* ========================================================================
      MATHEMATICAL ENGINE: MODE 1 (IKLAN VARIAN)
-     Sequence: Harga Jual -> Voucher -> Fee Marketplace -> Omzet Real -> HPP Real -> Profit Sebelum Iklan -> Target Profit -> Max Biaya Iklan -> ROAS
      ======================================================================== */
   const v1Calculation = React.useMemo(() => {
     if (!v1ActiveProduct || !v1ActiveVariant) return null;
 
-    const price = Number(v1ActiveVariant.harga_jual) || 0;
+    const basePrice = Number(v1ActiveVariant.harga_jual) || 0;
+    const price = simulatedPriceOverride !== null ? simulatedPriceOverride : basePrice;
     const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
     const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
     const numOrders = Math.max(1, v1OrderSim);
 
     const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
-    const percentRate = feeConfig.percentRate;
-    const nominalPerOrder = feeConfig.nominalPerOrder;
-    const nominalPerUnit = feeConfig.nominalPerUnit;
 
-    const voucherPerUnit = voucherNominalInput;
-    const priceAfterVoucher = Math.max(0, price - voucherPerUnit);
-    const omzetRealPerUnit = priceAfterVoucher * (1 - percentRate / 100);
-
-    const hppRealPerUnit = hppPcs + (nominalPerOrder / minOrder) + nominalPerUnit;
-    const profitBeforeAdsPerUnit = omzetRealPerUnit - hppRealPerUnit;
-    const marginBeforeAdsPct = price > 0 ? (profitBeforeAdsPerUnit / price) * 100 : 0;
-
-    const targetProfitNominalPerUnit = price * (targetProfitPct / 100);
-    const profitAvailableForAdsPerUnit = profitBeforeAdsPerUnit - targetProfitNominalPerUnit;
-    const isTargetFeasible = profitAvailableForAdsPerUnit > 0;
-
-    const t_ppn = includePpn ? ppnRate / 100 : 0;
-    const maxAdSpendPerUnit = isTargetFeasible ? profitAvailableForAdsPerUnit / (1 + t_ppn) : 0;
-
-    const roasBep = profitBeforeAdsPerUnit > 0 ? (price * (1 + t_ppn)) / profitBeforeAdsPerUnit : 0;
-    const roasTarget = isTargetFeasible && maxAdSpendPerUnit > 0 ? price / maxAdSpendPerUnit : 0;
-    const roasSetting = roasTarget > 0 ? roasTarget / (1 - bufferPct / 100) : 0;
-
-    const totalUnits = numOrders * minOrder;
-    const grossRevenue = totalUnits * price;
-    const totalOmzetReal = totalUnits * omzetRealPerUnit;
-    const totalHppReal = totalUnits * hppRealPerUnit;
-    const profitBeforeAdsTotal = totalUnits * profitBeforeAdsPerUnit;
-    const targetProfitTotal = totalUnits * targetProfitNominalPerUnit;
-    const maxAdSpendTotal = totalUnits * maxAdSpendPerUnit;
+    const unitEcon = calculateUnitEconomics({
+      sellingPrice: price,
+      hppPcs,
+      minOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      voucherNominal: voucherNominalInput,
+      voucherPct: 0,
+      includePpn,
+      ppnRate,
+      targetProfitPct,
+      actualRoas: v1SimRoas,
+      targetRoas: v1SimRoas,
+      bufferPct,
+      numOrders,
+    });
 
     return {
       product: v1ActiveProduct,
       variant: v1ActiveVariant,
+      unitEcon,
       price,
-      voucherPerUnit,
-      omzetRealPerUnit,
+      basePrice,
       hppPcs,
       minOrder,
-      nominalPerOrder,
-      nominalPerUnit,
-      hppRealPerUnit,
-      profitBeforeAdsPerUnit,
-      marginBeforeAdsPct,
-      targetProfitNominalPerUnit,
-      profitAvailableForAdsPerUnit,
-      isTargetFeasible,
-      maxAdSpendPerUnit,
-      roasBep,
-      roasTarget,
-      roasSetting,
+      feeConfig,
       numOrders,
-      totalUnits,
-      grossRevenue,
-      totalOmzetReal,
-      totalHppReal,
-      profitBeforeAdsTotal,
-      targetProfitTotal,
-      maxAdSpendTotal,
-      percentRate,
+      totalUnits: unitEcon.totalUnits,
+      grossRevenue: unitEcon.totalGrossRevenue,
+      totalOmzetReal: unitEcon.totalOmzetReal,
+      totalHppReal: unitEcon.totalHppReal,
+      profitBeforeAdsTotal: unitEcon.totalProfitBeforeAds,
+      targetProfitTotal: unitEcon.totalTargetProfit,
+      maxAdSpendTotal: unitEcon.totalMaxAdSpend,
+      isPriceOverridden: simulatedPriceOverride !== null,
     };
-  }, [v1ActiveProduct, v1ActiveVariant, ingredients, v1OrderSim, targetProfitPct, bufferPct, voucherNominalInput, includePpn, ppnRate]);
+  }, [
+    v1ActiveProduct,
+    v1ActiveVariant,
+    simulatedPriceOverride,
+    ingredients,
+    v1OrderSim,
+    v1SimRoas,
+    targetProfitPct,
+    bufferPct,
+    voucherNominalInput,
+    includePpn,
+    ppnRate,
+  ]);
 
   // CARI HARGA Engine: Mode 1
   const v1ReverseCalc = React.useMemo(() => {
@@ -1141,7 +1059,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
     const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
 
-    return calculateReversePrice({
+    const rev = calculateReversePrice({
       hppPcs,
       minOrder,
       nominalPerOrder: feeConfig.nominalPerOrder,
@@ -1150,11 +1068,36 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       targetRoas: targetRoasInput,
-      targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+      targetProfitPct: findPriceTargetProfitPct,
       includePpn,
       ppnRate,
       roundingStep: roundingOption,
     });
+
+    // Run verification pass using calculateUnitEconomics
+    const val = calculateUnitEconomics({
+      sellingPrice: rev.priceRecommended,
+      hppPcs,
+      minOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      voucherNominal: voucherNominalInput,
+      voucherPct: voucherPctInput,
+      includePpn,
+      ppnRate,
+      targetProfitPct: findPriceTargetProfitPct,
+      actualRoas: targetRoasInput,
+      targetRoas: targetRoasInput,
+    });
+
+    return {
+      rev,
+      validation: val,
+      hppPcs,
+      minOrder,
+      feeConfig,
+    };
   }, [
     v1ActiveProduct,
     v1ActiveVariant,
@@ -1162,7 +1105,6 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    useTargetProfitInFindPrice,
     findPriceTargetProfitPct,
     includePpn,
     ppnRate,
@@ -1170,13 +1112,13 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
   ]);
 
   React.useEffect(() => {
-    if (v1Calculation && v1Calculation.roasTarget > 0) {
-      setV1SimRoas((prev) => (prev === 0 ? Number(v1Calculation.roasTarget.toFixed(2)) : prev));
+    if (v1Calculation && v1Calculation.unitEcon.roasTarget > 0) {
+      setV1SimRoas((prev) => (prev === 0 ? Number(v1Calculation.unitEcon.roasTarget.toFixed(2)) : prev));
     }
   }, [v1Calculation]);
 
   /* ========================================================================
-     MATHEMATICAL ENGINE: MODE 2 (IKLAN PRODUK — WEIGHTED AVERAGE)
+     MATHEMATICAL ENGINE: MODE 2 (IKLAN PRODUK — CONSERVATIVE MULTI-VARIANT)
      ======================================================================== */
   const v2Calculation = React.useMemo(() => {
     if (!v2ActiveProduct || !v2ActiveProduct.varian || v2SelectedVariantIds.length === 0) {
@@ -1197,11 +1139,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     let weightedMinOrder = 0;
 
     const feeConfig = extractFeeRates(v2ActiveProduct);
-    const percentRate = feeConfig.percentRate;
-    const nominalPerOrder = feeConfig.nominalPerOrder;
-    const nominalPerUnit = feeConfig.nominalPerUnit;
-
-    const t_ppn = includePpn ? ppnRate / 100 : 0;
+    const numOrders = Math.max(1, v2OrderSim);
 
     const variantDetails = selectedVariants.map((v) => {
       const price = Number(v.harga_jual) || 0;
@@ -1213,11 +1151,23 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       weightedHppPcs += hppPcs * w;
       weightedMinOrder += minOrder * w;
 
-      const vVoucher = voucherNominalInput;
-      const vOmzetReal = Math.max(0, price - vVoucher) * (1 - percentRate / 100);
-      const vHppReal = hppPcs + (nominalPerOrder / minOrder) + nominalPerUnit;
-      const vProfitBefore = vOmzetReal - vHppReal;
-      const vRoasBep = vProfitBefore > 0 ? (price * (1 + t_ppn)) / vProfitBefore : 0;
+      const vEcon = calculateUnitEconomics({
+        sellingPrice: price,
+        hppPcs,
+        minOrder,
+        nominalPerOrder: feeConfig.nominalPerOrder,
+        nominalPerUnit: feeConfig.nominalPerUnit,
+        percentRate: feeConfig.percentRate,
+        voucherNominal: voucherNominalInput,
+        voucherPct: 0,
+        includePpn,
+        ppnRate,
+        targetProfitPct,
+        actualRoas: v2SimRoas,
+        targetRoas: v2SimRoas,
+        bufferPct,
+        numOrders,
+      });
 
       return {
         variant: v,
@@ -1225,39 +1175,34 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
         hppPcs,
         minOrder,
         weightPct: Math.round(w * 100),
-        vOmzetReal,
-        vHppReal,
-        vProfitBefore,
-        vRoasBep,
+        vEcon,
       };
     });
 
     const effectiveMinOrder = Math.max(1, Math.round(weightedMinOrder));
-    const numOrders = Math.max(1, v2OrderSim);
-    const totalUnits = numOrders * effectiveMinOrder;
 
-    const voucherPerUnit = voucherNominalInput;
-    const priceAfterVoucher = Math.max(0, weightedPrice - voucherPerUnit);
-    const omzetRealPerUnit = priceAfterVoucher * (1 - percentRate / 100);
+    const productEcon = calculateUnitEconomics({
+      sellingPrice: weightedPrice,
+      hppPcs: weightedHppPcs,
+      minOrder: effectiveMinOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      voucherNominal: voucherNominalInput,
+      voucherPct: 0,
+      includePpn,
+      ppnRate,
+      targetProfitPct,
+      actualRoas: v2SimRoas,
+      targetRoas: v2SimRoas,
+      bufferPct,
+      numOrders,
+    });
 
-    const hppRealPerUnit = weightedHppPcs + (nominalPerOrder / effectiveMinOrder) + nominalPerUnit;
-    const profitBeforeAdsPerUnit = omzetRealPerUnit - hppRealPerUnit;
-    const marginBeforeAdsPct = weightedPrice > 0 ? (profitBeforeAdsPerUnit / weightedPrice) * 100 : 0;
-
-    const targetProfitNominalPerUnit = weightedPrice * (targetProfitPct / 100);
-    const profitAvailableForAdsPerUnit = profitBeforeAdsPerUnit - targetProfitNominalPerUnit;
-    const isTargetFeasible = profitAvailableForAdsPerUnit > 0;
-
-    const maxAdSpendPerUnit = isTargetFeasible ? profitAvailableForAdsPerUnit / (1 + t_ppn) : 0;
-
-    const roasBep = profitBeforeAdsPerUnit > 0 ? (weightedPrice * (1 + t_ppn)) / profitBeforeAdsPerUnit : 0;
-    const roasTarget = isTargetFeasible && maxAdSpendPerUnit > 0 ? weightedPrice / maxAdSpendPerUnit : 0;
-    const roasSetting = roasTarget > 0 ? roasTarget / (1 - bufferPct / 100) : 0;
-
-    let worstVariant = variantDetails[0];
+    let worstDetail = variantDetails[0];
     variantDetails.forEach((vd) => {
-      if (vd.vRoasBep > (worstVariant?.vRoasBep || 0)) {
-        worstVariant = vd;
+      if (vd.vEcon.roasBep > (worstDetail?.vEcon.roasBep || 0)) {
+        worstDetail = vd;
       }
     });
 
@@ -1267,27 +1212,27 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       variantDetails,
       effectiveMinOrder,
       numOrders,
-      totalUnits,
       weightedPrice,
       weightedHppPcs,
-      voucherPerUnit,
-      omzetRealPerUnit,
-      hppRealPerUnit,
-      profitBeforeAdsPerUnit,
-      marginBeforeAdsPct,
-      targetProfitNominalPerUnit,
-      profitAvailableForAdsPerUnit,
-      isTargetFeasible,
-      maxAdSpendPerUnit,
-      roasBep,
-      roasTarget,
-      roasSetting,
-      roasWorst: worstVariant ? worstVariant.vRoasBep : 0,
-      worstVariantName: worstVariant?.variant?.nama || '-',
+      productEcon,
+      roasWorst: worstDetail ? worstDetail.vEcon.roasBep : 0,
+      worstVariantName: worstDetail?.variant?.nama || '-',
     };
-  }, [v2ActiveProduct, v2SelectedVariantIds, ingredients, v2VariantWeights, v2OrderSim, targetProfitPct, bufferPct, voucherNominalInput, includePpn, ppnRate]);
+  }, [
+    v2ActiveProduct,
+    v2SelectedVariantIds,
+    ingredients,
+    v2VariantWeights,
+    v2OrderSim,
+    v2SimRoas,
+    targetProfitPct,
+    bufferPct,
+    voucherNominalInput,
+    includePpn,
+    ppnRate,
+  ]);
 
-  // CARI HARGA Engine: Mode 2
+  // CARI HARGA Engine: Mode 2 (CONSERVATIVE PRICING)
   const v2ReverseCalc = React.useMemo(() => {
     if (!v2ActiveProduct || !v2ActiveProduct.varian || v2SelectedVariantIds.length === 0) return null;
     const selectedVariants = v2ActiveProduct.varian.filter((v) => v2SelectedVariantIds.includes(v.id));
@@ -1299,17 +1244,13 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       normWeights[v.id] = (v2VariantWeights[v.id] || 0) / totalWeightSum;
     });
 
-    let weightedHpp = 0;
-    let weightedMinOrder = 0;
     const feeConfig = extractFeeRates(v2ActiveProduct);
 
+    // 1. Calculate individual reverse price per variant
     const variantReverseDetails = selectedVariants.map((v) => {
       const hppPcs = calcHppPerPcs(v, ingredients);
       const minOrder = Math.max(1, Number(v.min_order) || 1);
       const w = normWeights[v.id] || 0;
-
-      weightedHpp += hppPcs * w;
-      weightedMinOrder += minOrder * w;
 
       const singleRev = calculateReversePrice({
         hppPcs,
@@ -1320,7 +1261,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
         voucherNominal: voucherNominalInput,
         voucherPct: voucherPctInput,
         targetRoas: targetRoasInput,
-        targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
+        targetProfitPct: findPriceTargetProfitPct,
         includePpn,
         ppnRate,
         roundingStep: roundingOption,
@@ -1335,29 +1276,58 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       };
     });
 
-    const effectiveMinOrder = Math.max(1, Math.round(weightedMinOrder));
+    // 2. CONSERVATIVE PRICING: Find heaviest variant (highest required exact price)
+    let maxRequiredPriceExact = 0;
+    let heaviestDetail = variantReverseDetails[0];
 
-    const weightedRev = calculateReversePrice({
-      hppPcs: weightedHpp,
-      minOrder: effectiveMinOrder,
-      nominalPerOrder: feeConfig.nominalPerOrder,
-      nominalPerUnit: feeConfig.nominalPerUnit,
-      percentRate: feeConfig.percentRate,
-      voucherNominal: voucherNominalInput,
-      voucherPct: voucherPctInput,
-      targetRoas: targetRoasInput,
-      targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
-      includePpn,
-      ppnRate,
-      roundingStep: roundingOption,
+    variantReverseDetails.forEach((vd) => {
+      if (vd.rev.priceExact > maxRequiredPriceExact) {
+        maxRequiredPriceExact = vd.rev.priceExact;
+        heaviestDetail = vd;
+      }
+    });
+
+    const conservativePriceRecommended = roundPrice(maxRequiredPriceExact, roundingOption);
+
+    // 3. VALIDATION PASS FOR EVERY VARIANT AT THE CONSERVATIVE PRICE
+    let allVariantsPassed = true;
+    const conservativeValidationDetails = variantReverseDetails.map((vd) => {
+      const val = calculateUnitEconomics({
+        sellingPrice: conservativePriceRecommended,
+        hppPcs: vd.hppPcs,
+        minOrder: vd.minOrder,
+        nominalPerOrder: feeConfig.nominalPerOrder,
+        nominalPerUnit: feeConfig.nominalPerUnit,
+        percentRate: feeConfig.percentRate,
+        voucherNominal: voucherNominalInput,
+        voucherPct: voucherPctInput,
+        includePpn,
+        ppnRate,
+        targetProfitPct: findPriceTargetProfitPct,
+        actualRoas: targetRoasInput,
+        targetRoas: targetRoasInput,
+      });
+
+      if (!val.isTargetFeasible || val.actualProfitPercent < (findPriceTargetProfitPct - 0.05)) {
+        allVariantsPassed = false;
+      }
+
+      return {
+        variant: vd.variant,
+        weightPct: vd.weightPct,
+        hppPcs: vd.hppPcs,
+        validation: val,
+      };
     });
 
     return {
-      weightedRev,
-      effectiveMinOrder,
-      weightedHpp,
-      feeConfig,
+      conservativePriceRecommended,
+      maxRequiredPriceExact,
+      heaviestVariantName: heaviestDetail?.variant?.nama || '-',
+      heaviestHpp: heaviestDetail?.hppPcs || 0,
+      isConservativeFeasible: allVariantsPassed && conservativePriceRecommended > 0,
       variantReverseDetails,
+      conservativeValidationDetails,
     };
   }, [
     v2ActiveProduct,
@@ -1367,7 +1337,6 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    useTargetProfitInFindPrice,
     findPriceTargetProfitPct,
     includePpn,
     ppnRate,
@@ -1375,8 +1344,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
   ]);
 
   React.useEffect(() => {
-    if (v2Calculation && v2Calculation.roasTarget > 0) {
-      setV2SimRoas((prev) => (prev === 0 ? Number(v2Calculation.roasTarget.toFixed(2)) : prev));
+    if (v2Calculation && v2Calculation.productEcon.roasTarget > 0) {
+      setV2SimRoas((prev) => (prev === 0 ? Number(v2Calculation.productEcon.roasTarget.toFixed(2)) : prev));
     }
   }, [v2Calculation]);
 
@@ -1391,11 +1360,11 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
 
     const totalProductWeightSum =
       groupProds.reduce((sum, p) => sum + (v3ProductWeights[p.id] || 0), 0) || 100;
-    const t_ppn = includePpn ? ppnRate / 100 : 0;
+    const numOrders = Math.max(1, v3OrderSim);
 
     let groupWeightedPrice = 0;
-    let groupOmzetReal = 0;
-    let groupHppReal = 0;
+    let groupWeightedHppPcs = 0;
+    let groupWeightedMinOrder = 0;
 
     const productBreakdown = groupProds.map((prod) => {
       const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
@@ -1422,15 +1391,27 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       const pMinOrder = Math.max(1, Math.round(pWeightedMinOrder));
       const pFeeConfig = extractFeeRates(prod);
 
-      const pVoucher = voucherNominalInput;
-      const pOmzetReal = Math.max(0, pWeightedPrice - pVoucher) * (1 - pFeeConfig.percentRate / 100);
-      const pHppReal = pWeightedHppPcs + (pFeeConfig.nominalPerOrder / pMinOrder) + pFeeConfig.nominalPerUnit;
-      const pProfitBefore = pOmzetReal - pHppReal;
-      const pRoasBep = pProfitBefore > 0 ? (pWeightedPrice * (1 + t_ppn)) / pProfitBefore : 0;
-
       groupWeightedPrice += pWeightedPrice * prodWeight;
-      groupOmzetReal += pOmzetReal * prodWeight;
-      groupHppReal += pHppReal * prodWeight;
+      groupWeightedHppPcs += pWeightedHppPcs * prodWeight;
+      groupWeightedMinOrder += pMinOrder * prodWeight;
+
+      const pEcon = calculateUnitEconomics({
+        sellingPrice: pWeightedPrice,
+        hppPcs: pWeightedHppPcs,
+        minOrder: pMinOrder,
+        nominalPerOrder: pFeeConfig.nominalPerOrder,
+        nominalPerUnit: pFeeConfig.nominalPerUnit,
+        percentRate: pFeeConfig.percentRate,
+        voucherNominal: voucherNominalInput,
+        voucherPct: 0,
+        includePpn,
+        ppnRate,
+        targetProfitPct,
+        actualRoas: v3SimRoas,
+        targetRoas: v3SimRoas,
+        bufferPct,
+        numOrders,
+      });
 
       return {
         product: prod,
@@ -1439,30 +1420,34 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
         minOrder: pMinOrder,
         weightedPrice: pWeightedPrice,
         weightedHppPcs: pWeightedHppPcs,
-        omzetReal: pOmzetReal,
-        hppReal: pHppReal,
-        profitBeforeAds: pProfitBefore,
-        marginBeforeAdsPct: pWeightedPrice > 0 ? (pProfitBefore / pWeightedPrice) * 100 : 0,
-        roasBep: pRoasBep,
+        pEcon,
       };
     });
 
-    const profitBeforeAdsGroup = groupOmzetReal - groupHppReal;
-    const marginBeforeAdsPct = groupWeightedPrice > 0 ? (profitBeforeAdsGroup / groupWeightedPrice) * 100 : 0;
+    const effectiveMinOrder = Math.max(1, Math.round(groupWeightedMinOrder));
+    const defaultFeeConfig = extractFeeRates(groupProds[0]);
 
-    const targetProfitNominalGroup = groupWeightedPrice * (targetProfitPct / 100);
-    const profitAvailableForAdsGroup = profitBeforeAdsGroup - targetProfitNominalGroup;
-    const isTargetFeasible = profitAvailableForAdsGroup > 0;
-
-    const maxAdSpendGroup = isTargetFeasible ? profitAvailableForAdsGroup / (1 + t_ppn) : 0;
-
-    const roasBepGroup = profitBeforeAdsGroup > 0 ? (groupWeightedPrice * (1 + t_ppn)) / profitBeforeAdsGroup : 0;
-    const roasTargetGroup = isTargetFeasible && maxAdSpendGroup > 0 ? groupWeightedPrice / maxAdSpendGroup : 0;
-    const roasSettingGroup = roasTargetGroup > 0 ? roasTargetGroup / (1 - bufferPct / 100) : 0;
+    const groupEcon = calculateUnitEconomics({
+      sellingPrice: groupWeightedPrice,
+      hppPcs: groupWeightedHppPcs,
+      minOrder: effectiveMinOrder,
+      nominalPerOrder: defaultFeeConfig.nominalPerOrder,
+      nominalPerUnit: defaultFeeConfig.nominalPerUnit,
+      percentRate: defaultFeeConfig.percentRate,
+      voucherNominal: voucherNominalInput,
+      voucherPct: 0,
+      includePpn,
+      ppnRate,
+      targetProfitPct,
+      actualRoas: v3SimRoas,
+      targetRoas: v3SimRoas,
+      bufferPct,
+      numOrders,
+    });
 
     let worstProduct = productBreakdown[0];
     productBreakdown.forEach((pb) => {
-      if (pb.roasBep > (worstProduct?.roasBep || 0)) {
+      if (pb.pEcon.roasBep > (worstProduct?.pEcon.roasBep || 0)) {
         worstProduct = pb;
       }
     });
@@ -1471,22 +1456,27 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       groupName: v3GroupName,
       productsCount: groupProds.length,
       groupWeightedPrice,
-      groupOmzetReal,
-      groupHppReal,
-      profitBeforeAdsGroup,
-      marginBeforeAdsPct,
-      targetProfitNominalGroup,
-      profitAvailableForAdsGroup,
-      isTargetFeasible,
-      maxAdSpendGroup,
-      roasBepGroup,
-      roasTargetGroup,
-      roasSettingGroup,
-      roasWorstGroup: worstProduct ? worstProduct.roasBep : 0,
+      groupWeightedHppPcs,
+      groupEcon,
+      roasWorstGroup: worstProduct ? worstProduct.pEcon.roasBep : 0,
       worstProductName: worstProduct?.product?.nama || '-',
       productBreakdown,
     };
-  }, [v3SelectedProductIds, products, v3ProductWeights, v3GroupProductVariants, ingredients, targetProfitPct, bufferPct, voucherNominalInput, includePpn, ppnRate, v3GroupName]);
+  }, [
+    v3SelectedProductIds,
+    products,
+    v3ProductWeights,
+    v3GroupProductVariants,
+    ingredients,
+    v3OrderSim,
+    v3SimRoas,
+    targetProfitPct,
+    bufferPct,
+    voucherNominalInput,
+    includePpn,
+    ppnRate,
+    v3GroupName,
+  ]);
 
   // CARI HARGA Engine: Mode 3
   const v3ReverseCalc = React.useMemo(() => {
@@ -1502,44 +1492,84 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
       const allVariants = prod.varian || [];
       const activeVarIds = v3GroupProductVariants[prod.id] || allVariants.map((v) => v.id);
       const activeVariants = allVariants.filter((v) => activeVarIds.includes(v.id));
-      const vCount = Math.max(1, activeVariants.length);
-
-      let pWeightedHpp = 0;
-      let pWeightedMinOrder = 0;
-
-      activeVariants.forEach((v) => {
-        const vHpp = calcHppPerPcs(v, ingredients);
-        const vMin = Math.max(1, Number(v.min_order) || 1);
-        const vShare = 1 / vCount;
-
-        pWeightedHpp += vHpp * vShare;
-        pWeightedMinOrder += vMin * vShare;
-      });
-
-      const pMinOrder = Math.max(1, Math.round(pWeightedMinOrder));
       const pFeeConfig = extractFeeRates(prod);
 
-      const rev = calculateReversePrice({
-        hppPcs: pWeightedHpp,
-        minOrder: pMinOrder,
-        nominalPerOrder: pFeeConfig.nominalPerOrder,
-        nominalPerUnit: pFeeConfig.nominalPerUnit,
-        percentRate: pFeeConfig.percentRate,
-        voucherNominal: voucherNominalInput,
-        voucherPct: voucherPctInput,
-        targetRoas: targetRoasInput,
-        targetProfitPct: useTargetProfitInFindPrice ? findPriceTargetProfitPct : 0,
-        includePpn,
-        ppnRate,
-        roundingStep: roundingOption,
+      // Find conservative price across variants in this product
+      let pMaxExact = 0;
+      let pHeaviestVar = activeVariants[0];
+
+      const variantRevList = activeVariants.map((v) => {
+        const vHpp = calcHppPerPcs(v, ingredients);
+        const vMin = Math.max(1, Number(v.min_order) || 1);
+        const singleRev = calculateReversePrice({
+          hppPcs: vHpp,
+          minOrder: vMin,
+          nominalPerOrder: pFeeConfig.nominalPerOrder,
+          nominalPerUnit: pFeeConfig.nominalPerUnit,
+          percentRate: pFeeConfig.percentRate,
+          voucherNominal: voucherNominalInput,
+          voucherPct: voucherPctInput,
+          targetRoas: targetRoasInput,
+          targetProfitPct: findPriceTargetProfitPct,
+          includePpn,
+          ppnRate,
+          roundingStep: roundingOption,
+        });
+
+        if (singleRev.priceExact > pMaxExact) {
+          pMaxExact = singleRev.priceExact;
+          pHeaviestVar = v;
+        }
+
+        return {
+          variant: v,
+          vHpp,
+          vMin,
+          rev: singleRev,
+        };
+      });
+
+      const pConservativePrice = roundPrice(pMaxExact, roundingOption);
+
+      // Validation pass for this product
+      let pAllPassed = true;
+      const pValidationList = variantRevList.map((vr) => {
+        const val = calculateUnitEconomics({
+          sellingPrice: pConservativePrice,
+          hppPcs: vr.vHpp,
+          minOrder: vr.vMin,
+          nominalPerOrder: pFeeConfig.nominalPerOrder,
+          nominalPerUnit: pFeeConfig.nominalPerUnit,
+          percentRate: pFeeConfig.percentRate,
+          voucherNominal: voucherNominalInput,
+          voucherPct: voucherPctInput,
+          includePpn,
+          ppnRate,
+          targetProfitPct: findPriceTargetProfitPct,
+          actualRoas: targetRoasInput,
+          targetRoas: targetRoasInput,
+        });
+
+        if (!val.isTargetFeasible || val.actualProfitPercent < (findPriceTargetProfitPct - 0.05)) {
+          pAllPassed = false;
+        }
+
+        return {
+          variant: vr.variant,
+          validation: val,
+        };
       });
 
       return {
         product: prod,
         weightPct: Math.round(prodWeight * 100),
-        weightedHpp: pWeightedHpp,
+        heaviestVarName: pHeaviestVar?.nama || '-',
+        pConservativePrice,
+        pMaxExact,
+        pIsFeasible: pAllPassed && pConservativePrice > 0,
         feeConfig: pFeeConfig,
-        rev,
+        variantRevList,
+        pValidationList,
       };
     });
 
@@ -1555,7 +1585,6 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    useTargetProfitInFindPrice,
     findPriceTargetProfitPct,
     includePpn,
     ppnRate,
@@ -1563,8 +1592,8 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
   ]);
 
   React.useEffect(() => {
-    if (v3Calculation && v3Calculation.roasTargetGroup > 0) {
-      setV3SimRoas((prev) => (prev === 0 ? Number(v3Calculation.roasTargetGroup.toFixed(2)) : prev));
+    if (v3Calculation && v3Calculation.groupEcon.roasTarget > 0) {
+      setV3SimRoas((prev) => (prev === 0 ? Number(v3Calculation.groupEcon.roasTarget.toFixed(2)) : prev));
     }
   }, [v3Calculation]);
 
