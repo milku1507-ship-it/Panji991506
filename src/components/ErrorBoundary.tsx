@@ -32,10 +32,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       let errorMessage = "Terjadi kesalahan yang tidak terduga.";
+      let detailText = "";
       
       try {
-        // Try to parse Firestore JSON error
         const message = this.state.error?.message || String(this.state.error);
+        detailText = this.state.error?.stack || message;
         if (message.startsWith('{')) {
           const parsed = JSON.parse(message);
           if (parsed.error) {
@@ -54,7 +55,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
       return (
         <div className="min-h-screen flex items-center justify-center bg-[#F5F7FA] p-6">
-          <div className="max-w-md w-full bg-white p-8 rounded-[2.5rem] shadow-sm text-center space-y-6">
+          <div className="max-w-lg w-full bg-white p-8 rounded-[2.5rem] shadow-sm text-center space-y-6">
             <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto">
               <AlertCircle className="w-8 h-8 text-red-500" />
             </div>
@@ -62,6 +63,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <h2 className="text-2xl font-black text-[#1A1A2E]">Waduh, Ada Masalah!</h2>
               <p className="text-gray-500 font-medium">{errorMessage}</p>
             </div>
+
+            {detailText && (
+              <div className="text-left bg-slate-900 text-slate-100 p-4 rounded-2xl text-xs font-mono overflow-auto max-h-48 whitespace-pre-wrap select-all border border-slate-800">
+                <p className="text-red-400 font-bold mb-1">Detail Error:</p>
+                {detailText}
+              </div>
+            )}
+
             <Button 
               onClick={() => window.location.reload()}
               className="w-full h-12 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-200"

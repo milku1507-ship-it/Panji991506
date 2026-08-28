@@ -76,8 +76,8 @@ const STORAGE_KEY = 'ceumilan_roas_engine_v5';
 /* ==========================================================================
    HELPER FUNCTIONS: HPP & BIAYA UNIT (SINGLE SOURCE OF TRUTH)
    ========================================================================== */
-function getMaterialCost(b: HppMaterial, ingredients: Ingredient[]): number {
-  const ingredient = ingredients.find((i) => i.id === b.ingredientId);
+function getMaterialCost(b: HppMaterial, ingredients: Ingredient[] = []): number {
+  const ingredient = (ingredients || []).find((i) => i.id === b.ingredientId);
   let price = b.harga;
   let usage = Number(b.qty) || 0;
   if (ingredient) {
@@ -707,7 +707,7 @@ function ROASResultDisplay({
 /* ==========================================================================
    MAIN COMPONENT: ROAS CALCULATOR
    ========================================================================== */
-export function ROASCalculator({ products, ingredients, transactions, user }: Props) {
+export function ROASCalculator({ products = [], ingredients = [], transactions = [], user }: Props) {
   // Mode Iklan: Varian, Produk, atau Grup
   const [adMode, setAdMode] = React.useState<'variant' | 'product' | 'group'>('variant');
   // Mode Perhitungan: CARI ROAS vs CARI HARGA
@@ -828,7 +828,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
   // Load Preferences
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_${user.uid}`);
+      const saved = localStorage.getItem(`${STORAGE_KEY}_${user?.uid || 'guest'}`);
       if (saved) {
         const data = JSON.parse(saved);
         if (data.adMode) setAdMode(data.adMode);
@@ -843,18 +843,18 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
         if (data.v3GroupName) setV3GroupName(data.v3GroupName);
       }
     } catch {}
-  }, [user.uid]);
+  }, [user?.uid]);
 
   const savePreferences = React.useCallback(
     (key: string, val: any) => {
       try {
-        const saved = localStorage.getItem(`${STORAGE_KEY}_${user.uid}`);
+        const saved = localStorage.getItem(`${STORAGE_KEY}_${user?.uid || 'guest'}`);
         const data = saved ? JSON.parse(saved) : {};
         data[key] = val;
-        localStorage.setItem(`${STORAGE_KEY}_${user.uid}`, JSON.stringify(data));
+        localStorage.setItem(`${STORAGE_KEY}_${user?.uid || 'guest'}`, JSON.stringify(data));
       } catch {}
     },
-    [user.uid]
+    [user?.uid]
   );
 
   // Sync Products & Variants
