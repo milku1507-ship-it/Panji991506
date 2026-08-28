@@ -94,6 +94,7 @@ function getMaterialCost(b: HppMaterial, ingredients: Ingredient[]): number {
 }
 
 function calcHppPerPcs(variant: Variant, ingredients: Ingredient[]): number {
+  if (!variant) return 0;
   const totalMaterials = (variant.bahan || []).reduce(
     (acc, b) => acc + getMaterialCost(b, ingredients),
     0
@@ -149,7 +150,7 @@ function getHistoricalVariantSales(productId: string, transactions?: Transaction
     if (tx.penjualan_detail) {
       tx.penjualan_detail.forEach((pd) => {
         if (pd.produk_id === productId) {
-          pd.varian.forEach((v) => {
+          (pd.varian || []).forEach((v) => {
             const q = Number(v.qty) || 0;
             qtyMap[v.varian_id] = (qtyMap[v.varian_id] || 0) + q;
             totalQty += q;
@@ -179,7 +180,7 @@ function getHistoricalProductSales(productIds: string[], transactions?: Transact
       tx.penjualan_detail.forEach((pd) => {
         if (productIds.includes(pd.produk_id)) {
           let itemQty = 0;
-          pd.varian.forEach((v) => {
+          (pd.varian || []).forEach((v) => {
             itemQty += Number(v.qty) || 0;
           });
           qtyMap[pd.produk_id] = (qtyMap[pd.produk_id] || 0) + itemQty;
@@ -729,7 +730,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
 
   // Mode 1: Varian States
   const [v1SelectedProductId, setV1SelectedProductId] = React.useState<string>(() => products[0]?.id || '');
-  const [v1SelectedVariantId, setV1SelectedVariantId] = React.useState<string>(() => products[0]?.varian[0]?.id || '');
+  const [v1SelectedVariantId, setV1SelectedVariantId] = React.useState<string>(() => products[0]?.varian?.[0]?.id || '');
   const [v1OrderSim, setV1OrderSim] = React.useState<number>(10);
   const [v1SimRoas, setV1SimRoas] = React.useState<number>(0);
 
@@ -796,7 +797,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
     setIsApplyingPrice(true);
 
     try {
-      const updatedVariants = product.varian.map((v) => {
+      const updatedVariants = (product.varian || []).map((v) => {
         if (v.id === variant.id) {
           return {
             ...v,
@@ -1093,6 +1094,11 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
 
     return {
       rev,
+      priceRecommended: rev.priceRecommended,
+      priceExact: rev.priceExact,
+      realHppPerUnit: rev.realHppPerUnit,
+      isFeasible: rev.isFeasible,
+      errorMessage: rev.errorMessage,
       validation: val,
       hppPcs,
       minOrder,
@@ -1885,7 +1891,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                             <SelectValue placeholder="Pilih varian..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {v1ActiveProduct?.varian.map((v) => (
+                            {(v1ActiveProduct?.varian || []).map((v) => (
                               <SelectItem key={v.id} value={v.id} className="text-xs">
                                 {v.nama} — {formatCurrency(v.harga_jual, true)}{v.harga_coret && v.harga_coret > v.harga_jual ? ` (Coret: ${formatCurrency(v.harga_coret, true)})` : ''}
                               </SelectItem>
@@ -1968,7 +1974,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                           <SelectContent>
                             {products.map((p) => (
                               <SelectItem key={p.id} value={p.id} className="text-xs">
-                                {p.nama} — {p.varian.length} Varian
+                                {p.nama} — {(p.varian || []).length} Varian
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1982,7 +1988,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                           </Label>
 
                           <div className="space-y-2.5">
-                            {v2ActiveProduct.varian.map((v) => {
+                            {(v2ActiveProduct.varian || []).map((v) => {
                               const isChecked = v2SelectedVariantIds.includes(v.id);
                               const hppPcs = calcHppPerPcs(v, ingredients);
 
@@ -2155,7 +2161,7 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                         >
                           <div className="space-y-0.5 min-w-0 flex-1">
                             <p className="text-xs font-bold text-gray-900 truncate">{prod.nama}</p>
-                            <p className="text-[11px] text-gray-500">{prod.varian.length} varian terpilih</p>
+                            <p className="text-[11px] text-gray-500">{(prod.varian || []).length} varian terpilih</p>
                           </div>
 
                           <div className="flex items-center gap-2.5 shrink-0">
@@ -2386,12 +2392,12 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
 
                 <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row items-baseline justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold text-gray-500 uppercase">HARGA JUAL PRODUK REKOMENDASI (AVERAGE)</p>
+                    <p className="text-xs font-bold text-gray-500 uppercase">HARGA JUAL PRODUK REKOMENDASI (KONSERVATIF)</p>
                     <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
-                      {formatCurrency(v2ReverseCalc.weightedRev.priceRecommended)}
+                      {formatCurrency(v2ReverseCalc.conservativePriceRecommended)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      HPP Rata-Rata: <strong>{formatCurrency(v2ReverseCalc.weightedHpp)}</strong>
+                      HPP Varian Kritis ({v2ReverseCalc.heaviestVariantName}): <strong>{formatCurrency(v2ReverseCalc.heaviestHpp)}</strong>
                     </p>
                   </div>
                 </div>
@@ -2442,16 +2448,16 @@ export function ROASCalculator({ products, ingredients, transactions, user }: Pr
                     </CardHeader>
                     <CardContent className="p-4 space-y-2">
                       <p className="text-[10px] font-bold text-gray-400 uppercase">HARGA JUAL DISARANKAN</p>
-                      <p className="text-2xl font-black text-emerald-600">{formatCurrency(pDetail.rev.priceRecommended)}</p>
-                      <p className="text-xs text-gray-500">HPP: {formatCurrency(pDetail.weightedHpp)}</p>
-                      {pDetail.product.varian && pDetail.product.varian.length > 0 && (
+                      <p className="text-2xl font-black text-emerald-600">{formatCurrency(pDetail.pConservativePrice)}</p>
+                      <p className="text-xs text-gray-500">Varian Kritis: {pDetail.heaviestVarName}</p>
+                      {pDetail.variantRevList?.[0]?.variant && (
                         <Button
                           type="button"
-                          onClick={() => handleApplyPriceRequest(pDetail.product, pDetail.product.varian[0], pDetail.rev.priceRecommended)}
+                          onClick={() => handleApplyPriceRequest(pDetail.product, pDetail.variantRevList[0].variant, pDetail.pConservativePrice)}
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl h-8 mt-2 flex items-center justify-center gap-1.5"
                         >
                           <Tag className="w-3.5 h-3.5" />
-                          <span>TERAPKAN HARGA ({pDetail.product.varian[0].nama})</span>
+                          <span>TERAPKAN HARGA ({pDetail.variantRevList[0].variant.nama})</span>
                         </Button>
                       )}
                     </CardContent>
