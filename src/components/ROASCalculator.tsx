@@ -141,18 +141,21 @@ function extractFeeRates(product?: Product, variant?: Variant) {
    HELPER FUNCTIONS: HISTORICAL SALES DATA
    ========================================================================== */
 function getHistoricalVariantSales(productId: string, transactions?: Transaction[]) {
-  if (!transactions || transactions.length === 0) return { weights: {}, totalUnitsSold: 0 };
+  if (!transactions || !Array.isArray(transactions) || transactions.length === 0) return { weights: {}, totalUnitsSold: 0 };
   const qtyMap: Record<string, number> = {};
   let totalQty = 0;
 
   transactions.forEach((tx) => {
-    if (tx.penjualan_detail) {
+    if (Array.isArray(tx.penjualan_detail)) {
       tx.penjualan_detail.forEach((pd) => {
-        if (pd.produk_id === productId) {
-          (pd.varian || []).forEach((v) => {
-            const q = Number(v.qty) || 0;
-            qtyMap[v.varian_id] = (qtyMap[v.varian_id] || 0) + q;
-            totalQty += q;
+        if (pd?.produk_id === productId) {
+          const varList = Array.isArray(pd.varian) ? pd.varian : [];
+          varList.forEach((v) => {
+            const q = Number(v?.qty) || 0;
+            if (v?.varian_id) {
+              qtyMap[v.varian_id] = (qtyMap[v.varian_id] || 0) + q;
+              totalQty += q;
+            }
           });
         }
       });
@@ -170,17 +173,18 @@ function getHistoricalVariantSales(productId: string, transactions?: Transaction
 }
 
 function getHistoricalProductSales(productIds: string[], transactions?: Transaction[]) {
-  if (!transactions || transactions.length === 0) return { weights: {}, totalUnitsSold: 0 };
+  if (!transactions || !Array.isArray(transactions) || transactions.length === 0) return { weights: {}, totalUnitsSold: 0 };
   const qtyMap: Record<string, number> = {};
   let totalQty = 0;
 
   transactions.forEach((tx) => {
-    if (tx.penjualan_detail) {
+    if (Array.isArray(tx.penjualan_detail)) {
       tx.penjualan_detail.forEach((pd) => {
-        if (productIds.includes(pd.produk_id)) {
+        if (pd?.produk_id && productIds.includes(pd.produk_id)) {
           let itemQty = 0;
-          (pd.varian || []).forEach((v) => {
-            itemQty += Number(v.qty) || 0;
+          const varList = Array.isArray(pd.varian) ? pd.varian : [];
+          varList.forEach((v) => {
+            itemQty += Number(v?.qty) || 0;
           });
           qtyMap[pd.produk_id] = (qtyMap[pd.produk_id] || 0) + itemQty;
           totalQty += itemQty;
@@ -707,7 +711,28 @@ function ROASResultDisplay({
    MAIN COMPONENT: ROAS CALCULATOR
    (Trigger update for GitHub Sync)
    ========================================================================== */
-export function ROASCalculator({ products = [], ingredients = [], transactions = [], user }: Props) {
+export function ROASCalculator({ products: rawProducts = [], ingredients: rawIngredients = [], transactions: rawTransactions = [], user }: Props) {
+  // --- DEFENSIVE SANITIZATION ---
+  // Ensure products is always a valid array and its nested properties (varian, biaya_lain, bahan) are also valid arrays.
+  const products = React.useMemo(() => {
+    const arr = Array.isArray(rawProducts) ? rawProducts : [];
+    return arr.map((p) => ({
+      ...p,
+      biaya_lain: Array.isArray(p?.biaya_lain) ? p.biaya_lain : [],
+      varian: Array.isArray(p?.varian)
+        ? p.varian.map((v) => ({
+            ...v,
+            bahan: Array.isArray(v?.bahan) ? v.bahan : [],
+            biaya_lain: Array.isArray(v?.biaya_lain) ? v.biaya_lain : [],
+          }))
+        : [],
+    }));
+  }, [rawProducts]);
+  
+  const ingredients = Array.isArray(rawIngredients) ? rawIngredients : [];
+  const transactions = Array.isArray(rawTransactions) ? rawTransactions : [];
+  // ------------------------------
+
   // Mode Iklan: Varian, Produk, atau Grup
   const [adMode, setAdMode] = React.useState<'variant' | 'product' | 'group'>('variant');
   // Mode Perhitungan: CARI ROAS vs CARI HARGA
