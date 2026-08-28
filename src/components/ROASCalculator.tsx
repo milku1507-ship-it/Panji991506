@@ -748,8 +748,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   // CARI HARGA specific states
   const [targetRoasInput, setTargetRoasInput] = React.useState<number>(6.5);
   const [voucherPctInput, setVoucherPctInput] = React.useState<number>(0);
-  const [useTargetProfitInFindPrice, setUseTargetProfitInFindPrice] = React.useState<boolean>(true);
-  const [findPriceTargetProfitPct, setFindPriceTargetProfitPct] = React.useState<number>(10);
   const [roundingOption, setRoundingOption] = React.useState<0 | 100 | 500 | 1000>(100);
   const [simulatedPriceOverride, setSimulatedPriceOverride] = React.useState<number | null>(null);
 
@@ -1096,7 +1094,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       targetRoas: targetRoasInput,
-      targetProfitPct: findPriceTargetProfitPct,
+      targetProfitPct,
       includePpn,
       ppnRate,
       roundingStep: roundingOption,
@@ -1114,7 +1112,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       voucherPct: voucherPctInput,
       includePpn,
       ppnRate,
-      targetProfitPct: findPriceTargetProfitPct,
+      targetProfitPct,
       actualRoas: targetRoasInput,
       targetRoas: targetRoasInput,
     });
@@ -1138,7 +1136,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    findPriceTargetProfitPct,
+    targetProfitPct,
     includePpn,
     ppnRate,
     roundingOption,
@@ -1294,7 +1292,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         voucherNominal: voucherNominalInput,
         voucherPct: voucherPctInput,
         targetRoas: targetRoasInput,
-        targetProfitPct: findPriceTargetProfitPct,
+        targetProfitPct,
         includePpn,
         ppnRate,
         roundingStep: roundingOption,
@@ -1336,12 +1334,12 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         voucherPct: voucherPctInput,
         includePpn,
         ppnRate,
-        targetProfitPct: findPriceTargetProfitPct,
+        targetProfitPct,
         actualRoas: targetRoasInput,
         targetRoas: targetRoasInput,
       });
 
-      if (!val.isTargetFeasible || val.actualProfitPercent < (findPriceTargetProfitPct - 0.05)) {
+      if (!val.isTargetFeasible || val.actualProfitPercent < (targetProfitPct - 0.05)) {
         allVariantsPassed = false;
       }
 
@@ -1370,7 +1368,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    findPriceTargetProfitPct,
+    targetProfitPct,
     includePpn,
     ppnRate,
     roundingOption,
@@ -1543,7 +1541,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           voucherNominal: voucherNominalInput,
           voucherPct: voucherPctInput,
           targetRoas: targetRoasInput,
-          targetProfitPct: findPriceTargetProfitPct,
+          targetProfitPct,
           includePpn,
           ppnRate,
           roundingStep: roundingOption,
@@ -1578,12 +1576,12 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           voucherPct: voucherPctInput,
           includePpn,
           ppnRate,
-          targetProfitPct: findPriceTargetProfitPct,
+          targetProfitPct,
           actualRoas: targetRoasInput,
           targetRoas: targetRoasInput,
         });
 
-        if (!val.isTargetFeasible || val.actualProfitPercent < (findPriceTargetProfitPct - 0.05)) {
+        if (!val.isTargetFeasible || val.actualProfitPercent < (targetProfitPct - 0.05)) {
           pAllPassed = false;
         }
 
@@ -1618,7 +1616,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherNominalInput,
     voucherPctInput,
     targetRoasInput,
-    findPriceTargetProfitPct,
+    targetProfitPct,
     includePpn,
     ppnRate,
     roundingOption,
@@ -2302,18 +2300,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   <p className="text-[11px] text-gray-400">Target ROAS di Seller Center (misal 8.4x).</p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700">Target Profit Bersih (%)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={findPriceTargetProfitPct}
-                    onChange={(e) => setFindPriceTargetProfitPct(Math.max(0, Number(e.target.value) || 0))}
-                    className="rounded-xl h-11 font-bold text-sm text-emerald-700"
-                  />
-                  <p className="text-[11px] text-gray-400">Margin profit bersih yang wajib dipertahankan.</p>
-                </div>
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-bold text-gray-700">Opsi Pembulatan Harga</Label>
@@ -2386,7 +2372,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <div className="text-right text-xs space-y-1">
                           <p className="text-gray-500">HPP Real: <strong>{formatCurrency(v1ReverseCalc.realHppPerUnit)}</strong></p>
                           <p className="text-gray-500">Target ROAS: <strong>{targetRoasInput}x</strong></p>
-                          <p className="text-gray-500">Target Net Profit: <strong>{findPriceTargetProfitPct}%</strong></p>
+                          <p className="text-gray-500">Target Net Profit: <strong>{targetProfitPct}%</strong></p>
                         </div>
                       </div>
                     </div>
