@@ -706,6 +706,7 @@ function ROASResultDisplay({
 
 /* ==========================================================================
    MAIN COMPONENT: ROAS CALCULATOR
+   (Trigger update for GitHub Sync)
    ========================================================================== */
 export function ROASCalculator({ products = [], ingredients = [], transactions = [], user }: Props) {
   // Mode Iklan: Varian, Produk, atau Grup
