@@ -241,6 +241,9 @@ interface ROASResultDisplayProps {
   targetProduct?: Product;
   targetVariant?: Variant;
   onApplyPrice?: (product: Product, variant: Variant, newPrice: number) => void;
+  isPriceFromCariHarga?: boolean;
+  masterPrice?: number;
+  onResetPrice?: () => void;
 }
 
 function ROASResultDisplay({
@@ -278,6 +281,9 @@ function ROASResultDisplay({
   targetProduct,
   targetVariant,
   onApplyPrice,
+  isPriceFromCariHarga,
+  masterPrice,
+  onResetPrice,
 }: ROASResultDisplayProps) {
   const t_ppn = includePpn ? ppnRate / 100 : 0;
   
@@ -357,6 +363,45 @@ function ROASResultDisplay({
       </CardHeader>
 
       <CardContent className="p-5 md:p-6 space-y-6">
+        {/* INDICATOR FOR PRICE FROM CARI HARGA */}
+        {isPriceFromCariHarga && (
+          <div className="p-4 bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl flex items-center justify-between gap-3 flex-wrap shadow-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-black text-emerald-950 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ✓ Harga dari Cari Harga: {formatCurrency(hargaJualPcs)}
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-800 font-medium">
+                Harga ini berasal dari rekomendasi Cari Harga dan belum mengubah harga produk {masterPrice !== undefined && masterPrice > 0 ? `(Harga Master: ${formatCurrency(masterPrice)})` : ''}.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {onApplyPrice && targetProduct && targetVariant && (
+                <Button
+                  type="button"
+                  onClick={() => onApplyPrice(targetProduct, targetVariant, hargaJualPcs)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl h-8 px-3.5 shadow-xs flex items-center gap-1.5"
+                >
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>TERAPKAN HARGA</span>
+                </Button>
+              )}
+              {onResetPrice && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onResetPrice}
+                  className="text-xs font-bold rounded-xl h-8 px-3 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                >
+                  Reset ke Harga Master
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 1. INFORMASI MINIMAL ORDER & TRANSPARANSI DEBUG (ATURAN UTAMA 1, 2, 4, 9) */}
         <div className="p-4 rounded-2xl bg-violet-50/70 border border-violet-100 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2 border-b border-violet-200/60 pb-2.5">
@@ -753,6 +798,18 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   const [roundingOption, setRoundingOption] = React.useState<0 | 100 | 500 | 1000>(100);
   const [simulatedPriceOverride, setSimulatedPriceOverride] = React.useState<number | null>(null);
 
+  // Explicit Data Handoff State (CARI HARGA -> CARI ROAS)
+  const [priceHandoff, setPriceHandoff] = React.useState<{
+    source: 'cari-harga';
+    priceSource: 'recommended-price';
+    productId: string;
+    variantId?: string;
+    recommendedPrice?: number;
+    prices?: Record<string, number>;
+    productConservativePrices?: Record<string, number>;
+    timestamp: number;
+  } | null>(null);
+
   // Mode 1: Varian States
   const [v1SelectedProductId, setV1SelectedProductId] = React.useState<string>(() => products[0]?.id || '');
   const [v1SelectedVariantId, setV1SelectedVariantId] = React.useState<string>(() => products[0]?.varian?.[0]?.id || '');
@@ -840,8 +897,22 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const productRef = doc(db, `users/${user.uid}/hpp/${product.id}`);
       await setDoc(productRef, sanitizeData(updatedProduct));
 
-      toast.success('Berhasil menerapkan harga.');
+      toast.success(`Harga master produk ${product.nama} (${variant.nama}) berhasil diperbarui menjadi ${formatCurrency(newPrice)}`);
       setConfirmModalData(null);
+
+      // Cleanly clear price handoff for this variant since it is now master
+      setPriceHandoff((prev) => {
+        if (!prev) return null;
+        if (prev.productId === product.id) {
+          const nextPrices = { ...prev.prices };
+          delete nextPrices[variant.id];
+          if (Object.keys(nextPrices).length === 0 && (!prev.variantId || prev.variantId === variant.id)) {
+            return null;
+          }
+          return { ...prev, prices: nextPrices };
+        }
+        return prev;
+      });
     } catch (error) {
       console.error('Gagal menerapkan harga:', error);
       toast.error('Gagal menerapkan harga.');
@@ -850,18 +921,286 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     }
   }, [confirmModalData, user?.uid]);
 
-  const handleTransferToFindRoas = React.useCallback((targetPrice?: number) => {
-    if (targetPrice !== undefined && targetPrice > 0) {
-      setSimulatedPriceOverride(targetPrice);
-    }
-    // Set simulation ROAS to user's exact Target ROAS
-    setV1SimRoas(targetRoasInput);
-    setV2SimRoas(targetRoasInput);
-    setV3SimRoas(targetRoasInput);
-    setCalcMode('find_roas');
-    const settingRoas = (targetRoasInput * (1 + bufferPct / 100)).toFixed(2);
-    toast.success(`Parameter berhasil diuji ke mode CARI ROAS (Target ROAS: ${targetRoasInput}x, Buffer: +${bufferPct}%, ROAS Setting: ${settingRoas}x)`);
-  }, [targetRoasInput, bufferPct]);
+  // Robust Price Resolution: Priority: 1. incomingRecommendedPrice, 2. manualOverride, 3. productMasterPrice
+  const getEffectiveVariantPrice = React.useCallback(
+    (productId: string, variant: Variant | null | undefined) => {
+      const masterPrice = Number(variant?.harga_jual) || 0;
+      if (!variant) {
+        return {
+          price: masterPrice,
+          source: 'master' as const,
+          isFromCariHarga: false,
+          masterPrice,
+        };
+      }
+
+      // Priority 1: Check Price Handoff from CARI HARGA
+      if (priceHandoff && priceHandoff.source === 'cari-harga') {
+        // A. Direct variantId match
+        if (
+          priceHandoff.variantId &&
+          priceHandoff.variantId === variant.id &&
+          typeof priceHandoff.recommendedPrice === 'number' &&
+          priceHandoff.recommendedPrice > 0
+        ) {
+          const receivedPrice = priceHandoff.recommendedPrice;
+          console.log({
+            receivedPrice,
+            priceSource: 'recommended-price',
+            productMasterPrice: masterPrice,
+            variant: variant.nama,
+          });
+          return {
+            price: receivedPrice,
+            source: 'recommended-price' as const,
+            isFromCariHarga: true,
+            masterPrice,
+          };
+        }
+
+        // B. Check variantId in handoff.prices map
+        if (
+          priceHandoff.prices &&
+          typeof priceHandoff.prices[variant.id] === 'number' &&
+          priceHandoff.prices[variant.id] > 0
+        ) {
+          const receivedPrice = priceHandoff.prices[variant.id];
+          console.log({
+            receivedPrice,
+            priceSource: 'recommended-price',
+            productMasterPrice: masterPrice,
+            variant: variant.nama,
+          });
+          return {
+            price: receivedPrice,
+            source: 'recommended-price' as const,
+            isFromCariHarga: true,
+            masterPrice,
+          };
+        }
+
+        // C. If handoff is for this product with general recommendedPrice
+        if (
+          priceHandoff.productId === productId &&
+          typeof priceHandoff.recommendedPrice === 'number' &&
+          priceHandoff.recommendedPrice > 0 &&
+          (!priceHandoff.variantId || priceHandoff.variantId === variant.id)
+        ) {
+          const receivedPrice = priceHandoff.recommendedPrice;
+          console.log({
+            receivedPrice,
+            priceSource: 'recommended-price',
+            productMasterPrice: masterPrice,
+            variant: variant.nama,
+          });
+          return {
+            price: receivedPrice,
+            source: 'recommended-price' as const,
+            isFromCariHarga: true,
+            masterPrice,
+          };
+        }
+      }
+
+      // Priority 2: Check manual simulated override
+      if (simulatedPriceOverride !== null && typeof simulatedPriceOverride === 'number' && simulatedPriceOverride > 0) {
+        console.log({
+          receivedPrice: simulatedPriceOverride,
+          priceSource: 'recommended-price',
+          productMasterPrice: masterPrice,
+          variant: variant.nama,
+        });
+        return {
+          price: simulatedPriceOverride,
+          source: 'recommended-price' as const,
+          isFromCariHarga: true,
+          masterPrice,
+        };
+      }
+
+      // Priority 3: Fallback to Product Master Price
+      return {
+        price: masterPrice,
+        source: 'master' as const,
+        isFromCariHarga: false,
+        masterPrice,
+      };
+    },
+    [priceHandoff, simulatedPriceOverride]
+  );
+
+  // Reset Handlers for price simulation
+  const handleResetVariantPrice = React.useCallback((productId?: string, variantId?: string) => {
+    setSimulatedPriceOverride(null);
+    setPriceHandoff((prev) => {
+      if (!prev) return null;
+      if (variantId && prev.prices && Object.keys(prev.prices).length > 1) {
+        const nextPrices = { ...prev.prices };
+        delete nextPrices[variantId];
+        return { ...prev, prices: nextPrices };
+      }
+      return null;
+    });
+    toast.info('Harga dikembalikan ke harga master produk');
+  }, []);
+
+  const handleResetProductPrices = React.useCallback((productId?: string) => {
+    setSimulatedPriceOverride(null);
+    setPriceHandoff(null);
+    toast.info('Harga seluruh varian produk dikembalikan ke harga master');
+  }, []);
+
+  const handleResetGroupPrices = React.useCallback((productIds?: string[]) => {
+    setSimulatedPriceOverride(null);
+    setPriceHandoff(null);
+    toast.info('Harga seluruh produk dalam grup dikembalikan ke harga master');
+  }, []);
+
+  // Transfer Handlers for each mode with explicit data handoff
+  const handleTransferVariantToFindRoas = React.useCallback(
+    (product: Product, variant: Variant, recommendedPrice: number) => {
+      console.log({
+        source: 'cari-harga',
+        productId: product.id,
+        variantId: variant.id,
+        recommendedPrice,
+        productMasterPrice: variant.harga_jual,
+      });
+
+      setPriceHandoff({
+        source: 'cari-harga',
+        priceSource: 'recommended-price',
+        productId: product.id,
+        variantId: variant.id,
+        recommendedPrice,
+        prices: { [variant.id]: recommendedPrice },
+        timestamp: Date.now(),
+      });
+
+      setV1SelectedProductId(product.id);
+      setV1SelectedVariantId(variant.id);
+      setV1SimRoas(targetRoasInput);
+      setAdMode('variant');
+      setCalcMode('find_roas');
+
+      const settingRoas = (targetRoasInput * (1 + bufferPct / 100)).toFixed(2);
+      toast.success(
+        `Harga rekomendasi ${formatCurrency(recommendedPrice)} berhasil diuji ke CARI ROAS (Target ROAS: ${targetRoasInput}x, ROAS Setting: ${settingRoas}x)`
+      );
+    },
+    [targetRoasInput, bufferPct]
+  );
+
+  const handleTransferProductToFindRoas = React.useCallback(
+    (
+      product: Product,
+      variantDetails: Array<{ variant: Variant; recommendedPrice: number }>
+    ) => {
+      const pricesMap: Record<string, number> = {};
+      variantDetails.forEach((vd) => {
+        pricesMap[vd.variant.id] = vd.recommendedPrice;
+      });
+
+      console.log({
+        source: 'cari-harga',
+        productId: product.id,
+        prices: pricesMap,
+        productMasterPrice: product.varian?.map((v) => ({ [v.nama]: v.harga_jual })),
+      });
+
+      setPriceHandoff({
+        source: 'cari-harga',
+        priceSource: 'recommended-price',
+        productId: product.id,
+        prices: pricesMap,
+        timestamp: Date.now(),
+      });
+
+      setV2SelectedProductId(product.id);
+      setV2SimRoas(targetRoasInput);
+      setAdMode('product');
+      setCalcMode('find_roas');
+
+      toast.success(`Harga rekomendasi seluruh varian berhasil diteruskan ke mode CARI ROAS`);
+    },
+    [targetRoasInput]
+  );
+
+  const handleTransferSingleVariantFromProduct = React.useCallback(
+    (product: Product, variant: Variant, recommendedPrice: number) => {
+      console.log({
+        source: 'cari-harga',
+        productId: product.id,
+        variantId: variant.id,
+        recommendedPrice,
+        productMasterPrice: variant.harga_jual,
+      });
+
+      setPriceHandoff({
+        source: 'cari-harga',
+        priceSource: 'recommended-price',
+        productId: product.id,
+        variantId: variant.id,
+        recommendedPrice,
+        prices: { [variant.id]: recommendedPrice },
+        timestamp: Date.now(),
+      });
+
+      setV1SelectedProductId(product.id);
+      setV1SelectedVariantId(variant.id);
+      setV1SimRoas(targetRoasInput);
+      setAdMode('variant');
+      setCalcMode('find_roas');
+
+      toast.success(
+        `Harga varian ${variant.nama} (${formatCurrency(recommendedPrice)}) diteruskan ke CARI ROAS`
+      );
+    },
+    [targetRoasInput]
+  );
+
+  const handleTransferGroupToFindRoas = React.useCallback(
+    (
+      productReverseDetails: Array<{
+        product: Product;
+        pConservativePrice: number;
+        variantRevList: Array<{ variant: Variant; rev: { priceRecommended: number } }>;
+      }>
+    ) => {
+      const allPricesMap: Record<string, number> = {};
+      const prodConservativeMap: Record<string, number> = {};
+
+      productReverseDetails.forEach((pd) => {
+        prodConservativeMap[pd.product.id] = pd.pConservativePrice;
+        pd.variantRevList.forEach((vr) => {
+          allPricesMap[vr.variant.id] = vr.rev.priceRecommended;
+        });
+      });
+
+      console.log({
+        source: 'cari-harga',
+        productId: 'group',
+        prices: allPricesMap,
+        productConservativePrices: prodConservativeMap,
+      });
+
+      setPriceHandoff({
+        source: 'cari-harga',
+        priceSource: 'recommended-price',
+        productId: 'group',
+        prices: allPricesMap,
+        productConservativePrices: prodConservativeMap,
+        timestamp: Date.now(),
+      });
+
+      setAdMode('group');
+      setCalcMode('find_roas');
+      setV3SimRoas(targetRoasInput);
+
+      toast.success(`Harga rekomendasi seluruh grup produk diteruskan ke mode CARI ROAS`);
+    },
+    [targetRoasInput]
+  );
 
   // Load Preferences
   React.useEffect(() => {
@@ -1036,8 +1375,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   const v1Calculation = React.useMemo(() => {
     if (!v1ActiveProduct || !v1ActiveVariant) return null;
 
-    const basePrice = Number(v1ActiveVariant.harga_jual) || 0;
-    const price = simulatedPriceOverride !== null ? simulatedPriceOverride : basePrice;
+    const { price, source, isFromCariHarga, masterPrice } = getEffectiveVariantPrice(
+      v1ActiveProduct.id,
+      v1ActiveVariant
+    );
     const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
     const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
     const numOrders = Math.max(1, v1OrderSim);
@@ -1067,7 +1408,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       variant: v1ActiveVariant,
       unitEcon,
       price,
-      basePrice,
+      basePrice: masterPrice,
       hppPcs,
       minOrder,
       feeConfig,
@@ -1079,12 +1420,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       profitBeforeAdsTotal: unitEcon.totalProfitBeforeAds,
       targetProfitTotal: unitEcon.totalTargetProfit,
       maxAdSpendTotal: unitEcon.totalMaxAdSpend,
-      isPriceOverridden: simulatedPriceOverride !== null,
+      isPriceOverridden: isFromCariHarga,
+      priceSource: source,
     };
   }, [
     v1ActiveProduct,
     v1ActiveVariant,
-    simulatedPriceOverride,
+    getEffectiveVariantPrice,
     ingredients,
     v1OrderSim,
     v1SimRoas,
@@ -1187,19 +1529,28 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     });
 
     let weightedPrice = 0;
+    let weightedBasePrice = 0;
     let weightedHppPcs = 0;
     let weightedMinOrder = 0;
+    let anyPriceOverridden = false;
 
     const feeConfig = extractFeeRates(v2ActiveProduct);
     const numOrders = Math.max(1, v2OrderSim);
 
     const variantDetails = selectedVariants.map((v) => {
-      const price = Number(v.harga_jual) || 0;
+      const { price, source, isFromCariHarga, masterPrice } = getEffectiveVariantPrice(
+        v2ActiveProduct.id,
+        v
+      );
+      if (isFromCariHarga) {
+        anyPriceOverridden = true;
+      }
       const hppPcs = calcHppPerPcs(v, ingredients);
       const minOrder = Math.max(1, Number(v.min_order) || 1);
       const w = normWeights[v.id] || 0;
 
       weightedPrice += price * w;
+      weightedBasePrice += masterPrice * w;
       weightedHppPcs += hppPcs * w;
       weightedMinOrder += minOrder * w;
 
@@ -1224,10 +1575,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       return {
         variant: v,
         price,
+        basePrice: masterPrice,
         hppPcs,
         minOrder,
         weightPct: Math.round(w * 100),
         vEcon,
+        isPriceOverridden: isFromCariHarga,
+        priceSource: source,
       };
     });
 
@@ -1265,14 +1619,17 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       effectiveMinOrder,
       numOrders,
       weightedPrice,
+      weightedBasePrice,
       weightedHppPcs,
       productEcon,
+      isPriceOverridden: anyPriceOverridden,
       roasWorst: worstDetail ? worstDetail.vEcon.roasBep : 0,
       worstVariantName: worstDetail?.variant?.nama || '-',
     };
   }, [
     v2ActiveProduct,
     v2SelectedVariantIds,
+    getEffectiveVariantPrice,
     ingredients,
     v2VariantWeights,
     v2OrderSim,
@@ -1417,8 +1774,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     const numOrders = Math.max(1, v3OrderSim);
 
     let groupWeightedPrice = 0;
+    let groupWeightedBasePrice = 0;
     let groupWeightedHppPcs = 0;
     let groupWeightedMinOrder = 0;
+    let anyPriceOverridden = false;
 
     const productBreakdown = groupProds.map((prod) => {
       const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
@@ -1428,16 +1787,21 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const vCount = Math.max(1, activeVariants.length);
 
       let pWeightedPrice = 0;
+      let pWeightedBasePrice = 0;
       let pWeightedHppPcs = 0;
       let pWeightedMinOrder = 0;
 
       activeVariants.forEach((v) => {
+        const { price, isFromCariHarga, masterPrice } = getEffectiveVariantPrice(prod.id, v);
+        if (isFromCariHarga) {
+          anyPriceOverridden = true;
+        }
         const vHpp = calcHppPerPcs(v, ingredients);
-        const vPrice = Number(v.harga_jual) || 0;
         const vMin = Math.max(1, Number(v.min_order) || 1);
         const vShare = 1 / vCount;
 
-        pWeightedPrice += vPrice * vShare;
+        pWeightedPrice += price * vShare;
+        pWeightedBasePrice += masterPrice * vShare;
         pWeightedHppPcs += vHpp * vShare;
         pWeightedMinOrder += vMin * vShare;
       });
@@ -1446,6 +1810,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const pFeeConfig = extractFeeRates(prod);
 
       groupWeightedPrice += pWeightedPrice * prodWeight;
+      groupWeightedBasePrice += pWeightedBasePrice * prodWeight;
       groupWeightedHppPcs += pWeightedHppPcs * prodWeight;
       groupWeightedMinOrder += pMinOrder * prodWeight;
 
@@ -1473,6 +1838,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         activeVariantsCount: activeVariants.length,
         minOrder: pMinOrder,
         weightedPrice: pWeightedPrice,
+        weightedBasePrice: pWeightedBasePrice,
         weightedHppPcs: pWeightedHppPcs,
         pEcon,
       };
@@ -1510,8 +1876,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       groupName: v3GroupName,
       productsCount: groupProds.length,
       groupWeightedPrice,
+      groupWeightedBasePrice,
       groupWeightedHppPcs,
       groupEcon,
+      isPriceOverridden: anyPriceOverridden,
       roasWorstGroup: worstProduct ? worstProduct.pEcon.roasBep : 0,
       worstProductName: worstProduct?.product?.nama || '-',
       productBreakdown,
@@ -1521,6 +1889,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     products,
     v3ProductWeights,
     v3GroupProductVariants,
+    getEffectiveVariantPrice,
     ingredients,
     v3OrderSim,
     v3SimRoas,
@@ -2020,37 +2389,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                       </div>
                     </div>
                   )}
-
-                  {simulatedPriceOverride !== null && (
-                    <div className="p-4 rounded-2xl bg-emerald-50/90 border border-emerald-200 flex items-center justify-between flex-wrap gap-2.5 text-xs text-emerald-900 shadow-xs">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>
-                          Sedang menguji <strong>Harga Simulasi CARI HARGA: {formatCurrency(simulatedPriceOverride)}</strong> (Target ROAS: <strong>{targetRoasInput}x</strong>, Target Profit: <strong>{targetProfitPct}%</strong>)
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {v1ActiveProduct && v1ActiveVariant && (
-                          <Button
-                            type="button"
-                            onClick={() => handleApplyPriceRequest(v1ActiveProduct, v1ActiveVariant, simulatedPriceOverride)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl h-8 px-3"
-                          >
-                            <Tag className="w-3.5 h-3.5 mr-1" />
-                            Terapkan Permanen
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setSimulatedPriceOverride(null)}
-                          className="text-xs font-bold rounded-xl h-8 px-3 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
-                        >
-                          Reset ke Harga Asli ({formatCurrency(Number(v1ActiveVariant?.harga_jual) || 0)})
-                        </Button>
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 
@@ -2061,6 +2399,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   targetProduct={v1Calculation.product}
                   targetVariant={v1Calculation.variant}
                   onApplyPrice={handleApplyPriceRequest}
+                  isPriceFromCariHarga={v1Calculation.isPriceOverridden}
+                  masterPrice={v1Calculation.basePrice}
+                  onResetPrice={() => handleResetVariantPrice(v1Calculation.product.id, v1Calculation.variant.id)}
                   minOrder={v1Calculation.minOrder}
                   hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
                   hargaCoretPcs={v1Calculation.variant.harga_coret}
@@ -2218,6 +2559,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 <ROASResultDisplay
                   modeTitle="Iklan Produk (Weighted Average)"
                   name={v2Calculation.product.nama}
+                  isPriceFromCariHarga={v2Calculation.isPriceOverridden}
+                  masterPrice={v2Calculation.weightedBasePrice}
+                  onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
                   minOrder={v2Calculation.effectiveMinOrder}
                   hargaJualPcs={v2Calculation.weightedPrice}
                   hppPcs={v2Calculation.weightedHppPcs}
@@ -2364,6 +2708,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 <ROASResultDisplay
                   modeTitle="Iklan Grup (Consolidated Portfolio)"
                   name={v3Calculation.groupName}
+                  isPriceFromCariHarga={v3Calculation.isPriceOverridden}
+                  masterPrice={v3Calculation.groupWeightedBasePrice}
+                  onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
                   minOrder={1}
                   hargaJualPcs={v3Calculation.groupWeightedPrice}
                   hppPcs={v3Calculation.groupWeightedHppPcs}
@@ -2472,7 +2819,15 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                       </div>
                       <Button
                         type="button"
-                        onClick={() => handleTransferToFindRoas(v1ReverseCalc.priceRecommended)}
+                        onClick={() => {
+                          if (v1ActiveProduct && v1ActiveVariant) {
+                            handleTransferVariantToFindRoas(
+                              v1ActiveProduct,
+                              v1ActiveVariant,
+                              v1ReverseCalc.priceRecommended
+                            );
+                          }
+                        }}
                         className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm h-9 px-4 flex items-center gap-1.5"
                       >
                         <CheckCircle className="w-4 h-4" />
@@ -2606,7 +2961,17 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   </div>
                   <Button
                     type="button"
-                    onClick={() => handleTransferToFindRoas()}
+                    onClick={() => {
+                      if (v2ActiveProduct && v2ReverseCalc) {
+                        handleTransferProductToFindRoas(
+                          v2ActiveProduct,
+                          v2ReverseCalc.variantReverseDetails.map((vd) => ({
+                            variant: vd.variant,
+                            recommendedPrice: vd.rev.priceRecommended,
+                          }))
+                        );
+                      }
+                    }}
                     className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm h-9 px-4 flex items-center gap-1.5"
                   >
                     <CheckCircle className="w-4 h-4" />
@@ -2692,7 +3057,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               <div className="flex justify-end pt-2">
                 <Button
                   type="button"
-                  onClick={() => handleTransferToFindRoas()}
+                  onClick={() => {
+                    if (v3ReverseCalc) {
+                      handleTransferGroupToFindRoas(v3ReverseCalc.productReverseDetails);
+                    }
+                  }}
                   className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold px-5 shadow-sm h-10 flex items-center gap-2"
                 >
                   <CheckCircle className="w-4 h-4" />
