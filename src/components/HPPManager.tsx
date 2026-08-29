@@ -940,14 +940,18 @@ function VariantPricingInputs({
     lines.push(judul);
     lines.push('');
 
-    const groups = ['Kulit Cireng', 'Bahan Isian', 'Packing', 'Overhead', 'Lainnya'];
+    // Dynamically retrieve all groups to avoid omissions
+    const settingsCats = [...(settings?.kategori_hpp || []), 'Lainnya'];
+    const legacyCats = activeHppVariant.bahan
+      .map(m => m.kelompok)
+      .filter((k): k is string => !!k && k.trim() !== '');
+    const groups = [...new Set([...settingsCats, ...legacyCats])];
+
     let totalCost = 0;
 
     for (const cat of groups) {
       const catMaterials = activeHppVariant.bahan.filter(m => {
-        let mCat = m.kelompok;
-        if (mCat === 'Kulit') mCat = 'Kulit Cireng';
-        if (mCat === 'Isian') mCat = 'Bahan Isian';
+        const mCat = m.kelompok || 'Lainnya';
         return mCat === cat;
       });
       if (catMaterials.length === 0) continue;
