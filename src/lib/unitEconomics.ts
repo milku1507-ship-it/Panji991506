@@ -1,10 +1,4 @@
 import { formatCurrency } from './formatUtils';
-
-/* ==========================================================================
-   GLOBAL UNIT ECONOMICS SERVICE (SINGLE SOURCE OF TRUTH)
-   ========================================================================== */
-
-import { formatCurrency } from './formatUtils';
 import { AdditionalFee } from '../types';
 
 /* ==========================================================================
@@ -18,6 +12,9 @@ export interface ProductFeeDetail {
   amountPerUnit: number;
   amountPerOrder: number;
   amountTotal: number;
+  nominalPerUnit: number;
+  nominalPerOrder: number;
+  isOrderLevel: boolean;
 }
 
 export interface UnitEconomicsParams {
@@ -187,6 +184,9 @@ export function calculateProductEconomics(params: UnitEconomicsParams): UnitEcon
         amountPerUnit,
         amountPerOrder,
         amountTotal: amountPerOrder * numOrders,
+        nominalPerUnit: amountPerUnit,
+        nominalPerOrder: amountPerOrder,
+        isOrderLevel: isOrderLevelFee(fee.nama),
       });
     });
 
@@ -211,6 +211,9 @@ export function calculateProductEconomics(params: UnitEconomicsParams): UnitEcon
         amountPerUnit,
         amountPerOrder: amountPerUnit * minOrder,
         amountTotal: amountPerUnit * minOrder * numOrders,
+        nominalPerUnit: amountPerUnit,
+        nominalPerOrder: amountPerUnit * minOrder,
+        isOrderLevel: false,
       });
     }
     if (aggregateNominalPerOrder > 0) {
@@ -222,6 +225,9 @@ export function calculateProductEconomics(params: UnitEconomicsParams): UnitEcon
         amountPerUnit,
         amountPerOrder: aggregateNominalPerOrder,
         amountTotal: aggregateNominalPerOrder * numOrders,
+        nominalPerUnit: amountPerUnit,
+        nominalPerOrder: aggregateNominalPerOrder,
+        isOrderLevel: true,
       });
     }
     if (aggregateNominalPerUnit > 0) {
@@ -232,6 +238,9 @@ export function calculateProductEconomics(params: UnitEconomicsParams): UnitEcon
         amountPerUnit: aggregateNominalPerUnit,
         amountPerOrder: aggregateNominalPerUnit * minOrder,
         amountTotal: aggregateNominalPerUnit * minOrder * numOrders,
+        nominalPerUnit: aggregateNominalPerUnit,
+        nominalPerOrder: aggregateNominalPerUnit * minOrder,
+        isOrderLevel: false,
       });
     }
   }
@@ -625,6 +634,162 @@ export function calculateReversePrice(input: ReverseCalcInput): ReverseCalcResul
     priceCoefficient,
     validationExact,
     validationRecommended,
+  };
+}
+
+/* ==========================================================================
+   PROMO TANGGAL CANTIK SIMULATION ENGINE (REVERSE CALCULATION)
+   ========================================================================== */
+
+export interface PromoTanggalCantikInput extends ReverseCalcInput {
+  sellingPrice: number;        // Harga Normal / Master (Rp)
+  promoDiscountPct: number;   // Diskon promo % (e.g. 5)
+}
+
+export interface PromoTanggalCantikResult {
+  isFeasible: boolean;
+  errorMessage: string | null;
+  normalPrice: number;                 // Harga Normal (Rp)
+  promoDiscountPct: number;            // Diskon Promo (%)
+  recommendedPromoPrice: number;       // HARGA YANG HARUS DIPASANG (sebelum diskon)
+  discountNominal: number;             // Potongan Promo (Rp)
+  effectivePrice: number;              // Harga Setelah Promo (Rp)
+  hppPcs: number;                      // HPP per unit
+  totalAdditionalCostPerUnit: number;   // Total Biaya Tambahan per unit
+  adSpendBurdenPerUnit: number;        // Biaya Iklan per unit
+  netProfitPerUnit: number;            // Profit Bersih per unit
+  profitMarginPct: number;             // Profit Margin (%)
+  roasActual: number;                  // ROAS Hasil Simulasi
+  validationEffective: UnitEconomicsResult; // Unit economics result on effective price
+}
+
+export function calculatePromoTanggalCantik(input: PromoTanggalCantikInput): PromoTanggalCantikResult {
+  const normalPrice = input.sellingPrice || 0;
+  const promoDiscountPct = Math.max(0, input.promoDiscountPct || 0);
+
+  // Validation of required fields
+  if (!input.hppPcs || input.hppPcs <= 0 || normalPrice <= 0) {
+    const dummyEcon = calculateProductEconomics({
+      sellingPrice: normalPrice,
+      hppPcs: input.hppPcs || 0,
+      additionalCosts: input.additionalCosts,
+      targetProfitPct: input.targetProfitPct,
+      actualRoas: input.targetRoas,
+      targetRoas: input.targetRoas,
+    });
+    return {
+      isFeasible: false,
+      errorMessage: 'Data biaya varian belum lengkap.',
+      normalPrice,
+      promoDiscountPct,
+      recommendedPromoPrice: normalPrice,
+      discountNominal: 0,
+      effectivePrice: normalPrice,
+      hppPcs: input.hppPcs || 0,
+      totalAdditionalCostPerUnit: dummyEcon.totalAdditionalCostPerUnit,
+      adSpendBurdenPerUnit: dummyEcon.actualAdSpendBurdenPerUnit,
+      netProfitPerUnit: dummyEcon.actualProfitPerUnit,
+      profitMarginPct: dummyEcon.actualProfitPercent,
+      roasActual: dummyEcon.roasTarget,
+      validationEffective: dummyEcon,
+    };
+  }
+
+  // Calculate reverse required price (this is the effective price needed after promo)
+  const rev = calculateReversePrice(input);
+  if (!rev.isFeasible) {
+    return {
+      isFeasible: false,
+      errorMessage: rev.errorMessage || 'Target profit dan ROAS tidak dapat dicapai.',
+      normalPrice,
+      promoDiscountPct,
+      recommendedPromoPrice: normalPrice,
+      discountNominal: 0,
+      effectivePrice: normalPrice,
+      hppPcs: input.hppPcs,
+      totalAdditionalCostPerUnit: rev.validationRecommended.totalAdditionalCostPerUnit,
+      adSpendBurdenPerUnit: rev.validationRecommended.actualAdSpendBurdenPerUnit,
+      netProfitPerUnit: rev.validationRecommended.actualProfitPerUnit,
+      profitMarginPct: rev.validationRecommended.actualProfitPercent,
+      roasActual: rev.validationRecommended.roasTarget,
+      validationEffective: rev.validationRecommended,
+    };
+  }
+
+  const requiredEffectivePrice = rev.priceRecommended;
+  const discountRate = promoDiscountPct / 100;
+
+  if (discountRate >= 1) {
+    return {
+      isFeasible: false,
+      errorMessage: 'Diskon promo tidak valid (harus kurang dari 100%).',
+      normalPrice,
+      promoDiscountPct,
+      recommendedPromoPrice: normalPrice,
+      discountNominal: 0,
+      effectivePrice: normalPrice,
+      hppPcs: input.hppPcs,
+      totalAdditionalCostPerUnit: rev.validationRecommended.totalAdditionalCostPerUnit,
+      adSpendBurdenPerUnit: rev.validationRecommended.actualAdSpendBurdenPerUnit,
+      netProfitPerUnit: rev.validationRecommended.actualProfitPerUnit,
+      profitMarginPct: rev.validationRecommended.actualProfitPercent,
+      roasActual: rev.validationRecommended.roasTarget,
+      validationEffective: rev.validationRecommended,
+    };
+  }
+
+  // Calculate required promo list price before discount
+  const rawListPrice = requiredEffectivePrice / (1 - discountRate);
+  let recommendedPromoPrice = roundPrice(rawListPrice, input.roundingStep || 100);
+
+  // Validate using central calculation engine
+  let effectivePrice = recommendedPromoPrice * (1 - discountRate);
+  let validationEffective = calculateProductEconomics({
+    ...input,
+    sellingPrice: effectivePrice,
+    actualRoas: input.targetRoas,
+    targetRoas: input.targetRoas,
+  });
+
+  // Re-validation loop: If rounding caused profit margin or ROAS to fall below target, increment promo list price
+  let loopCount = 0;
+  while (
+    recommendedPromoPrice > 0 &&
+    loopCount < 30 &&
+    (!validationEffective.isTargetFeasible || validationEffective.actualProfitPercent < (input.targetProfitPct - 0.01))
+  ) {
+    const step = input.roundingStep && input.roundingStep > 0 ? input.roundingStep : 100;
+    recommendedPromoPrice += step;
+    effectivePrice = recommendedPromoPrice * (1 - discountRate);
+    validationEffective = calculateProductEconomics({
+      ...input,
+      sellingPrice: effectivePrice,
+      actualRoas: input.targetRoas,
+      targetRoas: input.targetRoas,
+    });
+    loopCount++;
+  }
+
+  const discountNominal = recommendedPromoPrice * discountRate;
+  effectivePrice = recommendedPromoPrice - discountNominal;
+
+  const isFeasible = validationEffective.isTargetFeasible && validationEffective.actualProfitPercent >= (input.targetProfitPct - 0.05);
+
+  return {
+    isFeasible,
+    errorMessage: isFeasible ? null : `Target Profit ${input.targetProfitPct}% & ROAS ${input.targetRoas}x tidak dapat dicapai.`,
+    normalPrice,
+    promoDiscountPct,
+    recommendedPromoPrice,
+    discountNominal,
+    effectivePrice,
+    hppPcs: input.hppPcs,
+    totalAdditionalCostPerUnit: validationEffective.totalAdditionalCostPerUnit,
+    adSpendBurdenPerUnit: validationEffective.actualAdSpendBurdenPerUnit,
+    netProfitPerUnit: validationEffective.actualProfitPerUnit,
+    profitMarginPct: validationEffective.actualProfitPercent,
+    roasActual: validationEffective.roasTarget,
+    validationEffective,
   };
 }
 

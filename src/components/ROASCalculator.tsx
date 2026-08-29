@@ -5,10 +5,12 @@ import { getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import {
   calculateUnitEconomics,
   calculateReversePrice,
+  calculatePromoTanggalCantik,
   roundPrice,
   runUnitEconomicsSelfTests,
   UnitEconomicsResult,
   ReverseCalcResult,
+  PromoTanggalCantikResult,
   ProductFeeDetail,
 } from '../lib/unitEconomics';
 import { doc, setDoc } from 'firebase/firestore';
@@ -63,6 +65,7 @@ import {
   ArrowUpRight,
   FileSpreadsheet,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 
 interface Props {
@@ -810,6 +813,162 @@ function ROASResultDisplay({
 }
 
 /* ==========================================================================
+   PROMO TANGGAL CANTIK DISPLAY CARD
+   ========================================================================== */
+
+interface PromoDisplayProps {
+  promoResult: PromoTanggalCantikResult | null;
+  product?: Product | null;
+  variant?: Variant | null;
+  onTestInFindRoas?: (recommendedPrice: number) => void;
+}
+
+function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestInFindRoas }: PromoDisplayProps) {
+  if (!promoResult) return null;
+
+  if (!promoResult.isFeasible || promoResult.errorMessage === 'Data biaya varian belum lengkap.') {
+    return (
+      <Card className="rounded-3xl border-2 border-amber-300 bg-amber-50/50 shadow-sm overflow-hidden">
+        <CardContent className="p-5 space-y-3">
+          <div className="flex items-center gap-2 border-b border-amber-200/80 pb-3">
+            <Sparkles className="w-5 h-5 text-amber-600" />
+            <h3 className="text-sm font-black uppercase tracking-wider text-amber-950">
+              🎉 SIMULASI PROMO TANGGAL CANTIK
+            </h3>
+          </div>
+          <div className="p-3 bg-amber-100/60 rounded-xl border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-700" />
+            <span>{promoResult.errorMessage || 'Data biaya varian belum lengkap.'}</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const {
+    normalPrice,
+    promoDiscountPct,
+    recommendedPromoPrice,
+    discountNominal,
+    effectivePrice,
+    hppPcs,
+    totalAdditionalCostPerUnit,
+    adSpendBurdenPerUnit,
+    netProfitPerUnit,
+    profitMarginPct,
+    roasActual,
+  } = promoResult;
+
+  return (
+    <Card className="rounded-3xl border-2 border-amber-400 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/30 shadow-md overflow-hidden">
+      <CardHeader className="p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-white/20 rounded-2xl backdrop-blur-xs">
+            <Sparkles className="w-5 h-5 text-amber-100" />
+          </div>
+          <div>
+            <Badge className="bg-amber-900/40 text-amber-100 border-none text-[10px] uppercase tracking-wider font-bold">
+              Simulasi Virtual
+            </Badge>
+            <h3 className="text-base font-black tracking-tight text-white">
+              🎉 SIMULASI PROMO TANGGAL CANTIK
+            </h3>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="text-[10px] font-bold text-amber-100 uppercase block">Diskon Promo</span>
+          <span className="text-lg font-black text-white">{promoDiscountPct}%</span>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-5 md:p-6 space-y-5">
+        {/* HARGA NORMAL VS HARGA YANG HARUS DIPASANG */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
+            <span className="text-xs font-bold text-gray-500 block uppercase tracking-wider">Harga Normal</span>
+            <div className="text-xl font-black text-gray-800">{formatCurrency(normalPrice)}</div>
+            <p className="text-[10px] text-gray-400">Harga Master Produk (Tidak Berubah)</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-400 shadow-xs space-y-1">
+            <span className="text-xs font-black text-amber-900 block uppercase tracking-wider">
+              HARGA YANG HARUS DIPASANG
+            </span>
+            <div className="text-2xl md:text-3xl font-black text-amber-700">
+              {formatCurrency(recommendedPromoPrice)}
+            </div>
+            <p className="text-[10px] font-semibold text-amber-800">
+              Harga sebelum diskon yang harus dipasang di Seller Center
+            </p>
+          </div>
+        </div>
+
+        {/* RINCIAN POTONGAN PROMO & HARGA SETELAH PROMO */}
+        <div className="p-4 rounded-2xl bg-white border border-amber-200 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between text-xs font-bold text-gray-700">
+            <span className="text-rose-600">Potongan Promo {promoDiscountPct}%</span>
+            <span className="font-black text-rose-600">-{formatCurrency(discountNominal)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm font-black text-gray-900 pt-2 border-t border-dashed border-gray-200">
+            <span>Harga Setelah Promo</span>
+            <span className="text-base font-black text-emerald-700">{formatCurrency(effectivePrice)}</span>
+          </div>
+        </div>
+
+        {/* BREAKDOWN ELEMENT BIAYA */}
+        <div className="space-y-2 text-xs font-medium text-gray-600 bg-gray-50/80 p-4 rounded-2xl border border-gray-200">
+          <div className="flex justify-between items-center py-1">
+            <span>Harga Setelah Promo (Revenue)</span>
+            <span className="font-bold text-gray-900">{formatCurrency(effectivePrice)}</span>
+          </div>
+          <div className="flex justify-between items-center py-1 text-gray-500">
+            <span>HPP</span>
+            <span className="font-bold text-rose-600">-{formatCurrency(hppPcs)}</span>
+          </div>
+          <div className="flex justify-between items-center py-1 text-gray-500">
+            <span>Total Biaya Tambahan</span>
+            <span className="font-bold text-rose-600">-{formatCurrency(totalAdditionalCostPerUnit)}</span>
+          </div>
+          <div className="flex justify-between items-center py-1 text-gray-500">
+            <span>Biaya Iklan</span>
+            <span className="font-bold text-rose-600">-{formatCurrency(adSpendBurdenPerUnit)}</span>
+          </div>
+          <div className="flex justify-between items-center pt-2 border-t border-gray-200 font-bold text-gray-900">
+            <span>Profit Bersih</span>
+            <span className="text-sm font-black text-emerald-600">{formatCurrency(netProfitPerUnit)}</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5 font-bold text-gray-900">
+            <span>Profit Margin</span>
+            <span className="font-black text-emerald-700">{profitMarginPct.toFixed(1)}%</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5 font-bold text-gray-900">
+            <span>ROAS</span>
+            <span className="font-black text-violet-700">{roasActual.toFixed(2)}x</span>
+          </div>
+        </div>
+
+        {/* FOOTER NOTE & UJI BUTTON */}
+        <div className="flex items-center justify-between flex-wrap gap-3 pt-1">
+          <p className="text-[11px] text-amber-900 font-medium italic flex-1 min-w-[240px]">
+            * Harga yang harus dipasang sebelum diskon agar target profit dan ROAS tetap tercapai setelah Promo Tanggal Cantik.
+          </p>
+          {onTestInFindRoas && (
+            <Button
+              type="button"
+              onClick={() => onTestInFindRoas(recommendedPromoPrice)}
+              className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-black text-xs rounded-xl shadow-sm"
+            >
+              <ArrowUpRight className="w-4 h-4 mr-1" />
+              <span>UJI HARGA PROMO KE MODE CARI ROAS</span>
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ==========================================================================
    MAIN COMPONENT: ROAS CALCULATOR
    (Trigger update for GitHub Sync)
    ========================================================================== */
@@ -846,6 +1005,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   const [voucherNominalInput, setVoucherNominalInput] = React.useState<number>(0);
   const [includePpn, setIncludePpn] = React.useState<boolean>(false);
   const [ppnRate, setPpnRate] = React.useState<number>(11);
+
+  // Promo Tanggal Cantik States
+  const [isPromoActive, setIsPromoActive] = React.useState<boolean>(false);
+  const [promoDiscountPct, setPromoDiscountPct] = React.useState<number>(5);
 
   // CARI HARGA specific states
   const [targetRoasInput, setTargetRoasInput] = React.useState<number>(6.5);
@@ -1275,6 +1438,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         if (data.v2OrderSim !== undefined) setV2OrderSim(data.v2OrderSim);
         if (data.v3OrderSim !== undefined) setV3OrderSim(data.v3OrderSim);
         if (data.v3GroupName) setV3GroupName(data.v3GroupName);
+        if (data.isPromoActive !== undefined) setIsPromoActive(data.isPromoActive);
+        if (data.promoDiscountPct !== undefined) setPromoDiscountPct(data.promoDiscountPct);
       }
     } catch {}
   }, [user?.uid]);
@@ -1323,6 +1488,68 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     if (!v1ActiveProduct || !Array.isArray(v1ActiveProduct.varian) || v1ActiveProduct.varian.length === 0) return null;
     return v1ActiveProduct.varian.find((v) => v?.id === v1SelectedVariantId) || v1ActiveProduct.varian[0];
   }, [v1ActiveProduct, v1SelectedVariantId]);
+
+  const v1PromoResult = React.useMemo(() => {
+    if (!v1ActiveProduct || !v1ActiveVariant) return null;
+    const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
+    const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
+    const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
+    const normalPrice = Number(v1ActiveVariant.harga_jual) || 0;
+
+    return calculatePromoTanggalCantik({
+      sellingPrice: normalPrice,
+      hppPcs,
+      minOrder,
+      nominalPerOrder: feeConfig.nominalPerOrder,
+      nominalPerUnit: feeConfig.nominalPerUnit,
+      percentRate: feeConfig.percentRate,
+      additionalCosts: feeConfig.allFees,
+      voucherNominal: voucherNominalInput,
+      voucherPct: voucherPctInput,
+      targetRoas: targetRoasInput,
+      targetProfitPct,
+      includePpn,
+      ppnRate,
+      roundingStep: roundingOption,
+      promoDiscountPct,
+    });
+  }, [
+    v1ActiveProduct,
+    v1ActiveVariant,
+    ingredients,
+    voucherNominalInput,
+    voucherPctInput,
+    targetRoasInput,
+    targetProfitPct,
+    includePpn,
+    ppnRate,
+    roundingOption,
+    promoDiscountPct,
+  ]);
+
+  const handleTestPromoInFindRoas = React.useCallback(
+    (promoPrice: number) => {
+      if (!v1ActiveProduct || !v1ActiveVariant) return;
+
+      setPriceHandoff({
+        source: 'cari-harga',
+        priceSource: 'recommended-price',
+        productId: v1ActiveProduct.id,
+        variantId: v1ActiveVariant.id,
+        recommendedPrice: promoPrice,
+        prices: { [v1ActiveVariant.id]: promoPrice },
+        timestamp: Date.now(),
+      });
+
+      setCalcMode('find_roas');
+      setV1SimRoas(targetRoasInput);
+
+      toast.success(
+        `Harga promo ${formatCurrency(promoPrice)} diteruskan ke CARI ROAS (Target ROAS: ${targetRoasInput}x)`
+      );
+    },
+    [v1ActiveProduct, v1ActiveVariant, targetRoasInput]
+  );
 
   const v2ActiveProduct = React.useMemo(() => {
     if (!Array.isArray(products) || products.length === 0) return null;
@@ -2380,8 +2607,96 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               💡 Target ROAS adalah target profit {targetProfitPct}%. ROAS Setting adalah input rekomendasi ke Seller Center.
             </p>
           </div>
+
+          {/* SIMULASI PROMO TANGGAL CANTIK INPUT SECTION */}
+          <div className="p-4 bg-gradient-to-r from-amber-50/80 to-orange-50/80 rounded-2xl border border-amber-200 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="promo-tanggal-cantik-checkbox"
+                  checked={isPromoActive}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsPromoActive(checked);
+                    savePreferences('isPromoActive', checked);
+                  }}
+                  className="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer"
+                />
+                <Label
+                  htmlFor="promo-tanggal-cantik-checkbox"
+                  className="text-xs font-black text-amber-950 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>Aktifkan Promo Tanggal Cantik (Simulasi Virtual)</span>
+                </Label>
+              </div>
+              {isPromoActive && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] font-bold">
+                  Harga Master Produk Tetap Utuh
+                </Badge>
+              )}
+            </div>
+
+            {isPromoActive && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-200/60">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-amber-900 flex items-center justify-between">
+                    <span>Diskon Promo Tanggal Cantik (%)</span>
+                    <span className="text-amber-700 font-black">{promoDiscountPct}%</span>
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={99}
+                      step={1}
+                      value={promoDiscountPct}
+                      onChange={(e) => {
+                        const val = Math.min(99, Math.max(0, Number(e.target.value) || 0));
+                        setPromoDiscountPct(val);
+                        savePreferences('promoDiscountPct', val);
+                      }}
+                      className="rounded-xl h-10 font-bold text-xs bg-white border-amber-200"
+                      placeholder="5"
+                    />
+                    {[5, 10, 15, 20].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setPromoDiscountPct(preset);
+                          savePreferences('promoDiscountPct', preset);
+                        }}
+                        className={`h-10 px-2.5 rounded-xl text-xs font-bold transition-all ${
+                          promoDiscountPct === preset
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-100'
+                        }`}
+                      >
+                        {preset}%
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-amber-800/80 leading-tight">
+                    Diskon promo yang direncanakan. Biaya Admin, Ongkir, Biaya Pesanan, dll. otomatis diambil dari varian.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
+
+      {/* 🎉 DISPLAY SIMULASI PROMO TANGGAL CANTIK */}
+      {isPromoActive && (
+        <PromoTanggalCantikDisplayCard
+          promoResult={v1PromoResult}
+          product={v1ActiveProduct}
+          variant={v1ActiveVariant}
+          onTestInFindRoas={handleTestPromoInFindRoas}
+        />
+      )}
 
       {/* ====================================================================
           MODE: CARI ROAS
