@@ -300,7 +300,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     e.stopPropagation();
     try {
       const lines: string[] = [
-        `📦 ${product.nama}`
+        `📦 PRODUK: ${product.nama}`
       ];
       if (product.sku) {
         lines.push(`SKU: ${product.sku}`);
@@ -308,19 +308,76 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       if ((product as any).kategori) {
         lines.push(`Kategori: ${(product as any).kategori}`);
       }
+      if (product.deskripsi) {
+        lines.push(`Deskripsi: ${product.deskripsi}`);
+      }
       
+      // Biaya Lain-Lain Global
+      if (product.biaya_lain && product.biaya_lain.length > 0) {
+        lines.push(`\n💰 Biaya Lain-Lain Global Produk:`);
+        product.biaya_lain.forEach((fee) => {
+          const valStr = fee.tipe === 'nominal' ? formatCurrency(fee.nilai, true) : `${fee.nilai}%`;
+          lines.push(`  - ${fee.nama}: ${valStr}`);
+        });
+      }
+
       if (product.varian && product.varian.length > 0) {
-        lines.push(`\nVarian (${product.varian.length}):`);
+        lines.push(`\n================================`);
+        lines.push(`👥 VARIAN PRODUK (${product.varian.length}):`);
+        lines.push(`================================`);
+        
         product.varian.forEach((v, idx) => {
+          lines.push(`\n${idx + 1}. 🔹 Varian: ${v.nama}`);
+          if (v.sku) {
+            lines.push(`   SKU Varian: ${v.sku}`);
+          }
+          lines.push(`   Harga Jual: ${formatCurrency(v.harga_jual, true)}`);
+          if (v.harga_coret) {
+            lines.push(`   Harga Coret: ${formatCurrency(v.harga_coret, true)}`);
+          }
+          if (v.diskon_persen) {
+            lines.push(`   Diskon: ${v.diskon_persen}%`);
+          }
+          if (v.min_order) {
+            lines.push(`   Minimal Order: ${v.min_order} pcs`);
+          }
+          lines.push(`   Batch Qty: ${v.qty_batch || 1} pcs`);
+          lines.push(`   Harga Packing: ${formatCurrency(v.harga_packing || 0, true)}`);
+
+          // List of ingredients (Bahan Baku)
+          if (v.bahan && v.bahan.length > 0) {
+            lines.push(`\n   🍀 Bahan Baku (HPP):`);
+            v.bahan.forEach((b) => {
+              const cost = getMaterialCost(b);
+              lines.push(`     • ${b.nama}: ${b.qty} ${b.satuan} @ ${formatCurrency(b.harga, true)} (Subtotal: ${formatCurrency(cost, true)})`);
+            });
+          }
+
+          // List of variant-specific fees
+          if (v.biaya_lain && v.biaya_lain.length > 0) {
+            lines.push(`\n   💸 Biaya Tambahan Varian:`);
+            v.biaya_lain.forEach((fee) => {
+              const valStr = fee.tipe === 'nominal' ? formatCurrency(fee.nilai, true) : `${fee.nilai}%`;
+              lines.push(`     - ${fee.nama}: ${valStr}`);
+            });
+          }
+
           const hppPcs = calculateHpp(v.bahan, v.harga_packing, v.qty_batch);
           const fees = calculateVariantFees(
             [...(product.biaya_lain || []), ...(v.biaya_lain || [])],
             v.harga_jual
           );
           const totalCost = hppPcs + fees;
-          const skuInfo = v.sku ? ` [SKU: ${v.sku}]` : '';
-          const hppInfo = v.bahan && v.bahan.length > 0 ? ` | HPP: ${formatCurrency(Math.round(totalCost), true)}` : '';
-          lines.push(`${idx + 1}. ${v.nama}${skuInfo} - Harga: ${formatCurrency(v.harga_jual, true)}${hppInfo}`);
+          const profit = v.harga_jual - totalCost;
+          const margin = v.harga_jual > 0 ? (profit / v.harga_jual) * 100 : 0;
+
+          lines.push(`\n   📊 Ringkasan Keuangan Varian:`);
+          lines.push(`     - HPP Bahan Baku/pcs : ${formatCurrency(Math.round(hppPcs), true)}`);
+          lines.push(`     - Biaya Lain/Layanan : ${formatCurrency(Math.round(fees), true)}`);
+          lines.push(`     - Total Pengeluaran  : ${formatCurrency(Math.round(totalCost), true)}`);
+          lines.push(`     - Laba Bersih/pcs    : ${formatCurrency(Math.round(profit), true)}`);
+          lines.push(`     - Margin Keuntungan  : ${margin.toFixed(1)}%`);
+          lines.push(`   -----------------------------`);
         });
       }
 
@@ -698,18 +755,51 @@ function VariantPricingInputs({
         variant.harga_jual
       );
       const totalCost = hppPcs + fees;
-      const margin = variant.harga_jual > 0 ? ((variant.harga_jual - totalCost) / variant.harga_jual) * 100 : 0;
+      const profit = variant.harga_jual - totalCost;
+      const margin = variant.harga_jual > 0 ? (profit / variant.harga_jual) * 100 : 0;
 
       const lines: string[] = [
-        `📦 ${productName ? `${productName} - ` : ''}${variant.nama}`,
+        `📦 VARIAN: ${productName ? `${productName} - ` : ''}${variant.nama}`,
       ];
       if (variant.sku) lines.push(`SKU: ${variant.sku}`);
       lines.push(`Harga Jual: ${formatCurrency(variant.harga_jual, true)}`);
-      if (variant.bahan && variant.bahan.length > 0) {
-        lines.push(`HPP/pcs: ${formatCurrency(Math.round(totalCost), true)}`);
-        lines.push(`Margin: ${margin.toFixed(1)}%`);
-        lines.push(`Batch Qty: ${variant.qty_batch || 1}`);
+      if (variant.harga_coret) {
+        lines.push(`Harga Coret: ${formatCurrency(variant.harga_coret, true)}`);
       }
+      if (variant.diskon_persen) {
+        lines.push(`Diskon: ${variant.diskon_persen}%`);
+      }
+      if (variant.min_order) {
+        lines.push(`Minimal Order: ${variant.min_order} pcs`);
+      }
+      lines.push(`Batch Qty: ${variant.qty_batch || 1} pcs`);
+      lines.push(`Harga Packing: ${formatCurrency(variant.harga_packing || 0, true)}`);
+
+      // List of ingredients (Bahan Baku)
+      if (variant.bahan && variant.bahan.length > 0) {
+        lines.push(`\n🍀 Bahan Baku (HPP):`);
+        variant.bahan.forEach((b) => {
+          const cost = getMaterialCost(b);
+          lines.push(`  • ${b.nama}: ${b.qty} ${b.satuan} @ ${formatCurrency(b.harga, true)} (Subtotal: ${formatCurrency(cost, true)})`);
+        });
+      }
+
+      // List of fees
+      const allFees = [...(selectedProduct?.biaya_lain || []), ...(variant.biaya_lain || [])];
+      if (allFees.length > 0) {
+        lines.push(`\n💸 Biaya Tambahan & Layanan:`);
+        allFees.forEach((fee) => {
+          const valStr = fee.tipe === 'nominal' ? formatCurrency(fee.nilai, true) : `${fee.nilai}%`;
+          lines.push(`  - ${fee.nama}: ${valStr}`);
+        });
+      }
+
+      lines.push(`\n📊 Ringkasan Keuangan:`);
+      lines.push(`  - HPP Bahan Baku/pcs : ${formatCurrency(Math.round(hppPcs), true)}`);
+      lines.push(`  - Biaya Lain/Layanan : ${formatCurrency(Math.round(fees), true)}`);
+      lines.push(`  - Total Pengeluaran  : ${formatCurrency(Math.round(totalCost), true)}`);
+      lines.push(`  - Laba Bersih/pcs    : ${formatCurrency(Math.round(profit), true)}`);
+      lines.push(`  - Margin Keuntungan  : ${margin.toFixed(1)}%`);
 
       const textToCopy = lines.join('\n');
       if (navigator?.clipboard?.writeText) {
