@@ -351,7 +351,14 @@ function ROASResultDisplay({
             <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">
               {modeTitle}
             </span>
-            <h3 className="text-sm sm:text-base font-black text-gray-900 mt-1">{name}</h3>
+            <h3 className="text-sm sm:text-base font-black text-gray-900 mt-1 flex items-center gap-2">
+              <span>{name}</span>
+              {diskonPersen !== undefined && diskonPersen > 0 && (
+                <Badge className="bg-amber-100 text-amber-800 border-amber-300 font-black text-[10px] rounded-lg">
+                  % PROMO {diskonPersen}% AKTIF
+                </Badge>
+              )}
+            </h3>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {onApplyPrice && targetProduct && targetVariant && (
@@ -1785,8 +1792,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
     const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
 
+    const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+
     const unitEcon = calculateUnitEconomics({
-      sellingPrice: price,
+      sellingPrice,
       hppPcs,
       minOrder,
       nominalPerOrder: feeConfig.nominalPerOrder,
@@ -1808,7 +1817,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       product: v1ActiveProduct,
       variant: v1ActiveVariant,
       unitEcon,
-      price,
+      price: sellingPrice,
       basePrice: masterPrice,
       hppPcs,
       minOrder,
@@ -1838,6 +1847,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherPctInput,
     includePpn,
     ppnRate,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   // CARI HARGA Engine: Mode 1
@@ -1846,6 +1857,48 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
     const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
     const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
+
+    if (isPromoActive) {
+      const promoRes = calculatePromoTanggalCantik({
+        sellingPrice: v1ActiveVariant.harga_jual || 0,
+        hppPcs,
+        minOrder,
+        nominalPerOrder: feeConfig.nominalPerOrder,
+        nominalPerUnit: feeConfig.nominalPerUnit,
+        percentRate: feeConfig.percentRate,
+        additionalCosts: feeConfig.allFees,
+        voucherNominal: voucherNominalInput,
+        voucherPct: voucherPctInput,
+        targetRoas: targetRoasInput,
+        targetProfitPct,
+        includePpn,
+        ppnRate,
+        roundingStep: roundingOption,
+        promoDiscountPct,
+      });
+
+      return {
+        rev: {
+          isFeasible: promoRes.isFeasible,
+          errorMessage: promoRes.errorMessage,
+          priceExact: promoRes.recommendedPromoPrice,
+          priceRecommended: promoRes.recommendedPromoPrice,
+          realHppPerUnit: hppPcs + (feeConfig.nominalPerOrder / minOrder) + feeConfig.nominalPerUnit,
+          priceCoefficient: 0,
+          validationExact: promoRes.validationEffective,
+          validationRecommended: promoRes.validationEffective,
+        },
+        priceRecommended: promoRes.recommendedPromoPrice,
+        priceExact: promoRes.recommendedPromoPrice,
+        realHppPerUnit: hppPcs + (feeConfig.nominalPerOrder / minOrder) + feeConfig.nominalPerUnit,
+        isFeasible: promoRes.isFeasible,
+        errorMessage: promoRes.errorMessage,
+        validation: promoRes.validationEffective,
+        hppPcs,
+        minOrder,
+        feeConfig,
+      };
+    }
 
     const rev = calculateReversePrice({
       hppPcs,
@@ -1906,6 +1959,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     includePpn,
     ppnRate,
     roundingOption,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   React.useEffect(() => {
@@ -1953,13 +2008,16 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const w = normWeights[v.id] || 0;
       const vFeeConfig = extractFeeRates(v2ActiveProduct, v);
 
-      weightedPrice += price * w;
+      const originalPrice = price;
+      const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+
+      weightedPrice += sellingPrice * w;
       weightedBasePrice += masterPrice * w;
       weightedHppPcs += hppPcs * w;
       weightedMinOrder += minOrder * w;
 
       const vEcon = calculateUnitEconomics({
-        sellingPrice: price,
+        sellingPrice,
         hppPcs,
         minOrder,
         nominalPerOrder: vFeeConfig.nominalPerOrder,
@@ -1979,7 +2037,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
       return {
         variant: v,
-        price,
+        price: sellingPrice,
         basePrice: masterPrice,
         hppPcs,
         minOrder,
@@ -2048,6 +2106,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     voucherPctInput,
     includePpn,
     ppnRate,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   // CARI HARGA Engine: Mode 2 (CONSERVATIVE PRICING)
@@ -2071,21 +2131,53 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const w = normWeights[v.id] || 0;
       const vFeeConfig = extractFeeRates(v2ActiveProduct, v);
 
-      const singleRev = calculateReversePrice({
-        hppPcs,
-        minOrder,
-        nominalPerOrder: vFeeConfig.nominalPerOrder,
-        nominalPerUnit: vFeeConfig.nominalPerUnit,
-        percentRate: vFeeConfig.percentRate,
-        additionalCosts: vFeeConfig.allFees,
-        voucherNominal: voucherNominalInput,
-        voucherPct: voucherPctInput,
-        targetRoas: targetRoasInput,
-        targetProfitPct,
-        includePpn,
-        ppnRate,
-        roundingStep: roundingOption,
-      });
+      let singleRev;
+      if (isPromoActive) {
+        const promoRes = calculatePromoTanggalCantik({
+          sellingPrice: v.harga_jual || 0,
+          hppPcs,
+          minOrder,
+          nominalPerOrder: vFeeConfig.nominalPerOrder,
+          nominalPerUnit: vFeeConfig.nominalPerUnit,
+          percentRate: vFeeConfig.percentRate,
+          additionalCosts: vFeeConfig.allFees,
+          voucherNominal: voucherNominalInput,
+          voucherPct: voucherPctInput,
+          targetRoas: targetRoasInput,
+          targetProfitPct,
+          includePpn,
+          ppnRate,
+          roundingStep: roundingOption,
+          promoDiscountPct,
+        });
+
+        singleRev = {
+          isFeasible: promoRes.isFeasible,
+          errorMessage: promoRes.errorMessage,
+          priceExact: promoRes.recommendedPromoPrice,
+          priceRecommended: promoRes.recommendedPromoPrice,
+          realHppPerUnit: hppPcs + (vFeeConfig.nominalPerOrder / minOrder) + vFeeConfig.nominalPerUnit,
+          priceCoefficient: 0,
+          validationExact: promoRes.validationEffective,
+          validationRecommended: promoRes.validationEffective,
+        };
+      } else {
+        singleRev = calculateReversePrice({
+          hppPcs,
+          minOrder,
+          nominalPerOrder: vFeeConfig.nominalPerOrder,
+          nominalPerUnit: vFeeConfig.nominalPerUnit,
+          percentRate: vFeeConfig.percentRate,
+          additionalCosts: vFeeConfig.allFees,
+          voucherNominal: voucherNominalInput,
+          voucherPct: voucherPctInput,
+          targetRoas: targetRoasInput,
+          targetProfitPct,
+          includePpn,
+          ppnRate,
+          roundingStep: roundingOption,
+        });
+      }
 
       return {
         variant: v,
@@ -2113,8 +2205,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     // 3. VALIDATION PASS FOR EVERY VARIANT AT THE CONSERVATIVE PRICE
     let allVariantsPassed = true;
     const conservativeValidationDetails = variantReverseDetails.map((vd) => {
+      const sellingPrice = isPromoActive ? conservativePriceRecommended * (1 - promoDiscountPct / 100) : conservativePriceRecommended;
       const val = calculateUnitEconomics({
-        sellingPrice: conservativePriceRecommended,
+        sellingPrice,
         hppPcs: vd.hppPcs,
         minOrder: vd.minOrder,
         nominalPerOrder: vd.vFeeConfig.nominalPerOrder,
@@ -2163,6 +2256,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     includePpn,
     ppnRate,
     roundingOption,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   React.useEffect(() => {
@@ -2211,7 +2306,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         const vMin = Math.max(1, Number(v.min_order) || 1);
         const vShare = 1 / vCount;
 
-        pWeightedPrice += price * vShare;
+        const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+
+        pWeightedPrice += sellingPrice * vShare;
         pWeightedBasePrice += masterPrice * vShare;
         pWeightedHppPcs += vHpp * vShare;
         pWeightedMinOrder += vMin * vShare;
@@ -2312,6 +2409,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     includePpn,
     ppnRate,
     v3GroupName,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   // CARI HARGA Engine: Mode 3
@@ -2337,20 +2436,52 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const variantRevList = activeVariants.map((v) => {
         const vHpp = calcHppPerPcs(v, ingredients);
         const vMin = Math.max(1, Number(v.min_order) || 1);
-        const singleRev = calculateReversePrice({
-          hppPcs: vHpp,
-          minOrder: vMin,
-          nominalPerOrder: pFeeConfig.nominalPerOrder,
-          nominalPerUnit: pFeeConfig.nominalPerUnit,
-          percentRate: pFeeConfig.percentRate,
-          voucherNominal: voucherNominalInput,
-          voucherPct: voucherPctInput,
-          targetRoas: targetRoasInput,
-          targetProfitPct,
-          includePpn,
-          ppnRate,
-          roundingStep: roundingOption,
-        });
+
+        let singleRev;
+        if (isPromoActive) {
+          const promoRes = calculatePromoTanggalCantik({
+            sellingPrice: v.harga_jual || 0,
+            hppPcs: vHpp,
+            minOrder: vMin,
+            nominalPerOrder: pFeeConfig.nominalPerOrder,
+            nominalPerUnit: pFeeConfig.nominalPerUnit,
+            percentRate: pFeeConfig.percentRate,
+            voucherNominal: voucherNominalInput,
+            voucherPct: voucherPctInput,
+            targetRoas: targetRoasInput,
+            targetProfitPct,
+            includePpn,
+            ppnRate,
+            roundingStep: roundingOption,
+            promoDiscountPct,
+          });
+
+          singleRev = {
+            isFeasible: promoRes.isFeasible,
+            errorMessage: promoRes.errorMessage,
+            priceExact: promoRes.recommendedPromoPrice,
+            priceRecommended: promoRes.recommendedPromoPrice,
+            realHppPerUnit: vHpp + (pFeeConfig.nominalPerOrder / vMin) + pFeeConfig.nominalPerUnit,
+            priceCoefficient: 0,
+            validationExact: promoRes.validationEffective,
+            validationRecommended: promoRes.validationEffective,
+          };
+        } else {
+          singleRev = calculateReversePrice({
+            hppPcs: vHpp,
+            minOrder: vMin,
+            nominalPerOrder: pFeeConfig.nominalPerOrder,
+            nominalPerUnit: pFeeConfig.nominalPerUnit,
+            percentRate: pFeeConfig.percentRate,
+            voucherNominal: voucherNominalInput,
+            voucherPct: voucherPctInput,
+            targetRoas: targetRoasInput,
+            targetProfitPct,
+            includePpn,
+            ppnRate,
+            roundingStep: roundingOption,
+          });
+        }
 
         if (singleRev.priceExact > pMaxExact) {
           pMaxExact = singleRev.priceExact;
@@ -2370,8 +2501,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       // Validation pass for this product
       let pAllPassed = true;
       const pValidationList = variantRevList.map((vr) => {
+        const sellingPrice = isPromoActive ? pConservativePrice * (1 - promoDiscountPct / 100) : pConservativePrice;
         const val = calculateUnitEconomics({
-          sellingPrice: pConservativePrice,
+          sellingPrice,
           hppPcs: vr.vHpp,
           minOrder: vr.vMin,
           nominalPerOrder: pFeeConfig.nominalPerOrder,
@@ -2425,6 +2557,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     includePpn,
     ppnRate,
     roundingOption,
+    isPromoActive,
+    promoDiscountPct,
   ]);
 
   React.useEffect(() => {
@@ -3105,7 +3239,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   className="text-xs font-black text-amber-950 cursor-pointer flex items-center gap-1.5"
                 >
                   <Sparkles className="w-4 h-4 text-amber-600" />
-                  <span>Aktifkan Promo Tanggal Cantik (Simulasi Virtual)</span>
+                  <span>Aktifkan Promo Tanggal Cantik</span>
                 </Label>
               </div>
               {isPromoActive && (
@@ -3165,16 +3299,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         </CardContent>
       </Card>
 
-      {/* 🎉 DISPLAY SIMULASI PROMO TANGGAL CANTIK */}
-      {isPromoActive && (
-        <PromoTanggalCantikDisplayCard
-          promoResult={activePromoResult}
-          product={activeProductForPromo}
-          variant={activeVariantForPromo}
-          onTestInFindRoas={handleTestPromoInFindRoas}
-        />
-      )}
-
       {/* ====================================================================
           MODE: CARI ROAS
           ==================================================================== */}
@@ -3194,7 +3318,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               minOrder={v1Calculation.minOrder}
               hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
               hargaCoretPcs={v1Calculation.variant.harga_coret}
-              diskonPersen={v1Calculation.variant.diskon_persen}
+              diskonPersen={isPromoActive ? promoDiscountPct : v1Calculation.variant.diskon_persen}
               hppPcs={v1Calculation.hppPcs}
               biayaProsesOrder={v1Calculation.unitEcon.nominalPerOrder}
               hargaJualOrder={v1Calculation.unitEcon.sellingPrice * v1Calculation.minOrder}
@@ -3231,6 +3355,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
               minOrder={v2Calculation.effectiveMinOrder}
               hargaJualPcs={v2Calculation.weightedPrice}
+              diskonPersen={isPromoActive ? promoDiscountPct : undefined}
               hppPcs={v2Calculation.weightedHppPcs}
               biayaProsesOrder={v2Calculation.productEcon.nominalPerOrder}
               hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
@@ -3269,6 +3394,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
               minOrder={1}
               hargaJualPcs={v3Calculation.groupWeightedPrice}
+              diskonPersen={isPromoActive ? promoDiscountPct : undefined}
               hppPcs={v3Calculation.groupWeightedHppPcs}
               biayaProsesOrder={v3Calculation.groupEcon.nominalPerOrder}
               hargaJualOrder={v3Calculation.groupWeightedPrice}
