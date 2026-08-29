@@ -341,47 +341,49 @@ function ROASResultDisplay({
     statusDesc = `Profit bersih aktual (${simMarginAfterAdsPct.toFixed(1)}%) berada di bawah target minimum (${targetProfitPct}%). Selisih: ${selisihPct.toFixed(1)}%.`;
   }
 
+  const [showDetails, setShowDetails] = React.useState(false);
+
   return (
     <Card className="rounded-3xl border border-violet-100 shadow-md bg-white overflow-hidden">
-      <CardHeader className="p-5 md:p-6 bg-gradient-to-r from-violet-50/90 via-purple-50/50 to-white border-b border-violet-100">
+      <CardHeader className="p-4 md:p-5 bg-gradient-to-r from-violet-50/90 via-purple-50/50 to-white border-b border-violet-100">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-100 px-2.5 py-1 rounded-lg">
+            <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">
               {modeTitle}
             </span>
-            <h3 className="text-base sm:text-lg font-black text-gray-900 mt-1">{name}</h3>
+            <h3 className="text-sm sm:text-base font-black text-gray-900 mt-1">{name}</h3>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {onApplyPrice && targetProduct && targetVariant && (
               <Button
                 type="button"
                 onClick={() => onApplyPrice(targetProduct, targetVariant, hargaJualPcs)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm h-9 px-3.5 flex items-center gap-1.5"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm h-8 px-3 flex items-center gap-1.5"
               >
                 <Tag className="w-3.5 h-3.5" />
                 <span>TERAPKAN HARGA</span>
               </Button>
             )}
-            <Badge className={`text-xs font-black px-3 py-1.5 border rounded-xl ${statusColor}`}>
+            <Badge className={`text-xs font-black px-2.5 py-1 border rounded-xl ${statusColor}`}>
               {statusBadge}
             </Badge>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="p-5 md:p-6 space-y-6">
+      <CardContent className="p-4 md:p-5 space-y-4">
         {/* INDICATOR FOR PRICE FROM CARI HARGA */}
         {isPriceFromCariHarga && (
-          <div className="p-4 bg-emerald-50/90 border-2 border-emerald-300 rounded-2xl flex items-center justify-between gap-3 flex-wrap shadow-xs">
-            <div className="space-y-1">
+          <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl flex items-center justify-between gap-3 flex-wrap shadow-2xs">
+            <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <span className="text-xs sm:text-sm font-black text-emerald-950 flex items-center gap-1.5">
+                <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                   <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                   ✓ Harga dari Cari Harga: {formatCurrency(hargaJualPcs)}
                 </span>
               </div>
-              <p className="text-[11px] text-emerald-800 font-medium">
-                Harga ini berasal dari rekomendasi Cari Harga dan belum mengubah harga produk {masterPrice !== undefined && masterPrice > 0 ? `(Harga Master: ${formatCurrency(masterPrice)})` : ''}.
+              <p className="text-[10px] text-emerald-800 font-medium">
+                Harga ini berasal dari rekomendasi Cari Harga (Harga Master: {masterPrice !== undefined && masterPrice > 0 ? formatCurrency(masterPrice) : '-'}).
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -389,9 +391,9 @@ function ROASResultDisplay({
                 <Button
                   type="button"
                   onClick={() => onApplyPrice(targetProduct, targetVariant, hargaJualPcs)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl h-8 px-3.5 shadow-xs flex items-center gap-1.5"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-lg h-7 px-3 shadow-2xs flex items-center gap-1"
                 >
-                  <Tag className="w-3.5 h-3.5" />
+                  <Tag className="w-3 h-3" />
                   <span>TERAPKAN HARGA</span>
                 </Button>
               )}
@@ -400,14 +402,57 @@ function ROASResultDisplay({
                   type="button"
                   variant="outline"
                   onClick={onResetPrice}
-                  className="text-xs font-bold rounded-xl h-8 px-3 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  className="text-xs font-bold rounded-lg h-7 px-2.5 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
                 >
-                  Reset ke Harga Master
+                  Reset ke Master
                 </Button>
               )}
             </div>
           </div>
         )}
+
+        {/* COMPACT MAIN METRICS GRID (ALWAYS VISIBLE) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="p-3 rounded-xl bg-violet-50/80 border border-violet-100 space-y-0.5">
+            <span className="text-[10px] font-bold text-violet-700 uppercase">TARGET ROAS</span>
+            <p className="text-xl font-black text-violet-950">{roasTarget.toFixed(2)}x</p>
+            <p className="text-[9px] text-violet-600">Net profit target: {targetProfitPct}%</p>
+          </div>
+          <div className="p-3 rounded-xl bg-purple-50/80 border border-purple-100 space-y-0.5">
+            <span className="text-[10px] font-bold text-purple-700 uppercase">ROAS SETTING</span>
+            <p className="text-xl font-black text-purple-950">{roasSetting.toFixed(2)}x</p>
+            <p className="text-[9px] text-purple-600">Buffer: +{bufferPct}%</p>
+          </div>
+          <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-100 space-y-0.5">
+            <span className="text-[10px] font-bold text-blue-700 uppercase">ROAS BEP</span>
+            <p className="text-xl font-black text-blue-950">{roasBep.toFixed(2)}x</p>
+            <p className="text-[9px] text-blue-600">Batas impas</p>
+          </div>
+          <div className={`p-3 rounded-xl border space-y-0.5 ${simMarginAfterAdsPct >= targetProfitPct ? 'bg-teal-50/80 border-teal-200' : 'bg-amber-50/80 border-amber-200'}`}>
+            <span className="text-[10px] font-bold text-gray-700 uppercase">PROFIT BERSIH</span>
+            <p className={`text-xl font-black ${simMarginAfterAdsPct >= targetProfitPct ? 'text-teal-950' : 'text-amber-950'}`}>
+              {formatCurrency(totalSimProfitAfterAds)}
+            </p>
+            <p className="text-[9px] text-gray-600">Margin: {simMarginAfterAdsPct.toFixed(1)}%</p>
+          </div>
+        </div>
+
+        {/* DETAIL PERHITUNGAN ACCORDION TOGGLE */}
+        <div className="flex items-center justify-between pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setShowDetails(!showDetails)}
+            className="w-full text-xs font-bold text-violet-700 bg-violet-50/80 hover:bg-violet-100 border border-violet-200/60 rounded-xl h-9 flex items-center justify-center gap-1.5"
+          >
+            <span>{showDetails ? 'Sembunyikan Rincian' : 'Detail Perhitungan'}</span>
+            <Sliders className={`w-3.5 h-3.5 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+          </Button>
+        </div>
+
+        {/* COLLAPSIBLE DETAILS */}
+        {showDetails && (
+          <div className="space-y-6 pt-2 border-t border-gray-100">
 
         {/* 1. INFORMASI MINIMAL ORDER & TRANSPARANSI DEBUG (ATURAN UTAMA 1, 2, 4, 9) */}
         <div className="p-4 rounded-2xl bg-violet-50/70 border border-violet-100 space-y-3">
@@ -807,6 +852,8 @@ function ROASResultDisplay({
             </div>
           </div>
         )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1028,7 +1075,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     timestamp: number;
   } | null>(null);
 
-  // Mode 1: Varian States
+  // Mode 1: Varian States - Strict Product/Variant Lock (No silent fallback to products[0])
   const [v1SelectedProductId, setV1SelectedProductId] = React.useState<string>(() => products[0]?.id || '');
   const [v1SelectedVariantId, setV1SelectedVariantId] = React.useState<string>(() => products[0]?.varian?.[0]?.id || '');
   const [v1OrderSim, setV1OrderSim] = React.useState<number>(10);
@@ -1459,8 +1506,12 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   // Sync Products & Variants
   React.useEffect(() => {
     if (Array.isArray(products) && products.length > 0) {
-      if (!products.some((p) => p?.id === v1SelectedProductId)) {
-        setV1SelectedProductId(products[0]?.id || '');
+      if (!v1SelectedProductId || !products.some((p) => p?.id === v1SelectedProductId)) {
+        const firstP = products[0];
+        setV1SelectedProductId(firstP?.id || '');
+        setV1SelectedVariantId(firstP?.varian?.[0]?.id || '');
+        setPriceHandoff(null);
+        setSimulatedPriceOverride(null);
       }
       if (!products.some((p) => p?.id === v2SelectedProductId)) {
         setV2SelectedProductId(products[0]?.id || '');
@@ -1472,22 +1523,39 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   }, [products, v1SelectedProductId, v2SelectedProductId, v3SelectedProductIds.length]);
 
   const v1ActiveProduct = React.useMemo(() => {
-    if (!Array.isArray(products) || products.length === 0) return null;
-    return products.find((p) => p?.id === v1SelectedProductId) || products[0];
+    if (!Array.isArray(products) || products.length === 0 || !v1SelectedProductId) return null;
+    return products.find((p) => p?.id === v1SelectedProductId) || null;
   }, [products, v1SelectedProductId]);
 
   React.useEffect(() => {
     if (v1ActiveProduct && Array.isArray(v1ActiveProduct.varian) && v1ActiveProduct.varian.length > 0) {
-      if (!v1ActiveProduct.varian.some((v) => v?.id === v1SelectedVariantId)) {
+      if (!v1SelectedVariantId || !v1ActiveProduct.varian.some((v) => v?.id === v1SelectedVariantId)) {
         setV1SelectedVariantId(v1ActiveProduct.varian[0]?.id || '');
+        setPriceHandoff(null);
+        setSimulatedPriceOverride(null);
       }
     }
   }, [v1ActiveProduct, v1SelectedVariantId]);
 
   const v1ActiveVariant = React.useMemo(() => {
-    if (!v1ActiveProduct || !Array.isArray(v1ActiveProduct.varian) || v1ActiveProduct.varian.length === 0) return null;
-    return v1ActiveProduct.varian.find((v) => v?.id === v1SelectedVariantId) || v1ActiveProduct.varian[0];
+    if (!v1ActiveProduct || !Array.isArray(v1ActiveProduct.varian) || v1ActiveProduct.varian.length === 0 || !v1SelectedVariantId) return null;
+    return v1ActiveProduct.varian.find((v) => v?.id === v1SelectedVariantId) || null;
   }, [v1ActiveProduct, v1SelectedVariantId]);
+
+  // Temporary console logs to verify product & variant data binding
+  React.useEffect(() => {
+    if (process.env.NODE_ENV !== 'production' && v1ActiveProduct && v1ActiveVariant) {
+      console.log('ROASCalculator Product Context Verification:', {
+        selectedProductId: v1SelectedProductId,
+        selectedVariantId: v1SelectedVariantId,
+        selectedProductIdFromObject: v1ActiveProduct?.id,
+        selectedVariantIdFromObject: v1ActiveVariant?.id,
+        productName: v1ActiveProduct?.nama,
+        variantName: v1ActiveVariant?.nama,
+        variantSellingPrice: v1ActiveVariant?.harga_jual,
+      });
+    }
+  }, [v1SelectedProductId, v1SelectedVariantId, v1ActiveProduct, v1ActiveVariant]);
 
   const v1PromoResult = React.useMemo(() => {
     if (!v1ActiveProduct || !v1ActiveVariant) return null;
@@ -2706,6 +2774,36 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           {/* MODE 1: IKLAN VARIAN */}
           {adMode === 'variant' && (
             <div className="space-y-6">
+              {/* COMPACT PRODUCT IDENTIFIER HEADER (REQUIREMENT F & O) */}
+              {v1ActiveProduct && v1ActiveVariant && (
+                <div className="p-3.5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs border border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-violet-600/30 rounded-xl text-violet-400 shrink-0">
+                      <Calculator className="w-4.5 h-4.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-[11px] font-black tracking-wider text-slate-300 uppercase">KALKULATOR ROAS</h2>
+                        <Badge variant="outline" className="text-[9px] font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 py-0 px-1.5">
+                          Context Verified
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-200 mt-0.5 flex-wrap">
+                        <span>Produk: <strong className="text-white font-bold">{v1ActiveProduct.nama}</strong></span>
+                        <span className="text-slate-600">•</span>
+                        <span>Varian: <strong className="text-violet-300 font-bold">{v1ActiveVariant.nama}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right pl-3 border-l border-slate-800">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Harga Normal</span>
+                    <span className="text-sm font-black text-emerald-400">
+                      {formatCurrency(v1ActiveVariant.harga_jual || 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <Card className="rounded-3xl border-none shadow-sm bg-white">
                 <CardContent className="p-5 md:p-6 space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
@@ -2726,9 +2824,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <Select
                           value={v1SelectedProductId}
                           onValueChange={(val) => {
-                            if (typeof val === 'string') {
+                            if (typeof val === 'string' && val !== v1SelectedProductId) {
+                              const targetProduct = products.find((p) => p.id === val);
+                              const firstVariantId = targetProduct?.varian?.[0]?.id || '';
                               setV1SelectedProductId(val);
+                              setV1SelectedVariantId(firstVariantId);
                               setSimulatedPriceOverride(null);
+                              setPriceHandoff(null);
                             }
                           }}
                         >
@@ -2750,9 +2852,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <Select
                           value={v1SelectedVariantId}
                           onValueChange={(val) => {
-                            if (typeof val === 'string') {
+                            if (typeof val === 'string' && val !== v1SelectedVariantId) {
                               setV1SelectedVariantId(val);
                               setSimulatedPriceOverride(null);
+                              setPriceHandoff(null);
                             }
                           }}
                         >
@@ -2772,6 +2875,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   )}
                 </CardContent>
               </Card>
+
+              {(!v1ActiveProduct || !v1ActiveVariant || v1ActiveProduct.id !== v1SelectedProductId || v1ActiveVariant.id !== v1SelectedVariantId) && (
+                <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <span>Produk atau varian tidak ditemukan. Silakan pilih kembali produk.</span>
+                </div>
+              )}
 
               {v1Calculation && (
                 <ROASResultDisplay
