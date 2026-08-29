@@ -877,11 +877,20 @@ function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestIn
     return (
       <Card className="rounded-3xl border-2 border-amber-300 bg-amber-50/50 shadow-sm overflow-hidden">
         <CardContent className="p-5 space-y-3">
-          <div className="flex items-center gap-2 border-b border-amber-200/80 pb-3">
-            <Sparkles className="w-5 h-5 text-amber-600" />
-            <h3 className="text-sm font-black uppercase tracking-wider text-amber-950">
-              🎉 SIMULASI PROMO TANGGAL CANTIK
-            </h3>
+          <div className="flex items-center justify-between border-b border-amber-200/80 pb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-600" />
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-wider text-amber-950">
+                  🎉 SIMULASI PROMO TANGGAL CANTIK
+                </h3>
+                {product && variant && (
+                  <p className="text-xs font-bold text-amber-800">
+                    {product.nama} ({variant.nama})
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
           <div className="p-3 bg-amber-100/60 rounded-xl border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-700" />
@@ -908,7 +917,7 @@ function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestIn
 
   return (
     <Card className="rounded-3xl border-2 border-amber-400 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/30 shadow-md overflow-hidden">
-      <CardHeader className="p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex flex-row items-center justify-between">
+      <CardHeader className="p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex flex-row items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-white/20 rounded-2xl backdrop-blur-xs">
             <Sparkles className="w-5 h-5 text-amber-100" />
@@ -920,6 +929,11 @@ function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestIn
             <h3 className="text-base font-black tracking-tight text-white">
               🎉 SIMULASI PROMO TANGGAL CANTIK
             </h3>
+            {product && variant && (
+              <p className="text-xs font-bold text-amber-100 mt-0.5">
+                Produk: <strong className="text-white">{product.nama}</strong> • Varian: <strong className="text-amber-200">{variant.nama}</strong>
+              </p>
+            )}
           </div>
         </div>
         <div className="text-right">
@@ -934,7 +948,9 @@ function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestIn
           <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
             <span className="text-xs font-bold text-gray-500 block uppercase tracking-wider">Harga Normal</span>
             <div className="text-xl font-black text-gray-800">{formatCurrency(normalPrice)}</div>
-            <p className="text-[10px] text-gray-400">Harga Master Produk (Tidak Berubah)</p>
+            <p className="text-[10px] text-gray-500 font-medium">
+              Harga Master {product ? `(${product.nama}${variant ? ` - ${variant.nama}` : ''})` : 'Produk'} (Tidak Berubah)
+            </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-400 shadow-xs space-y-1">
@@ -1557,14 +1573,42 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     }
   }, [v1SelectedProductId, v1SelectedVariantId, v1ActiveProduct, v1ActiveVariant]);
 
-  const v1PromoResult = React.useMemo(() => {
-    if (!v1ActiveProduct || !v1ActiveVariant) return null;
-    const hppPcs = calcHppPerPcs(v1ActiveVariant, ingredients);
-    const minOrder = Math.max(1, Number(v1ActiveVariant.min_order) || 1);
-    const feeConfig = extractFeeRates(v1ActiveProduct, v1ActiveVariant);
-    const normalPrice = Number(v1ActiveVariant.harga_jual) || 0;
+  const v2ActiveProduct = React.useMemo(() => {
+    if (!Array.isArray(products) || products.length === 0) return null;
+    return products.find((p) => p?.id === v2SelectedProductId) || products[0];
+  }, [products, v2SelectedProductId]);
 
-    return calculatePromoTanggalCantik({
+  // Active Product & Variant Resolution for Promo Tanggal Cantik
+  const { activeProductForPromo, activeVariantForPromo, activePromoResult } = React.useMemo(() => {
+    let prod: Product | null = null;
+    let varItem: Variant | null = null;
+
+    if (adMode === 'variant') {
+      prod = v1ActiveProduct;
+      varItem = v1ActiveVariant;
+    } else if (adMode === 'product') {
+      prod = v2ActiveProduct;
+      if (prod && Array.isArray(prod.varian) && prod.varian.length > 0) {
+        varItem = prod.varian.find((v) => v2SelectedVariantIds.includes(v.id)) || prod.varian[0];
+      }
+    } else if (adMode === 'group') {
+      const firstProdId = v3SelectedProductIds[0];
+      prod = products.find((p) => p?.id === firstProdId) || null;
+      if (prod && Array.isArray(prod.varian) && prod.varian.length > 0) {
+        varItem = prod.varian[0];
+      }
+    }
+
+    if (!prod || !varItem) {
+      return { activeProductForPromo: null, activeVariantForPromo: null, activePromoResult: null };
+    }
+
+    const hppPcs = calcHppPerPcs(varItem, ingredients);
+    const minOrder = Math.max(1, Number(varItem.min_order) || 1);
+    const feeConfig = extractFeeRates(prod, varItem);
+    const normalPrice = Number(varItem.harga_jual) || 0;
+
+    const promoResult = calculatePromoTanggalCantik({
       sellingPrice: normalPrice,
       hppPcs,
       minOrder,
@@ -1581,9 +1625,20 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       roundingStep: roundingOption,
       promoDiscountPct,
     });
+
+    return {
+      activeProductForPromo: prod,
+      activeVariantForPromo: varItem,
+      activePromoResult: promoResult,
+    };
   }, [
+    adMode,
     v1ActiveProduct,
     v1ActiveVariant,
+    v2ActiveProduct,
+    v2SelectedVariantIds,
+    v3SelectedProductIds,
+    products,
     ingredients,
     voucherNominalInput,
     voucherPctInput,
@@ -1597,15 +1652,15 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
   const handleTestPromoInFindRoas = React.useCallback(
     (promoPrice: number) => {
-      if (!v1ActiveProduct || !v1ActiveVariant) return;
+      if (!activeProductForPromo || !activeVariantForPromo) return;
 
       setPriceHandoff({
         source: 'cari-harga',
         priceSource: 'recommended-price',
-        productId: v1ActiveProduct.id,
-        variantId: v1ActiveVariant.id,
+        productId: activeProductForPromo.id,
+        variantId: activeVariantForPromo.id,
         recommendedPrice: promoPrice,
-        prices: { [v1ActiveVariant.id]: promoPrice },
+        prices: { [activeVariantForPromo.id]: promoPrice },
         timestamp: Date.now(),
       });
 
@@ -1613,16 +1668,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       setV1SimRoas(targetRoasInput);
 
       toast.success(
-        `Harga promo ${formatCurrency(promoPrice)} diteruskan ke CARI ROAS (Target ROAS: ${targetRoasInput}x)`
+        `Harga promo ${formatCurrency(promoPrice)} diteruskan ke CARI ROAS (${activeProductForPromo.nama} - ${activeVariantForPromo.nama})`
       );
     },
-    [v1ActiveProduct, v1ActiveVariant, targetRoasInput]
+    [activeProductForPromo, activeVariantForPromo, targetRoasInput]
   );
-
-  const v2ActiveProduct = React.useMemo(() => {
-    if (!Array.isArray(products) || products.length === 0) return null;
-    return products.find((p) => p?.id === v2SelectedProductId) || products[0];
-  }, [products, v2SelectedProductId]);
 
   React.useEffect(() => {
     if (v2ActiveProduct && Array.isArray(v2ActiveProduct.varian)) {
@@ -2759,9 +2809,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       {/* 🎉 DISPLAY SIMULASI PROMO TANGGAL CANTIK */}
       {isPromoActive && (
         <PromoTanggalCantikDisplayCard
-          promoResult={v1PromoResult}
-          product={v1ActiveProduct}
-          variant={v1ActiveVariant}
+          promoResult={activePromoResult}
+          product={activeProductForPromo}
+          variant={activeVariantForPromo}
           onTestInFindRoas={handleTestPromoInFindRoas}
         />
       )}
@@ -2829,6 +2879,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                               const firstVariantId = targetProduct?.varian?.[0]?.id || '';
                               setV1SelectedProductId(val);
                               setV1SelectedVariantId(firstVariantId);
+                              setV2SelectedProductId(val);
                               setSimulatedPriceOverride(null);
                               setPriceHandoff(null);
                             }
@@ -2948,7 +2999,15 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         <Select
                           value={v2SelectedProductId}
                           onValueChange={(val) => {
-                            if (typeof val === 'string') setV2SelectedProductId(val);
+                            if (typeof val === 'string' && val !== v2SelectedProductId) {
+                              const targetProduct = products.find((p) => p.id === val);
+                              const firstVariantId = targetProduct?.varian?.[0]?.id || '';
+                              setV2SelectedProductId(val);
+                              setV1SelectedProductId(val);
+                              setV1SelectedVariantId(firstVariantId);
+                              setSimulatedPriceOverride(null);
+                              setPriceHandoff(null);
+                            }
                           }}
                         >
                           <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
