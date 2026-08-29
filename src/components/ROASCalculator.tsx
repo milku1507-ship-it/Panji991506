@@ -2534,6 +2534,365 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         </div>
       </div>
 
+      {/* ====================================================================
+          1. INPUT SELEKSI PRODUK & VARIAN (DI ATAS SEBELUM PARAMETER STRATEGI)
+          ==================================================================== */}
+      <div className="space-y-6">
+        {/* MODE 1: IKLAN VARIAN - SELEKSI PRODUK & VARIAN */}
+        {adMode === 'variant' && (
+          <div className="space-y-4">
+            {/* COMPACT PRODUCT IDENTIFIER HEADER */}
+            {v1ActiveProduct && v1ActiveVariant && (
+              <div className="p-3.5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs border border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-violet-600/30 rounded-xl text-violet-400 shrink-0">
+                    <Calculator className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-[11px] font-black tracking-wider text-slate-300 uppercase">KALKULATOR ROAS</h2>
+                      <Badge variant="outline" className="text-[9px] font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 py-0 px-1.5">
+                        Context Verified
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-200 mt-0.5 flex-wrap">
+                      <span>Produk: <strong className="text-white font-bold">{v1ActiveProduct.nama}</strong></span>
+                      <span className="text-slate-600">•</span>
+                      <span>Varian: <strong className="text-violet-300 font-bold">{v1ActiveVariant.nama}</strong></span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right pl-3 border-l border-slate-800">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Harga Normal</span>
+                  <span className="text-sm font-black text-emerald-400">
+                    {formatCurrency(v1ActiveVariant.harga_jual || 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <Card className="rounded-3xl border-none shadow-sm bg-white">
+              <CardContent className="p-5 md:p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
+                    Pilih Varian
+                  </span>
+                  <h2 className="text-sm font-bold text-gray-900">Pilih Produk & Varian Iklan</h2>
+                </div>
+
+                {products.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    Belum ada produk. Tambahkan produk di menu HPP terlebih dahulu.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
+                      <Select
+                        value={v1SelectedProductId}
+                        onValueChange={(val) => {
+                          if (typeof val === 'string' && val !== v1SelectedProductId) {
+                            const targetProduct = products.find((p) => p.id === val);
+                            const firstVariantId = targetProduct?.varian?.[0]?.id || '';
+                            setV1SelectedProductId(val);
+                            setV1SelectedVariantId(firstVariantId);
+                            setV2SelectedProductId(val);
+                            setSimulatedPriceOverride(null);
+                            setPriceHandoff(null);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
+                          <SelectValue placeholder="Pilih produk..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={p.id} className="text-xs">
+                              {p.nama} {p.sku ? `(${p.sku})` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-gray-600">Pilih Varian yang Diiklankan</Label>
+                      <Select
+                        value={v1SelectedVariantId}
+                        onValueChange={(val) => {
+                          if (typeof val === 'string' && val !== v1SelectedVariantId) {
+                            setV1SelectedVariantId(val);
+                            setSimulatedPriceOverride(null);
+                            setPriceHandoff(null);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
+                          <SelectValue placeholder="Pilih varian..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(v1ActiveProduct?.varian || []).map((v) => (
+                            <SelectItem key={v.id} value={v.id} className="text-xs">
+                              {v.nama} — {formatCurrency(v.harga_jual, true)}{v.harga_coret && v.harga_coret > v.harga_jual ? ` (Coret: ${formatCurrency(v.harga_coret, true)})` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {(!v1ActiveProduct || !v1ActiveVariant || v1ActiveProduct.id !== v1SelectedProductId || v1ActiveVariant.id !== v1SelectedVariantId) && (
+              <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                <span>Produk atau varian tidak ditemukan. Silakan pilih kembali produk.</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MODE 2: IKLAN PRODUK - SELEKSI PRODUK & CHECKLIST VARIAN */}
+        {adMode === 'product' && (
+          <Card className="rounded-3xl border-none shadow-sm bg-white">
+            <CardContent className="p-5 md:p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
+                  Checklist Varian & Bobot Sales
+                </span>
+                <h2 className="text-sm font-bold text-gray-900">Varian Terpilih dalam Produk</h2>
+              </div>
+
+              {products.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                  Belum ada produk. Tambahkan produk di menu HPP terlebih dahulu.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
+                    <Select
+                      value={v2SelectedProductId}
+                      onValueChange={(val) => {
+                        if (typeof val === 'string' && val !== v2SelectedProductId) {
+                          const targetProduct = products.find((p) => p.id === val);
+                          const firstVariantId = targetProduct?.varian?.[0]?.id || '';
+                          setV2SelectedProductId(val);
+                          setV1SelectedProductId(val);
+                          setV1SelectedVariantId(firstVariantId);
+                          setSimulatedPriceOverride(null);
+                          setPriceHandoff(null);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
+                        <SelectValue placeholder="Pilih produk..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.id} className="text-xs">
+                            {p.nama} — {(p.varian || []).length} Varian
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {v2ActiveProduct && (
+                    <div className="space-y-2 pt-2">
+                      <Label className="text-xs font-bold text-gray-700">
+                        Centang Varian yang Diiklankan & Atur Bobot (%):
+                      </Label>
+
+                      <div className="space-y-2.5">
+                        {(v2ActiveProduct.varian || []).map((v) => {
+                          const isChecked = v2SelectedVariantIds.includes(v.id);
+                          const hppPcs = calcHppPerPcs(v, ingredients);
+
+                          return (
+                            <div
+                              key={v.id}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                isChecked ? 'bg-white border-violet-200' : 'bg-gray-50/60 border-gray-200/60 opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isChecked && v2SelectedVariantIds.length > 1) {
+                                      setV2SelectedVariantIds((prev) => prev.filter((id) => id !== v.id));
+                                    } else if (!isChecked) {
+                                      setV2SelectedVariantIds((prev) => [...prev, v.id]);
+                                    }
+                                  }}
+                                  className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-all ${
+                                    isChecked ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-gray-300'
+                                  }`}
+                                >
+                                  {isChecked && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                </button>
+                                <div className="space-y-0.5 min-w-0">
+                                  <p className="text-xs font-bold text-gray-900 truncate">{v.nama}</p>
+                                  <p className="text-[11px] text-gray-500">
+                                    Harga: <strong>{formatCurrency(v.harga_jual, true)}</strong>{v.harga_coret && v.harga_coret > v.harga_jual ? <span className="text-gray-400 text-[10px] ml-1">(Coret: <span className="line-through">{formatCurrency(v.harga_coret, true)}</span>)</span> : null} • HPP: <strong>{formatCurrency(Math.round(hppPcs), true)}</strong> • Min: {v.min_order || 1} pack
+                                  </p>
+                                </div>
+                              </div>
+
+                              {isChecked && (
+                                <div className="flex items-center gap-2.5 shrink-0 sm:pl-4">
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    value={v2VariantWeights[v.id] || 0}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                                      setV2VariantWeights((prev) => ({ ...prev, [v.id]: val }));
+                                    }}
+                                    className="w-20 sm:w-28 h-2 rounded-lg bg-gray-200 appearance-none cursor-pointer accent-violet-600"
+                                  />
+                                  <div className="flex items-center gap-1 w-16">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      value={v2VariantWeights[v.id] || 0}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                                        setV2VariantWeights((prev) => ({ ...prev, [v.id]: val }));
+                                      }}
+                                      className="h-8 text-xs font-bold text-center px-1 rounded-lg"
+                                    />
+                                    <span className="text-xs font-bold text-gray-400">%</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* MODE 3: IKLAN GRUP - SELEKSI GRUP PRODUK */}
+        {adMode === 'group' && (
+          <Card className="rounded-3xl border-none shadow-sm bg-white">
+            <CardContent className="p-5 md:p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
+                  Pengaturan Grup Produk
+                </span>
+                <h2 className="text-sm font-bold text-gray-900">Portfolio Produk dalam Grup Iklan</h2>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-600">Nama Grup Iklan</Label>
+                  <Input
+                    value={v3GroupName}
+                    onChange={(e) => {
+                      setV3GroupName(e.target.value);
+                      savePreferences('v3GroupName', e.target.value);
+                    }}
+                    placeholder="Nama Grup Iklan"
+                    className="rounded-xl h-11 font-bold text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-600">Tambah Produk</Label>
+                  <Select
+                    onValueChange={(val) => {
+                      if (typeof val === 'string' && val && !v3SelectedProductIds.includes(val)) {
+                        setV3SelectedProductIds((prev) => [...prev, val]);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="rounded-xl h-11 bg-violet-50/50 border-violet-200 text-violet-700 font-bold text-xs">
+                      <SelectValue placeholder="+ Tambah Produk..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products
+                        .filter((p) => !v3SelectedProductIds.includes(p.id))
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id} className="text-xs">
+                            {p.nama}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Product Weight List */}
+              <div className="space-y-3 pt-2">
+                {v3SelectedProductIds.map((pId) => {
+                  const prod = products.find((p) => p.id === pId);
+                  if (!prod) return null;
+
+                  return (
+                    <div
+                      key={pId}
+                      className="p-3.5 rounded-2xl bg-white border border-gray-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-0.5 min-w-0 flex-1">
+                        <p className="text-xs font-bold text-gray-900 truncate">{prod.nama}</p>
+                        <p className="text-[11px] text-gray-500">{(prod.varian || []).length} varian terpilih</p>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={v3ProductWeights[pId] || 0}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                            setV3ProductWeights((prev) => ({ ...prev, [pId]: val }));
+                          }}
+                          className="w-20 sm:w-28 h-2 rounded-lg bg-gray-200 appearance-none cursor-pointer accent-violet-600"
+                        />
+                        <div className="flex items-center gap-1 w-16">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={v3ProductWeights[pId] || 0}
+                            onChange={(e) => {
+                              const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                              setV3ProductWeights((prev) => ({ ...prev, [pId]: val }));
+                            }}
+                            className="h-8 text-xs font-bold text-center px-1 rounded-lg"
+                          />
+                          <span className="text-xs font-bold text-gray-400">%</span>
+                        </div>
+
+                        {v3SelectedProductIds.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setV3SelectedProductIds((prev) => prev.filter((id) => id !== pId))}
+                            className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
       {/* PARAMETER STRATEGI (TARGET ROAS, TARGET PROFIT BERSIH, BUFFER, VOUCHER, PPN) */}
       <Card className="rounded-3xl border border-violet-100 shadow-sm bg-white">
         <CardContent className="p-5 md:p-6 space-y-4">
@@ -2822,475 +3181,120 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       {calcMode === 'find_roas' && (
         <div className="space-y-6">
           {/* MODE 1: IKLAN VARIAN */}
-          {adMode === 'variant' && (
-            <div className="space-y-6">
-              {/* COMPACT PRODUCT IDENTIFIER HEADER (REQUIREMENT F & O) */}
-              {v1ActiveProduct && v1ActiveVariant && (
-                <div className="p-3.5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs border border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-violet-600/30 rounded-xl text-violet-400 shrink-0">
-                      <Calculator className="w-4.5 h-4.5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-[11px] font-black tracking-wider text-slate-300 uppercase">KALKULATOR ROAS</h2>
-                        <Badge variant="outline" className="text-[9px] font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 py-0 px-1.5">
-                          Context Verified
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-200 mt-0.5 flex-wrap">
-                        <span>Produk: <strong className="text-white font-bold">{v1ActiveProduct.nama}</strong></span>
-                        <span className="text-slate-600">•</span>
-                        <span>Varian: <strong className="text-violet-300 font-bold">{v1ActiveVariant.nama}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right pl-3 border-l border-slate-800">
-                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Harga Normal</span>
-                    <span className="text-sm font-black text-emerald-400">
-                      {formatCurrency(v1ActiveVariant.harga_jual || 0)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              <Card className="rounded-3xl border-none shadow-sm bg-white">
-                <CardContent className="p-5 md:p-6 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
-                      Pilih Varian
-                    </span>
-                    <h2 className="text-sm font-bold text-gray-900">Pilih Produk & Varian Iklan</h2>
-                  </div>
-
-                  {products.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                      Belum ada produk. Tambahkan produk di menu HPP terlebih dahulu.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
-                        <Select
-                          value={v1SelectedProductId}
-                          onValueChange={(val) => {
-                            if (typeof val === 'string' && val !== v1SelectedProductId) {
-                              const targetProduct = products.find((p) => p.id === val);
-                              const firstVariantId = targetProduct?.varian?.[0]?.id || '';
-                              setV1SelectedProductId(val);
-                              setV1SelectedVariantId(firstVariantId);
-                              setV2SelectedProductId(val);
-                              setSimulatedPriceOverride(null);
-                              setPriceHandoff(null);
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
-                            <SelectValue placeholder="Pilih produk..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map((p) => (
-                              <SelectItem key={p.id} value={p.id} className="text-xs">
-                                {p.nama} {p.sku ? `(${p.sku})` : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-gray-600">Pilih Varian yang Diiklankan</Label>
-                        <Select
-                          value={v1SelectedVariantId}
-                          onValueChange={(val) => {
-                            if (typeof val === 'string' && val !== v1SelectedVariantId) {
-                              setV1SelectedVariantId(val);
-                              setSimulatedPriceOverride(null);
-                              setPriceHandoff(null);
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
-                            <SelectValue placeholder="Pilih varian..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(v1ActiveProduct?.varian || []).map((v) => (
-                              <SelectItem key={v.id} value={v.id} className="text-xs">
-                                {v.nama} — {formatCurrency(v.harga_jual, true)}{v.harga_coret && v.harga_coret > v.harga_jual ? ` (Coret: ${formatCurrency(v.harga_coret, true)})` : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {(!v1ActiveProduct || !v1ActiveVariant || v1ActiveProduct.id !== v1SelectedProductId || v1ActiveVariant.id !== v1SelectedVariantId) && (
-                <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
-                  <span>Produk atau varian tidak ditemukan. Silakan pilih kembali produk.</span>
-                </div>
-              )}
-
-              {v1Calculation && (
-                <ROASResultDisplay
-                  modeTitle="Iklan Varian"
-                  name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
-                  targetProduct={v1Calculation.product}
-                  targetVariant={v1Calculation.variant}
-                  onApplyPrice={handleApplyPriceRequest}
-                  isPriceFromCariHarga={v1Calculation.isPriceOverridden}
-                  masterPrice={v1Calculation.basePrice}
-                  onResetPrice={() => handleResetVariantPrice(v1Calculation.product.id, v1Calculation.variant.id)}
-                  minOrder={v1Calculation.minOrder}
-                  hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
-                  hargaCoretPcs={v1Calculation.variant.harga_coret}
-                  diskonPersen={v1Calculation.variant.diskon_persen}
-                  hppPcs={v1Calculation.hppPcs}
-                  biayaProsesOrder={v1Calculation.unitEcon.nominalPerOrder}
-                  hargaJualOrder={v1Calculation.unitEcon.sellingPrice * v1Calculation.minOrder}
-                  hppProdukOrder={v1Calculation.hppPcs * v1Calculation.minOrder}
-                  totalHppRealOrder={v1Calculation.unitEcon.realHppPerUnit * v1Calculation.minOrder}
-                  voucherPerPcs={v1Calculation.unitEcon.voucherPerUnit}
-                  omzetRealOrder={v1Calculation.unitEcon.omzetRealPerUnit * v1Calculation.minOrder}
-                  profitSebelumIklanOrder={v1Calculation.unitEcon.profitBeforeAdsPerUnit * v1Calculation.minOrder}
-                  marginSebelumIklanPct={v1Calculation.unitEcon.marginBeforeAdsPct}
-                  targetProfitPct={targetProfitPct}
-                  targetProfitNominalOrder={v1Calculation.unitEcon.targetProfitNominalPerUnit * v1Calculation.minOrder}
-                  maxAdSpendOrder={v1Calculation.unitEcon.maxAdSpendPerUnit * v1Calculation.minOrder}
-                  roasBep={v1Calculation.unitEcon.roasBep}
-                  roasTarget={v1Calculation.unitEcon.roasTarget}
-                  roasSetting={v1Calculation.unitEcon.roasSetting}
-                  bufferPct={bufferPct}
-                  isTargetFeasible={v1Calculation.unitEcon.isTargetFeasible}
-                  simRoas={v1SimRoas}
-                  setSimRoas={setV1SimRoas}
-                  includePpn={includePpn}
-                  ppnRate={ppnRate}
-                  numOrders={v1OrderSim}
-                  setNumOrders={setV1OrderSim}
-                />
-              )}
-            </div>
+          {adMode === 'variant' && v1Calculation && (
+            <ROASResultDisplay
+              modeTitle="Iklan Varian"
+              name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
+              targetProduct={v1Calculation.product}
+              targetVariant={v1Calculation.variant}
+              onApplyPrice={handleApplyPriceRequest}
+              isPriceFromCariHarga={v1Calculation.isPriceOverridden}
+              masterPrice={v1Calculation.basePrice}
+              onResetPrice={() => handleResetVariantPrice(v1Calculation.product.id, v1Calculation.variant.id)}
+              minOrder={v1Calculation.minOrder}
+              hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
+              hargaCoretPcs={v1Calculation.variant.harga_coret}
+              diskonPersen={v1Calculation.variant.diskon_persen}
+              hppPcs={v1Calculation.hppPcs}
+              biayaProsesOrder={v1Calculation.unitEcon.nominalPerOrder}
+              hargaJualOrder={v1Calculation.unitEcon.sellingPrice * v1Calculation.minOrder}
+              hppProdukOrder={v1Calculation.hppPcs * v1Calculation.minOrder}
+              totalHppRealOrder={v1Calculation.unitEcon.realHppPerUnit * v1Calculation.minOrder}
+              voucherPerPcs={v1Calculation.unitEcon.voucherPerUnit}
+              omzetRealOrder={v1Calculation.unitEcon.omzetRealPerUnit * v1Calculation.minOrder}
+              profitSebelumIklanOrder={v1Calculation.unitEcon.profitBeforeAdsPerUnit * v1Calculation.minOrder}
+              marginSebelumIklanPct={v1Calculation.unitEcon.marginBeforeAdsPct}
+              targetProfitPct={targetProfitPct}
+              targetProfitNominalOrder={v1Calculation.unitEcon.targetProfitNominalPerUnit * v1Calculation.minOrder}
+              maxAdSpendOrder={v1Calculation.unitEcon.maxAdSpendPerUnit * v1Calculation.minOrder}
+              roasBep={v1Calculation.unitEcon.roasBep}
+              roasTarget={v1Calculation.unitEcon.roasTarget}
+              roasSetting={v1Calculation.unitEcon.roasSetting}
+              bufferPct={bufferPct}
+              isTargetFeasible={v1Calculation.unitEcon.isTargetFeasible}
+              simRoas={v1SimRoas}
+              setSimRoas={setV1SimRoas}
+              includePpn={includePpn}
+              ppnRate={ppnRate}
+              numOrders={v1OrderSim}
+              setNumOrders={setV1OrderSim}
+            />
           )}
 
           {/* MODE 2: IKLAN PRODUK */}
-          {adMode === 'product' && (
-            <div className="space-y-6">
-              <Card className="rounded-3xl border-none shadow-sm bg-white">
-                <CardContent className="p-5 md:p-6 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
-                      Checklist Varian & Bobot Sales
-                    </span>
-                    <h2 className="text-sm font-bold text-gray-900">Varian Terpilih dalam Produk</h2>
-                  </div>
-
-                  {products.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                      Belum ada produk. Tambahkan produk di menu HPP terlebih dahulu.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
-                        <Select
-                          value={v2SelectedProductId}
-                          onValueChange={(val) => {
-                            if (typeof val === 'string' && val !== v2SelectedProductId) {
-                              const targetProduct = products.find((p) => p.id === val);
-                              const firstVariantId = targetProduct?.varian?.[0]?.id || '';
-                              setV2SelectedProductId(val);
-                              setV1SelectedProductId(val);
-                              setV1SelectedVariantId(firstVariantId);
-                              setSimulatedPriceOverride(null);
-                              setPriceHandoff(null);
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="rounded-xl h-11 bg-gray-50/80 border-gray-200 font-bold text-xs">
-                            <SelectValue placeholder="Pilih produk..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map((p) => (
-                              <SelectItem key={p.id} value={p.id} className="text-xs">
-                                {p.nama} — {(p.varian || []).length} Varian
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {v2ActiveProduct && (
-                        <div className="space-y-2 pt-2">
-                          <Label className="text-xs font-bold text-gray-700">
-                            Centang Varian yang Diiklankan & Atur Bobot (%):
-                          </Label>
-
-                          <div className="space-y-2.5">
-                            {(v2ActiveProduct.varian || []).map((v) => {
-                              const isChecked = v2SelectedVariantIds.includes(v.id);
-                              const hppPcs = calcHppPerPcs(v, ingredients);
-
-                              return (
-                                <div
-                                  key={v.id}
-                                  className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                                    isChecked ? 'bg-white border-violet-200' : 'bg-gray-50/60 border-gray-200/60 opacity-60'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (isChecked && v2SelectedVariantIds.length > 1) {
-                                          setV2SelectedVariantIds((prev) => prev.filter((id) => id !== v.id));
-                                        } else if (!isChecked) {
-                                          setV2SelectedVariantIds((prev) => [...prev, v.id]);
-                                        }
-                                      }}
-                                      className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-all ${
-                                        isChecked ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-gray-300'
-                                      }`}
-                                    >
-                                      {isChecked && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                    </button>
-                                    <div className="space-y-0.5 min-w-0">
-                                      <p className="text-xs font-bold text-gray-900 truncate">{v.nama}</p>
-                                      <p className="text-[11px] text-gray-500">
-                                        Harga: <strong>{formatCurrency(v.harga_jual, true)}</strong>{v.harga_coret && v.harga_coret > v.harga_jual ? <span className="text-gray-400 text-[10px] ml-1">(Coret: <span className="line-through">{formatCurrency(v.harga_coret, true)}</span>)</span> : null} • HPP: <strong>{formatCurrency(Math.round(hppPcs), true)}</strong> • Min: {v.min_order || 1} pack
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {isChecked && (
-                                    <div className="flex items-center gap-2.5 shrink-0 sm:pl-4">
-                                      <input
-                                        type="range"
-                                        min={0}
-                                        max={100}
-                                        value={v2VariantWeights[v.id] || 0}
-                                        onChange={(e) => {
-                                          const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                          setV2VariantWeights((prev) => ({ ...prev, [v.id]: val }));
-                                        }}
-                                        className="w-20 sm:w-28 h-2 rounded-lg bg-gray-200 appearance-none cursor-pointer accent-violet-600"
-                                      />
-                                      <div className="flex items-center gap-1 w-16">
-                                        <Input
-                                          type="number"
-                                          min={0}
-                                          max={100}
-                                          value={v2VariantWeights[v.id] || 0}
-                                          onChange={(e) => {
-                                            const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                            setV2VariantWeights((prev) => ({ ...prev, [v.id]: val }));
-                                          }}
-                                          className="h-8 text-xs font-bold text-center px-1 rounded-lg"
-                                        />
-                                        <span className="text-xs font-bold text-gray-400">%</span>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {v2Calculation && (
-                <ROASResultDisplay
-                  modeTitle="Iklan Produk (Weighted Average)"
-                  name={v2Calculation.product.nama}
-                  isPriceFromCariHarga={v2Calculation.isPriceOverridden}
-                  masterPrice={v2Calculation.weightedBasePrice}
-                  onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
-                  minOrder={v2Calculation.effectiveMinOrder}
-                  hargaJualPcs={v2Calculation.weightedPrice}
-                  hppPcs={v2Calculation.weightedHppPcs}
-                  biayaProsesOrder={v2Calculation.productEcon.nominalPerOrder}
-                  hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
-                  hppProdukOrder={v2Calculation.weightedHppPcs * v2Calculation.effectiveMinOrder}
-                  totalHppRealOrder={v2Calculation.productEcon.realHppPerUnit * v2Calculation.effectiveMinOrder}
-                  voucherPerPcs={v2Calculation.productEcon.voucherPerUnit}
-                  omzetRealOrder={v2Calculation.productEcon.omzetRealPerUnit * v2Calculation.effectiveMinOrder}
-                  profitSebelumIklanOrder={v2Calculation.productEcon.profitBeforeAdsPerUnit * v2Calculation.effectiveMinOrder}
-                  marginSebelumIklanPct={v2Calculation.productEcon.marginBeforeAdsPct}
-                  targetProfitPct={targetProfitPct}
-                  targetProfitNominalOrder={v2Calculation.productEcon.targetProfitNominalPerUnit * v2Calculation.effectiveMinOrder}
-                  maxAdSpendOrder={v2Calculation.productEcon.maxAdSpendPerUnit * v2Calculation.effectiveMinOrder}
-                  roasBep={v2Calculation.productEcon.roasBep}
-                  roasTarget={v2Calculation.productEcon.roasTarget}
-                  roasSetting={v2Calculation.productEcon.roasSetting}
-                  bufferPct={bufferPct}
-                  roasWorst={v2Calculation.roasWorst}
-                  worstName={v2Calculation.worstVariantName}
-                  isTargetFeasible={v2Calculation.productEcon.isTargetFeasible}
-                  simRoas={v2SimRoas}
-                  setSimRoas={setV2SimRoas}
-                  includePpn={includePpn}
-                  ppnRate={ppnRate}
-                  numOrders={v2OrderSim}
-                  setNumOrders={setV2OrderSim}
-                />
-              )}
-            </div>
+          {adMode === 'product' && v2Calculation && (
+            <ROASResultDisplay
+              modeTitle="Iklan Produk (Weighted Average)"
+              name={v2Calculation.product.nama}
+              isPriceFromCariHarga={v2Calculation.isPriceOverridden}
+              masterPrice={v2Calculation.weightedBasePrice}
+              onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
+              minOrder={v2Calculation.effectiveMinOrder}
+              hargaJualPcs={v2Calculation.weightedPrice}
+              hppPcs={v2Calculation.weightedHppPcs}
+              biayaProsesOrder={v2Calculation.productEcon.nominalPerOrder}
+              hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
+              hppProdukOrder={v2Calculation.weightedHppPcs * v2Calculation.effectiveMinOrder}
+              totalHppRealOrder={v2Calculation.productEcon.realHppPerUnit * v2Calculation.effectiveMinOrder}
+              voucherPerPcs={v2Calculation.productEcon.voucherPerUnit}
+              omzetRealOrder={v2Calculation.productEcon.omzetRealPerUnit * v2Calculation.effectiveMinOrder}
+              profitSebelumIklanOrder={v2Calculation.productEcon.profitBeforeAdsPerUnit * v2Calculation.effectiveMinOrder}
+              marginSebelumIklanPct={v2Calculation.productEcon.marginBeforeAdsPct}
+              targetProfitPct={targetProfitPct}
+              targetProfitNominalOrder={v2Calculation.productEcon.targetProfitNominalPerUnit * v2Calculation.effectiveMinOrder}
+              maxAdSpendOrder={v2Calculation.productEcon.maxAdSpendPerUnit * v2Calculation.effectiveMinOrder}
+              roasBep={v2Calculation.productEcon.roasBep}
+              roasTarget={v2Calculation.productEcon.roasTarget}
+              roasSetting={v2Calculation.productEcon.roasSetting}
+              bufferPct={bufferPct}
+              roasWorst={v2Calculation.roasWorst}
+              worstName={v2Calculation.worstVariantName}
+              isTargetFeasible={v2Calculation.productEcon.isTargetFeasible}
+              simRoas={v2SimRoas}
+              setSimRoas={setV2SimRoas}
+              includePpn={includePpn}
+              ppnRate={ppnRate}
+              numOrders={v2OrderSim}
+              setNumOrders={setV2OrderSim}
+            />
           )}
 
           {/* MODE 3: IKLAN GRUP */}
-          {adMode === 'group' && (
-            <div className="space-y-6">
-              <Card className="rounded-3xl border-none shadow-sm bg-white">
-                <CardContent className="p-5 md:p-6 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-gray-100 flex-wrap gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg">
-                      Pengaturan Grup Produk
-                    </span>
-                    <h2 className="text-sm font-bold text-gray-900">Portfolio Produk dalam Grup Iklan</h2>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="sm:col-span-2 space-y-1.5">
-                      <Label className="text-xs font-bold text-gray-600">Nama Grup Iklan</Label>
-                      <Input
-                        value={v3GroupName}
-                        onChange={(e) => {
-                          setV3GroupName(e.target.value);
-                          savePreferences('v3GroupName', e.target.value);
-                        }}
-                        placeholder="Nama Grup Iklan"
-                        className="rounded-xl h-11 font-bold text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold text-gray-600">Tambah Produk</Label>
-                      <Select
-                        onValueChange={(val) => {
-                          if (typeof val === 'string' && val && !v3SelectedProductIds.includes(val)) {
-                            setV3SelectedProductIds((prev) => [...prev, val]);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="rounded-xl h-11 bg-violet-50/50 border-violet-200 text-violet-700 font-bold text-xs">
-                          <SelectValue placeholder="+ Tambah Produk..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products
-                            .filter((p) => !v3SelectedProductIds.includes(p.id))
-                            .map((p) => (
-                              <SelectItem key={p.id} value={p.id} className="text-xs">
-                                {p.nama}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Product Weight List */}
-                  <div className="space-y-3 pt-2">
-                    {v3SelectedProductIds.map((pId) => {
-                      const prod = products.find((p) => p.id === pId);
-                      if (!prod) return null;
-
-                      return (
-                        <div
-                          key={pId}
-                          className="p-3.5 rounded-2xl bg-white border border-gray-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                        >
-                          <div className="space-y-0.5 min-w-0 flex-1">
-                            <p className="text-xs font-bold text-gray-900 truncate">{prod.nama}</p>
-                            <p className="text-[11px] text-gray-500">{(prod.varian || []).length} varian terpilih</p>
-                          </div>
-
-                          <div className="flex items-center gap-2.5 shrink-0">
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              value={v3ProductWeights[pId] || 0}
-                              onChange={(e) => {
-                                const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                setV3ProductWeights((prev) => ({ ...prev, [pId]: val }));
-                              }}
-                              className="w-20 sm:w-28 h-2 rounded-lg bg-gray-200 appearance-none cursor-pointer accent-violet-600"
-                            />
-                            <div className="flex items-center gap-1 w-16">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={v3ProductWeights[pId] || 0}
-                                onChange={(e) => {
-                                  const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                  setV3ProductWeights((prev) => ({ ...prev, [pId]: val }));
-                                }}
-                                className="h-8 text-xs font-bold text-center px-1 rounded-lg"
-                              />
-                              <span className="text-xs font-bold text-gray-400">%</span>
-                            </div>
-
-                            {v3SelectedProductIds.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => setV3SelectedProductIds((prev) => prev.filter((id) => id !== pId))}
-                                className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {v3Calculation && (
-                <ROASResultDisplay
-                  modeTitle="Iklan Grup (Consolidated Portfolio)"
-                  name={v3Calculation.groupName}
-                  isPriceFromCariHarga={v3Calculation.isPriceOverridden}
-                  masterPrice={v3Calculation.groupWeightedBasePrice}
-                  onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
-                  minOrder={1}
-                  hargaJualPcs={v3Calculation.groupWeightedPrice}
-                  hppPcs={v3Calculation.groupWeightedHppPcs}
-                  biayaProsesOrder={v3Calculation.groupEcon.nominalPerOrder}
-                  hargaJualOrder={v3Calculation.groupWeightedPrice}
-                  hppProdukOrder={v3Calculation.groupWeightedHppPcs}
-                  totalHppRealOrder={v3Calculation.groupEcon.realHppPerUnit}
-                  voucherPerPcs={v3Calculation.groupEcon.voucherPerUnit}
-                  omzetRealOrder={v3Calculation.groupEcon.omzetRealPerUnit}
-                  profitSebelumIklanOrder={v3Calculation.groupEcon.profitBeforeAdsPerUnit}
-                  marginSebelumIklanPct={v3Calculation.groupEcon.marginBeforeAdsPct}
-                  targetProfitPct={targetProfitPct}
-                  targetProfitNominalOrder={v3Calculation.groupEcon.targetProfitNominalPerUnit}
-                  maxAdSpendOrder={v3Calculation.groupEcon.maxAdSpendPerUnit}
-                  roasBep={v3Calculation.groupEcon.roasBep}
-                  roasTarget={v3Calculation.groupEcon.roasTarget}
-                  roasSetting={v3Calculation.groupEcon.roasSetting}
-                  bufferPct={bufferPct}
-                  roasWorst={v3Calculation.roasWorstGroup}
-                  worstName={v3Calculation.worstProductName}
-                  isTargetFeasible={v3Calculation.groupEcon.isTargetFeasible}
-                  simRoas={v3SimRoas}
-                  setSimRoas={setV3SimRoas}
-                  includePpn={includePpn}
-                  ppnRate={ppnRate}
-                  numOrders={v3OrderSim}
-                  setNumOrders={setV3OrderSim}
-                />
-              )}
-            </div>
+          {adMode === 'group' && v3Calculation && (
+            <ROASResultDisplay
+              modeTitle="Iklan Grup (Consolidated Portfolio)"
+              name={v3Calculation.groupName}
+              isPriceFromCariHarga={v3Calculation.isPriceOverridden}
+              masterPrice={v3Calculation.groupWeightedBasePrice}
+              onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
+              minOrder={1}
+              hargaJualPcs={v3Calculation.groupWeightedPrice}
+              hppPcs={v3Calculation.groupWeightedHppPcs}
+              biayaProsesOrder={v3Calculation.groupEcon.nominalPerOrder}
+              hargaJualOrder={v3Calculation.groupWeightedPrice}
+              hppProdukOrder={v3Calculation.groupWeightedHppPcs}
+              totalHppRealOrder={v3Calculation.groupEcon.realHppPerUnit}
+              voucherPerPcs={v3Calculation.groupEcon.voucherPerUnit}
+              omzetRealOrder={v3Calculation.groupEcon.omzetRealPerUnit}
+              profitSebelumIklanOrder={v3Calculation.groupEcon.profitBeforeAdsPerUnit}
+              marginSebelumIklanPct={v3Calculation.groupEcon.marginBeforeAdsPct}
+              targetProfitPct={targetProfitPct}
+              targetProfitNominalOrder={v3Calculation.groupEcon.targetProfitNominalPerUnit}
+              maxAdSpendOrder={v3Calculation.groupEcon.maxAdSpendPerUnit}
+              roasBep={v3Calculation.groupEcon.roasBep}
+              roasTarget={v3Calculation.groupEcon.roasTarget}
+              roasSetting={v3Calculation.groupEcon.roasSetting}
+              bufferPct={bufferPct}
+              roasWorst={v3Calculation.roasWorstGroup}
+              worstName={v3Calculation.worstProductName}
+              isTargetFeasible={v3Calculation.groupEcon.isTargetFeasible}
+              simRoas={v3SimRoas}
+              setSimRoas={setV3SimRoas}
+              includePpn={includePpn}
+              ppnRate={ppnRate}
+              numOrders={v3OrderSim}
+              setNumOrders={setV3OrderSim}
+            />
           )}
         </div>
       )}
