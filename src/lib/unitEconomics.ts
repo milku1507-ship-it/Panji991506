@@ -739,8 +739,9 @@ export function calculatePromoTanggalCantik(input: PromoTanggalCantikInput): Pro
   }
 
   // Calculate required promo list price before discount
+  const roundingStep = input.roundingStep !== undefined ? input.roundingStep : 0;
   const rawListPrice = requiredEffectivePrice / (1 - discountRate);
-  let recommendedPromoPrice = roundPrice(rawListPrice, input.roundingStep || 100);
+  let recommendedPromoPrice = roundPrice(rawListPrice, roundingStep);
 
   // Validate using central calculation engine
   let effectivePrice = recommendedPromoPrice * (1 - discountRate);
@@ -758,7 +759,7 @@ export function calculatePromoTanggalCantik(input: PromoTanggalCantikInput): Pro
     loopCount < 30 &&
     (!validationEffective.isTargetFeasible || validationEffective.actualProfitPercent < (input.targetProfitPct - 0.01))
   ) {
-    const step = input.roundingStep && input.roundingStep > 0 ? input.roundingStep : 100;
+    const step = roundingStep > 0 ? roundingStep : 1;
     recommendedPromoPrice += step;
     effectivePrice = recommendedPromoPrice * (1 - discountRate);
     validationEffective = calculateProductEconomics({
