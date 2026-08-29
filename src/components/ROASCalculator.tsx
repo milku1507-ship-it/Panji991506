@@ -9,6 +9,7 @@ import {
   runUnitEconomicsSelfTests,
   UnitEconomicsResult,
   ReverseCalcResult,
+  ProductFeeDetail,
 } from '../lib/unitEconomics';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, sanitizeData } from '../lib/firebase';
@@ -61,6 +62,7 @@ import {
   Flame,
   ArrowUpRight,
   FileSpreadsheet,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -104,7 +106,7 @@ function calcHppPerPcs(variant: Variant, ingredients: Ingredient[]): number {
 }
 
 /**
- * Ekstraksi konfigurasi fee dari produk dan varian
+ * Ekstraksi konfigurasi fee dari produk dan varian (Single Source of Truth)
  */
 function extractFeeRates(product?: Product, variant?: Variant) {
   const pFees = Array.isArray(product?.biaya_lain) ? product.biaya_lain : [];
@@ -134,7 +136,7 @@ function extractFeeRates(product?: Product, variant?: Variant) {
     nominalPerOrder = 1600;
   }
 
-  return { percentRate, nominalPerOrder, nominalPerUnit };
+  return { percentRate, nominalPerOrder, nominalPerUnit, allFees };
 }
 
 /* ==========================================================================
@@ -244,6 +246,7 @@ interface ROASResultDisplayProps {
   isPriceFromCariHarga?: boolean;
   masterPrice?: number;
   onResetPrice?: () => void;
+  feeBreakdown?: ProductFeeDetail[];
 }
 
 function ROASResultDisplay({
@@ -284,6 +287,7 @@ function ROASResultDisplay({
   isPriceFromCariHarga,
   masterPrice,
   onResetPrice,
+  feeBreakdown,
 }: ROASResultDisplayProps) {
   const t_ppn = includePpn ? ppnRate / 100 : 0;
   
@@ -486,6 +490,57 @@ function ROASResultDisplay({
             </div>
           ) : null}
         </div>
+
+        {/* DIAGNOSTIK & STRUKTUR BIAYA TERPADU (SINGLE SOURCE OF TRUTH) */}
+        {feeBreakdown && feeBreakdown.length > 0 && (
+          <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2 border-b border-amber-200/70 pb-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-700" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-amber-950">
+                  DIAGNOSTIK BIAYA TAMBAHAN VARIAN (SINGLE SOURCE OF TRUTH)
+                </h4>
+              </div>
+              <Badge variant="outline" className="bg-white text-emerald-800 border-emerald-300 font-bold text-[10px]">
+                ✓ Tersinkronisasi Otomatis dari Varian
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {feeBreakdown.map((fee, idx) => (
+                <div key={idx} className="p-2.5 bg-white rounded-xl border border-amber-100/90 flex flex-col justify-between gap-1 shadow-2xs">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="text-[11px] font-bold text-gray-800 truncate" title={fee.nama}>
+                      {fee.nama}
+                    </span>
+                    <Badge variant="secondary" className="text-[9px] font-black px-1.5 py-0 shrink-0">
+                      {fee.tipe === 'persen' ? `${fee.nilai}%` : fee.isOrderLevel ? 'Per Order' : 'Per Unit'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-50">
+                    <span className="text-[10px] text-gray-400 font-medium">Beban / Unit:</span>
+                    <span className="font-black text-amber-700">{formatCurrency(fee.nominalPerUnit)}</span>
+                  </div>
+                  {minOrder > 1 && (
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <span>Beban / Order ({minOrder} pcs):</span>
+                      <span className="font-bold text-gray-700">{formatCurrency(fee.nominalPerOrder)}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-1 text-xs text-amber-900 font-bold flex-wrap gap-2">
+              <span>
+                Total Biaya Tambahan: <strong>{formatCurrency(feeBreakdown.reduce((acc, f) => acc + f.nominalPerUnit, 0))} / pcs</strong> ({formatCurrency(feeBreakdown.reduce((acc, f) => acc + f.nominalPerOrder, 0))} / order)
+              </span>
+              <span className="text-[10px] text-gray-500 font-normal italic">
+                *Revenue − HPP − Packaging − Seluruh Biaya Tambahan = Profit Sebelum Iklan
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* 2. HASIL KALKULASI UNIT ECONOMICS (PER ORDER) */}
         <div className="space-y-3">
@@ -1392,6 +1447,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerOrder: feeConfig.nominalPerOrder,
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
+      additionalCosts: feeConfig.allFees,
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       includePpn,
@@ -1452,6 +1508,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerOrder: feeConfig.nominalPerOrder,
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
+      additionalCosts: feeConfig.allFees,
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       targetRoas: targetRoasInput,
@@ -1469,6 +1526,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerOrder: feeConfig.nominalPerOrder,
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
+      additionalCosts: feeConfig.allFees,
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       includePpn,
@@ -1548,6 +1606,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const hppPcs = calcHppPerPcs(v, ingredients);
       const minOrder = Math.max(1, Number(v.min_order) || 1);
       const w = normWeights[v.id] || 0;
+      const vFeeConfig = extractFeeRates(v2ActiveProduct, v);
 
       weightedPrice += price * w;
       weightedBasePrice += masterPrice * w;
@@ -1558,9 +1617,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         sellingPrice: price,
         hppPcs,
         minOrder,
-        nominalPerOrder: feeConfig.nominalPerOrder,
-        nominalPerUnit: feeConfig.nominalPerUnit,
-        percentRate: feeConfig.percentRate,
+        nominalPerOrder: vFeeConfig.nominalPerOrder,
+        nominalPerUnit: vFeeConfig.nominalPerUnit,
+        percentRate: vFeeConfig.percentRate,
+        additionalCosts: vFeeConfig.allFees,
         voucherNominal: voucherNominalInput,
         voucherPct: voucherPctInput,
         includePpn,
@@ -1580,6 +1640,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         minOrder,
         weightPct: Math.round(w * 100),
         vEcon,
+        vFeeConfig,
         isPriceOverridden: isFromCariHarga,
         priceSource: source,
       };
@@ -1594,6 +1655,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       nominalPerOrder: feeConfig.nominalPerOrder,
       nominalPerUnit: feeConfig.nominalPerUnit,
       percentRate: feeConfig.percentRate,
+      additionalCosts: feeConfig.allFees,
       voucherNominal: voucherNominalInput,
       voucherPct: voucherPctInput,
       includePpn,
@@ -1662,13 +1724,15 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       const hppPcs = calcHppPerPcs(v, ingredients);
       const minOrder = Math.max(1, Number(v.min_order) || 1);
       const w = normWeights[v.id] || 0;
+      const vFeeConfig = extractFeeRates(v2ActiveProduct, v);
 
       const singleRev = calculateReversePrice({
         hppPcs,
         minOrder,
-        nominalPerOrder: feeConfig.nominalPerOrder,
-        nominalPerUnit: feeConfig.nominalPerUnit,
-        percentRate: feeConfig.percentRate,
+        nominalPerOrder: vFeeConfig.nominalPerOrder,
+        nominalPerUnit: vFeeConfig.nominalPerUnit,
+        percentRate: vFeeConfig.percentRate,
+        additionalCosts: vFeeConfig.allFees,
         voucherNominal: voucherNominalInput,
         voucherPct: voucherPctInput,
         targetRoas: targetRoasInput,
@@ -1683,6 +1747,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         weightPct: Math.round(w * 100),
         hppPcs,
         minOrder,
+        vFeeConfig,
         rev: singleRev,
       };
     });
@@ -1707,9 +1772,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         sellingPrice: conservativePriceRecommended,
         hppPcs: vd.hppPcs,
         minOrder: vd.minOrder,
-        nominalPerOrder: feeConfig.nominalPerOrder,
-        nominalPerUnit: feeConfig.nominalPerUnit,
-        percentRate: feeConfig.percentRate,
+        nominalPerOrder: vd.vFeeConfig.nominalPerOrder,
+        nominalPerUnit: vd.vFeeConfig.nominalPerUnit,
+        percentRate: vd.vFeeConfig.percentRate,
+        additionalCosts: vd.vFeeConfig.allFees,
         voucherNominal: voucherNominalInput,
         voucherPct: voucherPctInput,
         includePpn,

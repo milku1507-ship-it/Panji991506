@@ -376,14 +376,19 @@ export default function TransactionManager({ user, transactions, setTransactions
       if (txData.penjualan_detail) {
         txData.penjualan_detail.forEach((pd: any) => {
           const prod = products.find(p => p.id === pd.produk_id);
-          if (prod?.biaya_lain) {
-            prod.biaya_lain.forEach((fee: any) => {
-              if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai });
+          const allVariantIds = Array.isArray(pd.varian) ? pd.varian.map((v: any) => v?.varian_id) : [pd.varian_id];
+          const prodFees = prod?.biaya_lain || [];
+          prodFees.forEach((fee: any) => {
+            if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai });
+          });
+          if (prod?.varian) {
+            prod.varian.forEach((v) => {
+              if (allVariantIds.includes(v.id) && v.biaya_lain) {
+                v.biaya_lain.forEach((fee: any) => {
+                  if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai });
+                });
+              }
             });
-          } else if (prod) {
-            console.log(`[TX] Produk "${prod.nama}" tidak punya biaya_lain — tanpa pajak`);
-          } else {
-            console.error(`[TX] Produk tidak ditemukan untuk produk_id: ${pd.produk_id}`);
           }
         });
       }

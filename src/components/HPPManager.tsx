@@ -10,6 +10,7 @@ import {
   GripVertical, ChevronDown, ChevronUp, Camera, ClipboardCopy, Check, Files
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
+import { calculateProductEconomics } from '../lib/unitEconomics';
 import ProductPhotoUpload from './ProductPhotoUpload';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
@@ -1369,14 +1370,15 @@ function VariantPricingInputs({
     return (totalMaterials + (Number(packingCost) || 0)) / qBatch;
   };
 
-  const calculateVariantFees = (fees: AdditionalFee[] = [], sellingPrice: number = 0) => {
+  const calculateVariantFees = (fees: AdditionalFee[] = [], sellingPrice: number = 0, minOrder: number = 1) => {
     if (!fees || fees.length === 0) return 0;
-    return fees.reduce((sum, fee) => {
-      if (fee.tipe === 'persen') {
-        return sum + ((Number(fee.nilai) || 0) / 100) * (Number(sellingPrice) || 0);
-      }
-      return sum + (Number(fee.nilai) || 0);
-    }, 0);
+    const econ = calculateProductEconomics({
+      sellingPrice,
+      hppPcs: 0,
+      minOrder,
+      additionalCosts: fees,
+    });
+    return econ.totalAdditionalCostPerUnit;
   };
 
   const calculateBatchHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
@@ -1827,24 +1829,25 @@ function VariantPricingInputs({
                         ...(activeHppVariant.biaya_lain || [])
                       ];
                       if (allFees.length === 0) return null;
+                      const econ = calculateProductEconomics({
+                        sellingPrice: activeHppVariant.harga_jual,
+                        hppPcs: 0,
+                        minOrder: Number(activeHppVariant.min_order) || 1,
+                        additionalCosts: allFees,
+                      });
                       return (
                         <div className="pt-2 border-t border-dashed border-gray-100 space-y-1.5">
                           <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider">Biaya Tambahan / pcs</p>
-                          {allFees.map((fee, idx) => {
-                            const feeNominal = fee.tipe === 'persen' 
-                              ? ((Number(fee.nilai) || 0) / 100) * (Number(activeHppVariant.harga_jual) || 0)
-                              : (Number(fee.nilai) || 0);
-                            return (
-                              <div key={idx} className="flex justify-between items-center text-xs">
-                                <span className="text-gray-500 font-medium truncate max-w-[150px]">
-                                  {fee.nama} {fee.tipe === 'persen' && `(${fee.nilai}%)`}
-                                </span>
-                                <span className="font-bold text-amber-600">
-                                  {formatCurrency(feeNominal, true)}
-                                </span>
-                              </div>
-                            );
-                          })}
+                          {econ.feeBreakdown.map((fee, idx) => (
+                            <div key={idx} className="flex justify-between items-center text-xs">
+                              <span className="text-gray-500 font-medium truncate max-w-[150px]">
+                                {fee.nama} {fee.tipe === 'persen' && `(${fee.nilai}%)`}
+                              </span>
+                              <span className="font-bold text-amber-600">
+                                {formatCurrency(fee.nominalPerUnit, true)}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       );
                     })()}
@@ -1934,13 +1937,18 @@ function VariantPricingInputs({
                   </div>
                   {(() => {
                     const hppBase = calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch);
-                    const totalFees = calculateVariantFees(
-                      [...(selectedProduct?.biaya_lain || []), ...(activeHppVariant.biaya_lain || [])],
-                      activeHppVariant.harga_jual
-                    );
-                    const totalHppWithFees = hppBase + totalFees;
-                    const labaBersih = activeHppVariant.harga_jual - totalHppWithFees;
-                    const marginProfit = activeHppVariant.harga_jual > 0 ? (labaBersih / activeHppVariant.harga_jual) * 100 : 0;
+                    const allFees = [
+                      ...(selectedProduct?.biaya_lain || []),
+                      ...(activeHppVariant.biaya_lain || [])
+                    ];
+                    const econ = calculateProductEconomics({
+                      sellingPrice: activeHppVariant.harga_jual,
+                      hppPcs: hppBase,
+                      minOrder: Number(activeHppVariant.min_order) || 1,
+                      additionalCosts: allFees,
+                    });
+                    const labaBersih = econ.profitBeforeAdsPerUnit;
+                    const marginProfit = econ.marginBeforeAdsPct;
                     return (
                       <div className="pt-4 border-t border-dashed border-gray-100">
                         <div className="flex justify-between items-center mb-2">
