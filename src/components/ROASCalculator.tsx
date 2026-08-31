@@ -6,6 +6,7 @@ import {
   calculateUnitEconomics,
   calculateReversePrice,
   calculatePromoTanggalCantik,
+  calculatePriceSpread,
   roundPrice,
   runUnitEconomicsSelfTests,
   UnitEconomicsResult,
@@ -66,6 +67,7 @@ import {
   FileSpreadsheet,
   ShieldCheck,
   AlertCircle,
+  FolderKanban,
 } from 'lucide-react';
 
 interface Props {
@@ -250,6 +252,38 @@ interface ROASResultDisplayProps {
   masterPrice?: number;
   onResetPrice?: () => void;
   feeBreakdown?: ProductFeeDetail[];
+  isAggregated?: boolean;
+  priceSpread?: {
+    minPrice: number;
+    maxPrice: number;
+    spreadNominal: number;
+    spreadPct: number;
+    warningLevel: 'none' | 'moderate' | 'high';
+    warningMessage: string | null;
+  };
+  variantBreakdown?: Array<{
+    variant: Variant;
+    price: number;
+    basePrice: number;
+    hppPcs: number;
+    minOrder: number;
+    weightPct: number;
+    vEcon: UnitEconomicsResult;
+    isPriceOverridden: boolean;
+    priceSource: string;
+  }>;
+  productBreakdown?: Array<{
+    product: Product;
+    weightPct: number;
+    minOrder: number;
+    weightedPrice: number;
+    weightedBasePrice: number;
+    weightedHppPcs: number;
+    activeVariantsCount: number;
+    pEcon: UnitEconomicsResult;
+  }>;
+  onApplyVariantPrice?: (product: Product, variant: Variant, newPrice: number) => void;
+  onResetVariantPrice?: (productId: string, variantId: string) => void;
 }
 
 function ROASResultDisplay({
@@ -291,6 +325,12 @@ function ROASResultDisplay({
   masterPrice,
   onResetPrice,
   feeBreakdown,
+  isAggregated,
+  priceSpread,
+  variantBreakdown,
+  productBreakdown,
+  onApplyVariantPrice,
+  onResetVariantPrice,
 }: ROASResultDisplayProps) {
   const t_ppn = includePpn ? ppnRate / 100 : 0;
   
@@ -315,8 +355,6 @@ function ROASResultDisplay({
   const totalSimProfitAfterAds = simProfitAfterAdsOrder * nOrders;
 
   // Determine automatic status based on strict intent rules:
-  // Target Profit = Target Minimum (%)
-  // Profit Aktual = Calculated actual net profit (%)
   const selisihPct = simMarginAfterAdsPct - targetProfitPct;
 
   let statusBadge = '✓ DI ATAS TARGET';
@@ -358,7 +396,17 @@ function ROASResultDisplay({
                   % PROMO {diskonPersen}% AKTIF
                 </Badge>
               )}
+              {isAggregated && (
+                <Badge variant="outline" className="bg-purple-50 text-purple-800 border-purple-200 text-[10px] font-bold">
+                  Rata-rata Tertimbang (Weighted Average)
+                </Badge>
+              )}
             </h3>
+            {isAggregated && (
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Nilai gabungan dihitung proporsional dari estimasi bobot varian/produk untuk simulasi iklan portfolio.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {onApplyPrice && targetProduct && targetVariant && (
@@ -379,6 +427,31 @@ function ROASResultDisplay({
       </CardHeader>
 
       <CardContent className="p-4 md:p-5 space-y-4">
+        {/* PRICE SPREAD WARNING BANNER */}
+        {priceSpread && priceSpread.warningLevel !== 'none' && (
+          <div
+            className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+              priceSpread.warningLevel === 'high'
+                ? 'bg-rose-50 border-rose-200 text-rose-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}
+          >
+            <AlertTriangle
+              className={`w-4 h-4 shrink-0 mt-0.5 ${
+                priceSpread.warningLevel === 'high' ? 'text-rose-600' : 'text-amber-600'
+              }`}
+            />
+            <div className="space-y-0.5">
+              <span className="font-black">
+                {priceSpread.warningLevel === 'high' ? '⚠ Disparitas Harga Tinggi' : 'ℹ Disparitas Harga Moderat'} (Rentang: {formatCurrency(priceSpread.minPrice)} – {formatCurrency(priceSpread.maxPrice)} | Selisih: {priceSpread.spreadPct.toFixed(1)}%)
+              </span>
+              <p className="text-[11px] leading-relaxed opacity-90">
+                {priceSpread.warningMessage}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* INDICATOR FOR PRICE FROM CARI HARGA */}
         {isPriceFromCariHarga && (
           <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl flex items-center justify-between gap-3 flex-wrap shadow-2xs">
@@ -386,11 +459,13 @@ function ROASResultDisplay({
               <div className="flex items-center gap-2">
                 <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                   <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ✓ Harga dari Cari Harga: {formatCurrency(hargaJualPcs)}
+                  ✓ Menggunakan Harga Rekomendasi dari Cari Harga
                 </span>
               </div>
               <p className="text-[10px] text-emerald-800 font-medium">
-                Harga ini berasal dari rekomendasi Cari Harga (Harga Master: {masterPrice !== undefined && masterPrice > 0 ? formatCurrency(masterPrice) : '-'}).
+                {isAggregated
+                  ? `Setiap varian menerima harga rekomendasi masing-masing (Rata-rata simulasi: ${formatCurrency(hargaJualPcs)} vs Master: ${masterPrice ? formatCurrency(masterPrice) : '-'}).`
+                  : `Harga ini berasal dari rekomendasi Cari Harga: ${formatCurrency(hargaJualPcs)} (Harga Master: ${masterPrice ? formatCurrency(masterPrice) : '-'}).`}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -545,6 +620,190 @@ function ROASResultDisplay({
             </div>
           ) : null}
         </div>
+
+        {/* RINCIAN SETIAP VARIAN / SKU (SINGLE SOURCE OF TRUTH) */}
+        {variantBreakdown && variantBreakdown.length > 0 && (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-purple-50/50 to-white border border-indigo-200/80 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2 border-b border-indigo-200/70 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Package className="w-4 h-4 text-indigo-600" />
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-indigo-950">
+                    RINCIAN SETIAP VARIAN / SKU (SINGLE SOURCE OF TRUTH)
+                  </h4>
+                  <p className="text-[10px] text-indigo-700">
+                    Setiap SKU memiliki unit economics dan harga jual aktual tersendiri.
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="bg-white text-indigo-900 border-indigo-300 font-bold text-[10px]">
+                {variantBreakdown.length} Varian Aktif
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {variantBreakdown.map((vb) => (
+                <div
+                  key={vb.variant.id}
+                  className="p-3.5 bg-white rounded-2xl border border-indigo-100/90 shadow-2xs space-y-2.5 flex flex-col justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-black text-xs text-gray-900 truncate" title={vb.variant.nama}>
+                        {vb.variant.nama}
+                      </span>
+                      <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full shrink-0">
+                        {vb.weightPct}% Bobot
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline justify-between pt-1">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase block">Harga Jual Aktual</span>
+                        <span className="text-base font-black text-emerald-600">
+                          {formatCurrency(vb.price)}
+                        </span>
+                      </div>
+                      {vb.isPriceOverridden ? (
+                        <Badge className="bg-emerald-100 text-emerald-800 border-none text-[9px] font-bold">
+                          ✓ Dari Cari Harga
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-gray-400">Master</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1.5 border-t border-gray-100">
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">HPP / pcs</span>
+                      <span className="font-bold text-rose-600">{formatCurrency(vb.hppPcs)}</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">Min Order</span>
+                      <span className="font-bold text-gray-800">{vb.minOrder} pcs</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">ROAS BEP</span>
+                      <span className="font-black text-blue-700">{vb.vEcon.roasBep.toFixed(2)}x</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">Target ROAS</span>
+                      <span className="font-black text-violet-700">{vb.vEcon.roasTarget.toFixed(2)}x</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-gray-100">
+                    <span className="text-gray-500">Profit Bersih:</span>
+                    <span
+                      className={`font-black ${
+                        vb.vEcon.actualProfitPercent >= targetProfitPct
+                          ? 'text-emerald-600'
+                          : vb.vEcon.actualProfitPercent >= 0
+                          ? 'text-amber-600'
+                          : 'text-rose-600'
+                      }`}
+                    >
+                      {vb.vEcon.actualProfitPercent.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  {onApplyVariantPrice && targetProduct && (
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <Button
+                        type="button"
+                        onClick={() => onApplyVariantPrice(targetProduct, vb.variant, vb.price)}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg h-7 shadow-2xs flex items-center justify-center gap-1"
+                      >
+                        <Tag className="w-3 h-3" />
+                        <span>Terapkan</span>
+                      </Button>
+                      {onResetVariantPrice && vb.isPriceOverridden && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => onResetVariantPrice(targetProduct.id, vb.variant.id)}
+                          className="text-[10px] font-bold rounded-lg h-7 px-2 border-gray-200 text-gray-600 hover:bg-gray-100"
+                        >
+                          Reset
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RINCIAN PRODUK DALAM IKLAN GRUP */}
+        {productBreakdown && productBreakdown.length > 0 && (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-50/70 via-indigo-50/50 to-white border border-purple-200/80 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2 border-b border-purple-200/70 pb-2.5">
+              <div className="flex items-center gap-2">
+                <FolderKanban className="w-4 h-4 text-purple-600" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-purple-950">
+                  RINCIAN PRODUK DALAM IKLAN GRUP
+                </h4>
+              </div>
+              <Badge variant="outline" className="bg-white text-purple-900 border-purple-300 font-bold text-[10px]">
+                {productBreakdown.length} Produk
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {productBreakdown.map((pb) => (
+                <div
+                  key={pb.product.id}
+                  className="p-3.5 bg-white rounded-2xl border border-purple-100/90 shadow-2xs space-y-2 flex flex-col justify-between"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-black text-xs text-gray-900 truncate" title={pb.product.nama}>
+                      {pb.product.nama}
+                    </span>
+                    <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full shrink-0">
+                      {pb.weightPct}% Bobot
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-gray-100">
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">Rata-rata Harga</span>
+                      <span className="font-bold text-gray-900">{formatCurrency(pb.weightedPrice)}</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">Rata-rata HPP</span>
+                      <span className="font-bold text-rose-600">{formatCurrency(pb.weightedHppPcs)}</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">ROAS BEP</span>
+                      <span className="font-black text-blue-700">{pb.pEcon.roasBep.toFixed(2)}x</span>
+                    </div>
+                    <div className="p-1.5 bg-gray-50 rounded-lg">
+                      <span className="text-gray-400 block text-[9px] uppercase">Target ROAS</span>
+                      <span className="font-black text-violet-700">{pb.pEcon.roasTarget.toFixed(2)}x</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-gray-100">
+                    <span className="text-gray-500">Profit Bersih:</span>
+                    <span
+                      className={`font-black ${
+                        pb.pEcon.actualProfitPercent >= targetProfitPct
+                          ? 'text-emerald-600'
+                          : pb.pEcon.actualProfitPercent >= 0
+                          ? 'text-amber-600'
+                          : 'text-rose-600'
+                      }`}
+                    >
+                      {pb.pEcon.actualProfitPercent.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* DIAGNOSTIK & STRUKTUR BIAYA TERPADU (SINGLE SOURCE OF TRUTH) */}
         {feeBreakdown && feeBreakdown.length > 0 && (
@@ -1222,9 +1481,24 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         };
       }
 
-      // Priority 1: Check Price Handoff from CARI HARGA
+      // Priority 1: Check Price Handoff from CARI HARGA (Strict 1 SKU = 1 Price)
       if (priceHandoff && priceHandoff.source === 'cari-harga') {
-        // A. Direct variantId match
+        // A. Check variantId in handoff.prices map
+        if (
+          priceHandoff.prices &&
+          typeof priceHandoff.prices[variant.id] === 'number' &&
+          priceHandoff.prices[variant.id] > 0
+        ) {
+          const receivedPrice = priceHandoff.prices[variant.id];
+          return {
+            price: receivedPrice,
+            source: 'recommended-price' as const,
+            isFromCariHarga: true,
+            masterPrice,
+          };
+        }
+
+        // B. Direct single variantId match
         if (
           priceHandoff.variantId &&
           priceHandoff.variantId === variant.id &&
@@ -1232,55 +1506,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           priceHandoff.recommendedPrice > 0
         ) {
           const receivedPrice = priceHandoff.recommendedPrice;
-          console.log({
-            receivedPrice,
-            priceSource: 'recommended-price',
-            productMasterPrice: masterPrice,
-            variant: variant.nama,
-          });
-          return {
-            price: receivedPrice,
-            source: 'recommended-price' as const,
-            isFromCariHarga: true,
-            masterPrice,
-          };
-        }
-
-        // B. Check variantId in handoff.prices map
-        if (
-          priceHandoff.prices &&
-          typeof priceHandoff.prices[variant.id] === 'number' &&
-          priceHandoff.prices[variant.id] > 0
-        ) {
-          const receivedPrice = priceHandoff.prices[variant.id];
-          console.log({
-            receivedPrice,
-            priceSource: 'recommended-price',
-            productMasterPrice: masterPrice,
-            variant: variant.nama,
-          });
-          return {
-            price: receivedPrice,
-            source: 'recommended-price' as const,
-            isFromCariHarga: true,
-            masterPrice,
-          };
-        }
-
-        // C. If handoff is for this product with general recommendedPrice
-        if (
-          priceHandoff.productId === productId &&
-          typeof priceHandoff.recommendedPrice === 'number' &&
-          priceHandoff.recommendedPrice > 0 &&
-          (!priceHandoff.variantId || priceHandoff.variantId === variant.id)
-        ) {
-          const receivedPrice = priceHandoff.recommendedPrice;
-          console.log({
-            receivedPrice,
-            priceSource: 'recommended-price',
-            productMasterPrice: masterPrice,
-            variant: variant.nama,
-          });
           return {
             price: receivedPrice,
             source: 'recommended-price' as const,
@@ -2077,6 +2302,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       }
     });
 
+    const priceSpread = calculatePriceSpread(
+      variantDetails.map((vd) => vd.price),
+      weightedPrice
+    );
+
     return {
       product: v2ActiveProduct,
       selectedVariantsCount: selectedVariants.length,
@@ -2090,6 +2320,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       isPriceOverridden: anyPriceOverridden,
       roasWorst: worstDetail ? worstDetail.vEcon.roasBep : 0,
       worstVariantName: worstDetail?.variant?.nama || '-',
+      priceSpread,
     };
   }, [
     v2ActiveProduct,
@@ -2110,7 +2341,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     promoDiscountPct,
   ]);
 
-  // CARI HARGA Engine: Mode 2 (CONSERVATIVE PRICING)
+  // CARI HARGA Engine: Mode 2 (INDIVIDUAL SKU + WEIGHTED AVERAGE)
   const v2ReverseCalc = React.useMemo(() => {
     if (!v2ActiveProduct || !v2ActiveProduct.varian || v2SelectedVariantIds.length === 0) return null;
     const selectedVariants = v2ActiveProduct.varian.filter((v) => v2SelectedVariantIds.includes(v.id));
@@ -2124,7 +2355,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
     const feeConfig = extractFeeRates(v2ActiveProduct);
 
-    // 1. Calculate individual reverse price per variant
+    // 1. Calculate individual reverse price per variant (Single Source of Truth)
     const variantReverseDetails = selectedVariants.map((v) => {
       const hppPcs = calcHppPerPcs(v, ingredients);
       const minOrder = Math.max(1, Number(v.min_order) || 1);
@@ -2189,7 +2420,19 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       };
     });
 
-    // 2. CONSERVATIVE PRICING: Find heaviest variant (highest required exact price)
+    // 2. Calculate Weighted Average Recommended Price
+    const variantRecommendedPrices = variantReverseDetails.map((vd) => vd.rev.priceRecommended);
+    const weightedPriceRecommended = Math.round(
+      variantReverseDetails.reduce((sum, vd) => sum + vd.rev.priceRecommended * (normWeights[vd.variant.id] || 0), 0)
+    );
+    const weightedPriceExact = variantReverseDetails.reduce(
+      (sum, vd) => sum + vd.rev.priceExact * (normWeights[vd.variant.id] || 0),
+      0
+    );
+
+    const priceSpread = calculatePriceSpread(variantRecommendedPrices, weightedPriceRecommended);
+
+    // 3. Find heaviest variant (for reference)
     let maxRequiredPriceExact = 0;
     let heaviestDetail = variantReverseDetails[0];
 
@@ -2202,47 +2445,16 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
     const conservativePriceRecommended = roundPrice(maxRequiredPriceExact, roundingOption);
 
-    // 3. VALIDATION PASS FOR EVERY VARIANT AT THE CONSERVATIVE PRICE
-    let allVariantsPassed = true;
-    const conservativeValidationDetails = variantReverseDetails.map((vd) => {
-      const sellingPrice = isPromoActive ? conservativePriceRecommended * (1 - promoDiscountPct / 100) : conservativePriceRecommended;
-      const val = calculateUnitEconomics({
-        sellingPrice,
-        hppPcs: vd.hppPcs,
-        minOrder: vd.minOrder,
-        nominalPerOrder: vd.vFeeConfig.nominalPerOrder,
-        nominalPerUnit: vd.vFeeConfig.nominalPerUnit,
-        percentRate: vd.vFeeConfig.percentRate,
-        additionalCosts: vd.vFeeConfig.allFees,
-        voucherNominal: voucherNominalInput,
-        voucherPct: voucherPctInput,
-        includePpn,
-        ppnRate,
-        targetProfitPct,
-        actualRoas: targetRoasInput,
-        targetRoas: targetRoasInput,
-      });
-
-      if (!val.isTargetFeasible || val.actualProfitPercent < (targetProfitPct - 0.05)) {
-        allVariantsPassed = false;
-      }
-
-      return {
-        variant: vd.variant,
-        weightPct: vd.weightPct,
-        hppPcs: vd.hppPcs,
-        validation: val,
-      };
-    });
-
     return {
+      weightedPriceRecommended,
+      weightedPriceExact,
+      priceSpread,
       conservativePriceRecommended,
       maxRequiredPriceExact,
       heaviestVariantName: heaviestDetail?.variant?.nama || '-',
       heaviestHpp: heaviestDetail?.hppPcs || 0,
-      isConservativeFeasible: allVariantsPassed && conservativePriceRecommended > 0,
+      isFeasible: variantReverseDetails.every((vd) => vd.rev.isFeasible),
       variantReverseDetails,
-      conservativeValidationDetails,
     };
   }, [
     v2ActiveProduct,
@@ -2284,6 +2496,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     let groupWeightedHppPcs = 0;
     let groupWeightedMinOrder = 0;
     let anyPriceOverridden = false;
+    const allVariantPrices: number[] = [];
 
     const productBreakdown = groupProds.map((prod) => {
       const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
@@ -2307,6 +2520,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         const vShare = 1 / vCount;
 
         const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+        allVariantPrices.push(sellingPrice);
 
         pWeightedPrice += sellingPrice * vShare;
         pWeightedBasePrice += masterPrice * vShare;
@@ -2380,6 +2594,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       }
     });
 
+    const priceSpread = calculatePriceSpread(
+      allVariantPrices.length > 0 ? allVariantPrices : [groupWeightedPrice],
+      groupWeightedPrice
+    );
+
     return {
       groupName: v3GroupName,
       productsCount: groupProds.length,
@@ -2391,6 +2610,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       roasWorstGroup: worstProduct ? worstProduct.pEcon.roasBep : 0,
       worstProductName: worstProduct?.product?.nama || '-',
       productBreakdown,
+      priceSpread,
     };
   }, [
     v3SelectedProductIds,
@@ -2413,7 +2633,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     promoDiscountPct,
   ]);
 
-  // CARI HARGA Engine: Mode 3
+  // CARI HARGA Engine: Mode 3 (INDIVIDUAL SKU + GROUP WEIGHTED AVERAGE)
   const v3ReverseCalc = React.useMemo(() => {
     if (v3SelectedProductIds.length === 0) return null;
     const groupProds = products.filter((p) => v3SelectedProductIds.includes(p.id));
@@ -2422,14 +2642,16 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     const totalProductWeightSum =
       groupProds.reduce((sum, p) => sum + (v3ProductWeights[p.id] || 0), 0) || 100;
 
+    const allVariantRecommendedPrices: number[] = [];
+
     const productReverseDetails = groupProds.map((prod) => {
       const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
       const allVariants = prod.varian || [];
       const activeVarIds = v3GroupProductVariants[prod.id] || allVariants.map((v) => v.id);
       const activeVariants = allVariants.filter((v) => activeVarIds.includes(v.id));
       const pFeeConfig = extractFeeRates(prod);
+      const vCount = Math.max(1, activeVariants.length);
 
-      // Find conservative price across variants in this product
       let pMaxExact = 0;
       let pHeaviestVar = activeVariants[0];
 
@@ -2483,6 +2705,8 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           });
         }
 
+        allVariantRecommendedPrices.push(singleRev.priceRecommended);
+
         if (singleRev.priceExact > pMaxExact) {
           pMaxExact = singleRev.priceExact;
           pHeaviestVar = v;
@@ -2497,52 +2721,37 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       });
 
       const pConservativePrice = roundPrice(pMaxExact, roundingOption);
-
-      // Validation pass for this product
-      let pAllPassed = true;
-      const pValidationList = variantRevList.map((vr) => {
-        const sellingPrice = isPromoActive ? pConservativePrice * (1 - promoDiscountPct / 100) : pConservativePrice;
-        const val = calculateUnitEconomics({
-          sellingPrice,
-          hppPcs: vr.vHpp,
-          minOrder: vr.vMin,
-          nominalPerOrder: pFeeConfig.nominalPerOrder,
-          nominalPerUnit: pFeeConfig.nominalPerUnit,
-          percentRate: pFeeConfig.percentRate,
-          voucherNominal: voucherNominalInput,
-          voucherPct: voucherPctInput,
-          includePpn,
-          ppnRate,
-          targetProfitPct,
-          actualRoas: targetRoasInput,
-          targetRoas: targetRoasInput,
-        });
-
-        if (!val.isTargetFeasible || val.actualProfitPercent < (targetProfitPct - 0.05)) {
-          pAllPassed = false;
-        }
-
-        return {
-          variant: vr.variant,
-          validation: val,
-        };
-      });
+      const pWeightedRecommendedPrice = Math.round(
+        variantRevList.reduce((sum, vr) => sum + vr.rev.priceRecommended * (1 / vCount), 0)
+      );
 
       return {
         product: prod,
         weightPct: Math.round(prodWeight * 100),
         heaviestVarName: pHeaviestVar?.nama || '-',
         pConservativePrice,
+        pWeightedRecommendedPrice,
         pMaxExact,
-        pIsFeasible: pAllPassed && pConservativePrice > 0,
+        pIsFeasible: variantRevList.every((vr) => vr.rev.isFeasible),
         feeConfig: pFeeConfig,
         variantRevList,
-        pValidationList,
       };
     });
 
+    const groupWeightedRecommendedPrice = Math.round(
+      productReverseDetails.reduce((sum, pd) => sum + pd.pWeightedRecommendedPrice * (pd.weightPct / 100), 0)
+    );
+
+    const priceSpread = calculatePriceSpread(
+      allVariantRecommendedPrices.length > 0 ? allVariantRecommendedPrices : [groupWeightedRecommendedPrice],
+      groupWeightedRecommendedPrice
+    );
+
     return {
+      groupWeightedRecommendedPrice,
+      priceSpread,
       productReverseDetails,
+      isFeasible: productReverseDetails.every((pd) => pd.pIsFeasible),
     };
   }, [
     v3SelectedProductIds,
@@ -3381,6 +3590,12 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               ppnRate={ppnRate}
               numOrders={v2OrderSim}
               setNumOrders={setV2OrderSim}
+              isAggregated={true}
+              priceSpread={v2Calculation.priceSpread}
+              variantBreakdown={v2Calculation.variantDetails}
+              targetProduct={v2Calculation.product}
+              onApplyVariantPrice={handleApplyPriceRequest}
+              onResetVariantPrice={handleResetVariantPrice}
             />
           )}
 
@@ -3420,6 +3635,9 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
               ppnRate={ppnRate}
               numOrders={v3OrderSim}
               setNumOrders={setV3OrderSim}
+              isAggregated={true}
+              priceSpread={v3Calculation.priceSpread}
+              productBreakdown={v3Calculation.productBreakdown}
             />
           )}
         </div>
@@ -3454,7 +3672,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                   />
                   <p className="text-[11px] text-emerald-700 font-semibold">Perhitungan menggunakan Target ROAS, bukan ROAS Setting Iklan.</p>
                 </div>
-
 
                 <div className="space-y-1.5">
                   <Label className="text-xs font-bold text-gray-700">Opsi Pembulatan Harga</Label>
@@ -3544,7 +3761,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                       </div>
                     </div>
 
-                    {/* TRANSPARENT VALIDATION BREAKDOWN (SECTION 14 & 15) */}
+                    {/* TRANSPARENT VALIDATION BREAKDOWN */}
                     <div className="p-4 bg-white/90 rounded-2xl border border-emerald-200/80 space-y-3">
                       <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
                         <span className="text-xs font-black uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
@@ -3631,11 +3848,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           {/* MODE 2: CARI HARGA PRODUK */}
           {adMode === 'product' && v2ReverseCalc && (
             <Card className="rounded-3xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/80 via-teal-50/40 to-white shadow-md">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-6 space-y-5">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">
-                      HARGA REKOMENDASI RATA-RATA PRODUK
+                      RATA-RATA HARGA REKOMENDASI PRODUK (WEIGHTED AVERAGE)
                     </span>
                     <h3 className="text-lg font-black text-gray-900">{v2ActiveProduct?.nama}</h3>
                   </div>
@@ -3655,41 +3872,123 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                     className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold shadow-sm h-9 px-4 flex items-center gap-1.5"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    <span>Uji ke Mode CARI ROAS</span>
+                    <span>Uji Seluruh Varian ke Mode CARI ROAS</span>
                   </Button>
                 </div>
 
+                {/* PRICE SPREAD WARNING BANNER */}
+                {v2ReverseCalc.priceSpread && v2ReverseCalc.priceSpread.warningLevel !== 'none' && (
+                  <div
+                    className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+                      v2ReverseCalc.priceSpread.warningLevel === 'high'
+                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    <AlertTriangle
+                      className={`w-4 h-4 shrink-0 mt-0.5 ${
+                        v2ReverseCalc.priceSpread.warningLevel === 'high' ? 'text-rose-600' : 'text-amber-600'
+                      }`}
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-black">
+                        {v2ReverseCalc.priceSpread.warningLevel === 'high' ? '⚠ Disparitas Harga Varian Tinggi' : 'ℹ Disparitas Harga Varian'} (Rentang: {formatCurrency(v2ReverseCalc.priceSpread.minPrice)} – {formatCurrency(v2ReverseCalc.priceSpread.maxPrice)})
+                      </span>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {v2ReverseCalc.priceSpread.warningMessage}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row items-baseline justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold text-gray-500 uppercase">HARGA JUAL PRODUK REKOMENDASI (KONSERVATIF)</p>
+                    <p className="text-xs font-bold text-gray-500 uppercase">RATA-RATA HARGA REKOMENDASI TERTIMBANG</p>
                     <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
-                      {formatCurrency(v2ReverseCalc.conservativePriceRecommended)}
+                      {formatCurrency(v2ReverseCalc.weightedPriceRecommended)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      HPP Varian Kritis ({v2ReverseCalc.heaviestVariantName}): <strong>{formatCurrency(v2ReverseCalc.heaviestHpp)}</strong>
+                      Nilai gabungan ini adalah rata-rata tertimbang berdasarkan bobot estimasi penjualan. Setiap varian memiliki harga rekomendasi tersendiri di bawah ini.
                     </p>
                   </div>
                 </div>
 
-                <div className="space-y-2 pt-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">Rincian per Varian:</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-gray-800">
+                      Rekomendasi Harga Setiap Varian / SKU (Single Source of Truth):
+                    </h4>
+                    <span className="text-[11px] text-gray-500">
+                      {v2ReverseCalc.variantReverseDetails.length} Varian
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {v2ReverseCalc.variantReverseDetails.map((vDetail) => (
-                      <div key={vDetail.variant.id} className="p-3.5 bg-white rounded-2xl border border-emerald-200 space-y-2">
-                        <div className="flex justify-between items-center text-xs font-bold">
-                          <span>{vDetail.variant.nama}</span>
-                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">{vDetail.weightPct}% Sales</span>
+                      <div key={vDetail.variant.id} className="p-4 bg-white rounded-2xl border border-emerald-200 shadow-2xs space-y-3 flex flex-col justify-between">
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-xs font-bold">
+                            <span className="text-gray-900 font-black">{vDetail.variant.nama}</span>
+                            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                              {vDetail.weightPct}% Bobot
+                            </span>
+                          </div>
+                          
+                          <div className="pt-1">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase">Harga Rekomendasi</p>
+                            <p className="text-xl font-black text-emerald-600">
+                              {formatCurrency(vDetail.rev.priceRecommended)}
+                            </p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              Harga Eksak: <strong>{formatCurrency(vDetail.rev.priceExact)}</strong> | Master: {formatCurrency(vDetail.variant.harga_jual)}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-black text-emerald-600">{formatCurrency(vDetail.rev.priceRecommended)}</p>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-2 border-t border-gray-100">
+                          <div className="p-1.5 bg-gray-50 rounded-lg">
+                            <span className="text-gray-400 block text-[9px] uppercase">HPP / pcs</span>
+                            <span className="font-bold text-rose-600">{formatCurrency(vDetail.hppPcs)}</span>
+                          </div>
+                          <div className="p-1.5 bg-gray-50 rounded-lg">
+                            <span className="text-gray-400 block text-[9px] uppercase">HPP Real / unit</span>
+                            <span className="font-bold text-gray-800">{formatCurrency(vDetail.rev.realHppPerUnit)}</span>
+                          </div>
+                        </div>
+
+                        <div className="p-2 bg-emerald-50/70 rounded-xl text-[10px] text-emerald-900 space-y-0.5 border border-emerald-100">
+                          <div className="flex justify-between font-bold">
+                            <span>Verifikasi Profit Bersih:</span>
+                            <span className="text-emerald-700 font-black">
+                              {vDetail.rev.validationRecommended.actualProfitPercent.toFixed(2)}%
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>ROAS BEP:</span>
+                            <span className="font-bold">{vDetail.rev.validationRecommended.roasBep.toFixed(2)}x</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 pt-1">
                           {v2ActiveProduct && (
                             <Button
                               type="button"
                               onClick={() => handleApplyPriceRequest(v2ActiveProduct, vDetail.variant, vDetail.rev.priceRecommended)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg h-7 px-2.5 flex items-center gap-1"
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl h-8 shadow-xs flex items-center justify-center gap-1"
                             >
-                              <Tag className="w-3 h-3" />
+                              <Tag className="w-3.5 h-3.5" />
                               <span>TERAPKAN</span>
+                            </Button>
+                          )}
+                          {v2ActiveProduct && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => handleTransferVariantToFindRoas(v2ActiveProduct, vDetail.variant, vDetail.rev.priceRecommended)}
+                              className="text-xs font-bold rounded-xl h-8 px-2.5 border-violet-200 text-violet-700 hover:bg-violet-50"
+                              title="Uji varian ini secara mandiri di mode Cari ROAS"
+                            >
+                              Uji ROAS
                             </Button>
                           )}
                         </div>
@@ -3704,7 +4003,59 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
           {/* MODE 3: CARI HARGA GRUP */}
           {adMode === 'group' && v3ReverseCalc && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-xs">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">
+                      RATA-RATA HARGA REKOMENDASI GABUNGAN PORTOFOLIO
+                    </span>
+                    <p className="text-2xl sm:text-3xl font-black text-emerald-600 mt-1">
+                      {formatCurrency(v3ReverseCalc.groupWeightedRecommendedPrice)}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Rata-rata tertimbang dari seluruh grup produk. Setiap varian di dalam masing-masing produk memiliki rekomendasi harga individual.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (v3ReverseCalc) {
+                        handleTransferGroupToFindRoas(v3ReverseCalc.productReverseDetails);
+                      }
+                    }}
+                    className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold px-5 shadow-sm h-10 flex items-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Uji Seluruh Harga ke Mode CARI ROAS</span>
+                  </Button>
+                </div>
+
+                {v3ReverseCalc.priceSpread && v3ReverseCalc.priceSpread.warningLevel !== 'none' && (
+                  <div
+                    className={`mt-4 p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+                      v3ReverseCalc.priceSpread.warningLevel === 'high'
+                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    <AlertTriangle
+                      className={`w-4 h-4 shrink-0 mt-0.5 ${
+                        v3ReverseCalc.priceSpread.warningLevel === 'high' ? 'text-rose-600' : 'text-amber-600'
+                      }`}
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-black">
+                        {v3ReverseCalc.priceSpread.warningLevel === 'high' ? '⚠ Disparitas Harga Grup Tinggi' : 'ℹ Disparitas Harga Portofolio'} (Rentang: {formatCurrency(v3ReverseCalc.priceSpread.minPrice)} – {formatCurrency(v3ReverseCalc.priceSpread.maxPrice)})
+                      </span>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {v3ReverseCalc.priceSpread.warningMessage}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {v3ReverseCalc.productReverseDetails.map((pDetail) => (
                   <Card key={pDetail.product.id} className="rounded-3xl border border-emerald-200 bg-white shadow-xs">
                     <CardHeader className="p-4 bg-emerald-50/60 border-b border-emerald-100">
@@ -3715,38 +4066,36 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                         </span>
                       </div>
                     </CardHeader>
-                    <CardContent className="p-4 space-y-2">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase">HARGA JUAL DISARANKAN</p>
-                      <p className="text-2xl font-black text-emerald-600">{formatCurrency(pDetail.pConservativePrice)}</p>
-                      <p className="text-xs text-gray-500">Varian Kritis: {pDetail.heaviestVarName}</p>
-                      {pDetail.variantRevList?.[0]?.variant && (
-                        <Button
-                          type="button"
-                          onClick={() => handleApplyPriceRequest(pDetail.product, pDetail.variantRevList[0].variant, pDetail.pConservativePrice)}
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl h-8 mt-2 flex items-center justify-center gap-1.5"
-                        >
-                          <Tag className="w-3.5 h-3.5" />
-                          <span>TERAPKAN HARGA ({pDetail.variantRevList[0].variant.nama})</span>
-                        </Button>
-                      )}
+                    <CardContent className="p-4 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">RATA-RATA HARGA PRODUK</p>
+                        <p className="text-2xl font-black text-emerald-600">{formatCurrency(pDetail.pWeightedRecommendedPrice)}</p>
+                      </div>
+
+                      <div className="space-y-2 pt-1 border-t border-gray-100">
+                        <p className="text-[10px] font-black text-gray-500 uppercase">Rincian Varian:</p>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {pDetail.variantRevList.map((vr) => (
+                            <div key={vr.variant.id} className="p-2 bg-gray-50 rounded-xl text-xs flex items-center justify-between">
+                              <div>
+                                <span className="font-bold text-gray-800 block text-[11px]">{vr.variant.nama}</span>
+                                <span className="font-black text-emerald-600 text-xs">{formatCurrency(vr.rev.priceRecommended)}</span>
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={() => handleApplyPriceRequest(pDetail.product, vr.variant, vr.rev.priceRecommended)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg h-6 px-2 flex items-center gap-1"
+                              >
+                                <Tag className="w-3 h-3" />
+                                <span>Terapkan</span>
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <Button
-                  type="button"
-                  onClick={() => {
-                    if (v3ReverseCalc) {
-                      handleTransferGroupToFindRoas(v3ReverseCalc.productReverseDetails);
-                    }
-                  }}
-                  className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold px-5 shadow-sm h-10 flex items-center gap-2"
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  <span>Uji Seluruh Harga ke Mode CARI ROAS</span>
-                </Button>
               </div>
             </div>
           )}

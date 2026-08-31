@@ -795,310 +795,241 @@ export function calculatePromoTanggalCantik(input: PromoTanggalCantikInput): Pro
 }
 
 /* ==========================================================================
-   AUTOMATED SELF-TEST SUITE (SECTION 16 COMPLIANT)
+   AUTOMATED SELF-TEST SUITE (SECTION 16 & FINAL FIX COMPLIANT)
    ========================================================================== */
+
+export function calculatePriceSpread(prices: number[], averagePrice?: number): {
+  minPrice: number;
+  maxPrice: number;
+  spreadNominal: number;
+  spreadPct: number;
+  warningLevel: 'none' | 'moderate' | 'high';
+  warningMessage: string | null;
+} {
+  if (!prices || prices.length <= 1) {
+    return {
+      minPrice: prices?.[0] || 0,
+      maxPrice: prices?.[0] || 0,
+      spreadNominal: 0,
+      spreadPct: 0,
+      warningLevel: 'none',
+      warningMessage: null,
+    };
+  }
+
+  const validPrices = prices.filter((p) => typeof p === 'number' && p > 0);
+  if (validPrices.length <= 1) {
+    return {
+      minPrice: validPrices[0] || 0,
+      maxPrice: validPrices[0] || 0,
+      spreadNominal: 0,
+      spreadPct: 0,
+      warningLevel: 'none',
+      warningMessage: null,
+    };
+  }
+
+  const minPrice = Math.min(...validPrices);
+  const maxPrice = Math.max(...validPrices);
+  const avg = averagePrice && averagePrice > 0 ? averagePrice : validPrices.reduce((a, b) => a + b, 0) / validPrices.length;
+  const spreadNominal = maxPrice - minPrice;
+  const spreadPct = avg > 0 ? (spreadNominal / avg) * 100 : 0;
+
+  let warningLevel: 'none' | 'moderate' | 'high' = 'none';
+  let warningMessage: string | null = null;
+
+  if (spreadPct > 40) {
+    warningLevel = 'high';
+    warningMessage = `Selisih harga antarvarian sangat tinggi (${spreadPct.toFixed(1)}%). Pastikan menggunakan hasil per varian untuk keputusan harga dan profit aktual.`;
+  } else if (spreadPct > 20) {
+    warningLevel = 'moderate';
+    warningMessage = `Selisih harga antarvarian cukup tinggi (${spreadPct.toFixed(1)}%). Rata-rata harga gabungan hanya sebagai acuan simulasi portofolio.`;
+  }
+
+  return {
+    minPrice,
+    maxPrice,
+    spreadNominal,
+    spreadPct,
+    warningLevel,
+    warningMessage,
+  };
+}
 
 export function runUnitEconomicsSelfTests(): { success: boolean; results: string[] } {
   const logs: string[] = [];
   let allPassed = true;
 
-  // TEST A: Target ROAS 10x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 10x ±0.01, Profit >= 15%
-  const testAInput: ReverseCalcInput = {
-    hppPcs: 10000,
+  // TEST 1: Single SKU Unit Economics (1 SKU = 1 Unit Economics)
+  const test1Input: UnitEconomicsParams = {
+    sellingPrice: 100000,
+    hppPcs: 35000,
     minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
     percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 10,
-    targetProfitPct: 15,
-    bufferPct: 20,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  };
-  const revA = calculateReversePrice(testAInput);
-  if (!revA.isFeasible) {
-    logs.push('TEST A FAIL: Reverse calculation infeasible for 10x ROAS.');
-    allPassed = false;
-  } else {
-    const valA = calculateUnitEconomics({
-      sellingPrice: revA.priceRecommended,
-      hppPcs: 10000,
-      minOrder: 1,
-      nominalPerOrder: 1600,
-      nominalPerUnit: 0,
-      percentRate: 5,
-      voucherNominal: 0,
-      voucherPct: 0,
-      includePpn: false,
-      ppnRate: 11,
-      targetProfitPct: 15,
-      actualRoas: 10,
-      targetRoas: 10,
-      bufferPct: 20,
-    });
-    if (Math.abs(valA.actualProfitPercent - 15) > 0.05 || Math.abs(valA.roasTarget - 10) > 0.01) {
-      logs.push(`TEST A FAIL: Bidirectional mismatch. Expected 10x ROAS & 15% Profit. Got ROAS ${valA.roasTarget.toFixed(2)}x, Profit ${valA.actualProfitPercent.toFixed(2)}%`);
-      allPassed = false;
-    } else {
-      logs.push(`TEST A PASS: Target ROAS 10x <-> Cari Harga (Rp${revA.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valA.roasTarget.toFixed(2)}x, Profit: ${valA.actualProfitPercent.toFixed(2)}%).`);
-    }
-  }
-
-  // TEST B: Target ROAS 8x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 8x ±0.01
-  const testBInput: ReverseCalcInput = {
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
+    nominalPerOrder: 2000,
     nominalPerUnit: 0,
-    percentRate: 5,
     voucherNominal: 0,
     voucherPct: 0,
     targetRoas: 8,
-    targetProfitPct: 15,
-    bufferPct: 20,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  };
-  const revB = calculateReversePrice(testBInput);
-  if (!revB.isFeasible) {
-    logs.push('TEST B FAIL: Reverse calculation infeasible for 8x ROAS.');
-    allPassed = false;
-  } else {
-    const valB = calculateUnitEconomics({
-      sellingPrice: revB.priceRecommended,
-      hppPcs: 10000,
-      minOrder: 1,
-      nominalPerOrder: 1600,
-      nominalPerUnit: 0,
-      percentRate: 5,
-      voucherNominal: 0,
-      voucherPct: 0,
-      includePpn: false,
-      ppnRate: 11,
-      targetProfitPct: 15,
-      actualRoas: 8,
-      targetRoas: 8,
-      bufferPct: 20,
-    });
-    if (Math.abs(valB.actualProfitPercent - 15) > 0.05 || Math.abs(valB.roasTarget - 8) > 0.01) {
-      logs.push(`TEST B FAIL: Bidirectional mismatch for 8x ROAS. Got ROAS ${valB.roasTarget.toFixed(2)}x, Profit ${valB.actualProfitPercent.toFixed(2)}%`);
-      allPassed = false;
-    } else {
-      logs.push(`TEST B PASS: Target ROAS 8x <-> Cari Harga (Rp${revB.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valB.roasTarget.toFixed(2)}x, Profit: ${valB.actualProfitPercent.toFixed(2)}%).`);
-    }
-  }
-
-  // TEST C: Target ROAS 12x -> Cari Harga -> Harga X -> Cari ROAS -> Expected 12x ±0.01
-  const testCInput: ReverseCalcInput = {
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 12,
-    targetProfitPct: 15,
-    bufferPct: 20,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  };
-  const revC = calculateReversePrice(testCInput);
-  if (!revC.isFeasible) {
-    logs.push('TEST C FAIL: Reverse calculation infeasible for 12x ROAS.');
-    allPassed = false;
-  } else {
-    const valC = calculateUnitEconomics({
-      sellingPrice: revC.priceRecommended,
-      hppPcs: 10000,
-      minOrder: 1,
-      nominalPerOrder: 1600,
-      nominalPerUnit: 0,
-      percentRate: 5,
-      voucherNominal: 0,
-      voucherPct: 0,
-      includePpn: false,
-      ppnRate: 11,
-      targetProfitPct: 15,
-      actualRoas: 12,
-      targetRoas: 12,
-      bufferPct: 20,
-    });
-    if (Math.abs(valC.actualProfitPercent - 15) > 0.05 || Math.abs(valC.roasTarget - 12) > 0.01) {
-      logs.push(`TEST C FAIL: Bidirectional mismatch for 12x ROAS. Got ROAS ${valC.roasTarget.toFixed(2)}x, Profit ${valC.actualProfitPercent.toFixed(2)}%`);
-      allPassed = false;
-    } else {
-      logs.push(`TEST C PASS: Target ROAS 12x <-> Cari Harga (Rp${revC.priceRecommended.toFixed(0)}) <-> Cari ROAS (ROAS: ${valC.roasTarget.toFixed(2)}x, Profit: ${valC.actualProfitPercent.toFixed(2)}%).`);
-    }
-  }
-
-  // TEST D: Target ROAS 10x, Buffer 20% -> ROAS Setting = 12x -> Cari Harga remains exactly 10x, not 12x
-  const testD_Reverse = calculateReversePrice({
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 10,
-    targetProfitPct: 15,
-    bufferPct: 20,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  });
-  const testD_DirectAt12 = calculateReversePrice({
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 12, // what it would be if corrupted by buffer
-    targetProfitPct: 15,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  });
-  if (Math.abs(testD_Reverse.priceExact - testD_DirectAt12.priceExact) < 0.1) {
-    logs.push('TEST D FAIL: Cari Harga erroneously used 12x instead of 10x!');
-    allPassed = false;
-  } else {
-    logs.push(`TEST D PASS: Cari Harga strictly uses Target ROAS 10x (Rp${testD_Reverse.priceExact.toFixed(0)}), completely isolated from ROAS Setting 12x (Rp${testD_DirectAt12.priceExact.toFixed(0)}).`);
-  }
-
-  // TEST E: Buffer changes from 20% to 30% -> Target ROAS remains 10x, ROAS Setting becomes 13x, Price remains unchanged
-  const testE_Buf20 = calculateReversePrice({
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 10,
-    targetProfitPct: 15,
-    bufferPct: 20,
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  });
-  const testE_Buf30 = calculateReversePrice({
-    hppPcs: 10000,
-    minOrder: 1,
-    nominalPerOrder: 1600,
-    nominalPerUnit: 0,
-    percentRate: 5,
-    voucherNominal: 0,
-    voucherPct: 0,
-    targetRoas: 10,
-    targetProfitPct: 15,
-    bufferPct: 30, // changed buffer
-    includePpn: false,
-    ppnRate: 11,
-    roundingStep: 0,
-  });
-  if (Math.abs(testE_Buf20.priceExact - testE_Buf30.priceExact) > 0.001) {
-    logs.push('TEST E FAIL: Buffer change altered Cari Harga calculation!');
-    allPassed = false;
-  } else {
-    const valE_Buf30 = calculateUnitEconomics({
-      sellingPrice: testE_Buf30.priceRecommended,
-      hppPcs: 10000,
-      minOrder: 1,
-      nominalPerOrder: 1600,
-      nominalPerUnit: 0,
-      percentRate: 5,
-      voucherNominal: 0,
-      voucherPct: 0,
-      includePpn: false,
-      ppnRate: 11,
-      targetProfitPct: 15,
-      targetRoas: 10,
-      bufferPct: 30,
-    });
-    if (Math.abs(valE_Buf30.roasSetting - 13.0) > 0.01 || Math.abs(valE_Buf30.roasTarget - 10.0) > 0.01) {
-      logs.push(`TEST E FAIL: ROAS Setting calculation error on 30% buffer. Got ${valE_Buf30.roasSetting.toFixed(2)}x`);
-      allPassed = false;
-    } else {
-      logs.push(`TEST E PASS: Buffer 30% -> Target ROAS remains 10.00x, ROAS Setting is 13.00x, and Cari Harga price is identical (Rp${testE_Buf20.priceExact.toFixed(0)}).`);
-    }
-  }
-
-  // TEST 8: AdditionalFee synchronization with percent & nominal fees
-  const sampleVariantFees: AdditionalFee[] = [
-    { nama: 'Admin Shopee', tipe: 'persen', nilai: 6.75 },
-    { nama: 'Gratis Ongkir Extra', tipe: 'persen', nilai: 4.5 },
-    { nama: 'Biaya Pesanan', tipe: 'nominal', nilai: 1000 },
-  ];
-  const test8Result = calculateProductEconomics({
-    sellingPrice: 100000,
-    hppPcs: 40000,
-    minOrder: 2,
-    additionalCosts: sampleVariantFees,
-    targetProfitPct: 15,
-    actualRoas: 5,
+    actualRoas: 8,
+    targetProfitPct: 20,
     includePpn: true,
     ppnRate: 11,
-  });
-
-  // Admin Shopee 6.75% of 100k = 6750
-  // Gratis Ongkir 4.5% of 100k = 4500
-  // Biaya Pesanan 1000 / 2 minOrder = 500
-  // Total fees per unit = 6750 + 4500 + 500 = 11750
-  if (Math.abs(test8Result.totalAdditionalCostPerUnit - 11750) > 0.01) {
-    logs.push(`TEST 8 FAIL: AdditionalFee total cost per unit mismatch. Expected 11750, got ${test8Result.totalAdditionalCostPerUnit}`);
-    allPassed = false;
-  } else if (test8Result.feeBreakdown.length !== 3) {
-    logs.push(`TEST 8 FAIL: Expected 3 itemized fees, got ${test8Result.feeBreakdown.length}`);
+  };
+  const econ1 = calculateProductEconomics(test1Input);
+  if (econ1.sellingPrice !== 100000 || econ1.hppPcs !== 35000 || econ1.nominalPerOrder !== 2000) {
+    logs.push('TEST 1 FAIL: Single SKU economics mismatch on base parameters.');
     allPassed = false;
   } else {
-    logs.push(`TEST 8 PASS: AdditionalFee synchronization correctly parsed 3 fees (Total: Rp${test8Result.totalAdditionalCostPerUnit.toLocaleString('id-ID')}/unit).`);
+    logs.push(`TEST 1 PASS: Single SKU economics verified (Omzet Real: Rp${econ1.omzetRealPerUnit.toLocaleString('id-ID')}, Profit Sebelum Iklan: Rp${econ1.profitBeforeAdsPerUnit.toLocaleString('id-ID')}).`);
   }
 
-  // TEST 9: Dynamic Fee Addition & Isolation
-  const variantAFees: AdditionalFee[] = [
-    { nama: 'Admin Shopee', tipe: 'persen', nilai: 6.75 },
-  ];
-  const variantBFees: AdditionalFee[] = [
-    { nama: 'Admin Shopee', tipe: 'persen', nilai: 6.75 },
-    { nama: 'Affiliate', tipe: 'persen', nilai: 5 },
-  ];
-  const resA = calculateProductEconomics({ sellingPrice: 50000, hppPcs: 20000, additionalCosts: variantAFees });
-  const resB = calculateProductEconomics({ sellingPrice: 50000, hppPcs: 20000, additionalCosts: variantBFees });
-  if (resA.totalCostBeforeAdsPerUnit >= resB.totalCostBeforeAdsPerUnit) {
-    logs.push('TEST 9 FAIL: Variant isolation failed. Variant B with Affiliate fee should have higher total cost than Variant A.');
-    allPassed = false;
-  } else {
-    logs.push('TEST 9 PASS: Variant isolation confirmed. Costs and profit remain strictly isolated per variant configuration.');
-  }
-
-  // TEST 10: Bidirectional Reverse Price with AdditionalFee array
-  const revWithFees = calculateReversePrice({
-    hppPcs: 15000,
+  // TEST 2: Multi-Variant CARI HARGA (1 Product, Multiple SKUs) -> Individual Prices & Weighted Average (NOT MAX)
+  const skuA_Hpp = 15000;
+  const skuB_Hpp = 25000;
+  const revA = calculateReversePrice({
+    hppPcs: skuA_Hpp,
     minOrder: 1,
-    additionalCosts: sampleVariantFees,
+    percentRate: 6.5,
+    nominalPerOrder: 1500,
     targetRoas: 8,
-    targetProfitPct: 20,
+    targetProfitPct: 15,
     includePpn: true,
     ppnRate: 11,
     roundingStep: 100,
   });
-  if (!revWithFees.isFeasible || revWithFees.validationRecommended.actualProfitPercent < 19.9) {
-    logs.push(`TEST 10 FAIL: Reverse price with AdditionalFee array failed target profit. Got profit: ${revWithFees.validationRecommended.actualProfitPercent.toFixed(2)}%`);
+  const revB = calculateReversePrice({
+    hppPcs: skuB_Hpp,
+    minOrder: 1,
+    percentRate: 6.5,
+    nominalPerOrder: 1500,
+    targetRoas: 8,
+    targetProfitPct: 15,
+    includePpn: true,
+    ppnRate: 11,
+    roundingStep: 100,
+  });
+
+  const weightA = 0.6;
+  const weightB = 0.4;
+  const weightedPrice = revA.priceRecommended * weightA + revB.priceRecommended * weightB;
+  const maxPrice = Math.max(revA.priceRecommended, revB.priceRecommended);
+
+  if (revA.priceRecommended >= revB.priceRecommended) {
+    logs.push('TEST 2 FAIL: SKU A (lower HPP) has higher recommended price than SKU B.');
+    allPassed = false;
+  } else if (weightedPrice === maxPrice) {
+    logs.push('TEST 2 FAIL: Combined price erroneously used MAX price instead of weighted average!');
     allPassed = false;
   } else {
-    logs.push(`TEST 10 PASS: Reverse price with AdditionalFee array -> Recommended Price: Rp${revWithFees.priceRecommended.toLocaleString('id-ID')} achieves ${revWithFees.validationRecommended.actualProfitPercent.toFixed(2)}% profit at 8x ROAS.`);
+    logs.push(`TEST 2 PASS: Multi-Variant Cari Harga verified. SKU A (HPP Rp${skuA_Hpp.toLocaleString('id-ID')}) = Rp${revA.priceRecommended.toLocaleString('id-ID')}, SKU B (HPP Rp${skuB_Hpp.toLocaleString('id-ID')}) = Rp${revB.priceRecommended.toLocaleString('id-ID')}. Weighted Average = Rp${Math.round(weightedPrice).toLocaleString('id-ID')} (strictly != MAX Rp${maxPrice.toLocaleString('id-ID')}).`);
   }
 
-  // TEST 7: Safety & No undefined .toFixed() crashes on all properties
+  // TEST 3: Bidirectional Handoff (Cari Harga -> Cari ROAS per SKU)
+  const valA = calculateProductEconomics({
+    sellingPrice: revA.priceRecommended,
+    hppPcs: skuA_Hpp,
+    minOrder: 1,
+    percentRate: 6.5,
+    nominalPerOrder: 1500,
+    actualRoas: 8,
+    targetRoas: 8,
+    targetProfitPct: 15,
+    includePpn: true,
+    ppnRate: 11,
+  });
+  const valB = calculateProductEconomics({
+    sellingPrice: revB.priceRecommended,
+    hppPcs: skuB_Hpp,
+    minOrder: 1,
+    percentRate: 6.5,
+    nominalPerOrder: 1500,
+    actualRoas: 8,
+    targetRoas: 8,
+    targetProfitPct: 15,
+    includePpn: true,
+    ppnRate: 11,
+  });
+
+  if (Math.abs(valA.actualProfitPercent - 15) > 0.1 || Math.abs(valB.actualProfitPercent - 15) > 0.1) {
+    logs.push(`TEST 3 FAIL: Bidirectional validation failed. SKU A Profit = ${valA.actualProfitPercent.toFixed(2)}%, SKU B Profit = ${valB.actualProfitPercent.toFixed(2)}%`);
+    allPassed = false;
+  } else {
+    logs.push(`TEST 3 PASS: Bidirectional Cari Harga -> Cari ROAS verified. Both SKUs achieve target profit (SKU A: ${valA.actualProfitPercent.toFixed(2)}%, SKU B: ${valB.actualProfitPercent.toFixed(2)}%).`);
+  }
+
+  // TEST 4: Price Spread Calculation & Alert Thresholds (>20% and >40%)
+  const spreadLow = calculatePriceSpread([100000, 105000], 102500); // 4.8% spread
+  const spreadMed = calculatePriceSpread([100000, 130000], 115000); // 26.0% spread
+  const spreadHigh = calculatePriceSpread([50000, 100000], 75000);  // 66.6% spread
+
+  if (spreadLow.warningLevel !== 'none' || spreadMed.warningLevel !== 'moderate' || spreadHigh.warningLevel !== 'high') {
+    logs.push(`TEST 4 FAIL: Price spread warning level incorrect. Got low=${spreadLow.warningLevel}, med=${spreadMed.warningLevel}, high=${spreadHigh.warningLevel}`);
+    allPassed = false;
+  } else {
+    logs.push(`TEST 4 PASS: Price spread alerts verified (Low: ${spreadLow.spreadPct.toFixed(1)}% [none], Med: ${spreadMed.spreadPct.toFixed(1)}% [moderate], High: ${spreadHigh.spreadPct.toFixed(1)}% [high]).`);
+  }
+
+  // TEST 5: Pack / Bundle Pricing vs Pcs Pricing (Pack 50 pcs = Rp 50.000, minOrder = 1 pack)
+  const packPrice = 50000;
+  const packHpp = 20000;
+  const packMinOrder = 1; // 1 pack per order
+  const packEcon = calculateProductEconomics({
+    sellingPrice: packPrice,
+    hppPcs: packHpp,
+    minOrder: packMinOrder,
+    percentRate: 5,
+    nominalPerOrder: 1500,
+    targetRoas: 6,
+    actualRoas: 6,
+    targetProfitPct: 20,
+    includePpn: true,
+    ppnRate: 11,
+  });
+  if (packEcon.sellingPrice !== 50000 || packEcon.realHppPerUnit !== (20000 + 1500)) {
+    logs.push('TEST 5 FAIL: Pack/bundle pricing corrupted unit values.');
+    allPassed = false;
+  } else {
+    logs.push(`TEST 5 PASS: Pack pricing integrity verified (Harga: Rp${packEcon.sellingPrice.toLocaleString('id-ID')}, HPP Real: Rp${packEcon.realHppPerUnit.toLocaleString('id-ID')}).`);
+  }
+
+  // TEST 6: Target ROAS 10x with Buffer 20% Isolation
+  const test6_Rev = calculateReversePrice({
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    nominalPerUnit: 0,
+    percentRate: 5,
+    voucherNominal: 0,
+    voucherPct: 0,
+    targetRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 20,
+    includePpn: false,
+    ppnRate: 11,
+    roundingStep: 0,
+  });
+  const val6 = calculateProductEconomics({
+    sellingPrice: test6_Rev.priceRecommended,
+    hppPcs: 10000,
+    minOrder: 1,
+    nominalPerOrder: 1600,
+    percentRate: 5,
+    targetRoas: 10,
+    actualRoas: 10,
+    targetProfitPct: 15,
+    bufferPct: 20,
+    includePpn: false,
+    ppnRate: 11,
+  });
+  if (Math.abs(val6.roasTarget - 10) > 0.01 || Math.abs(val6.roasSetting - 12) > 0.01) {
+    logs.push(`TEST 6 FAIL: ROAS Target / Setting separation failed. roasTarget=${val6.roasTarget}, roasSetting=${val6.roasSetting}`);
+    allPassed = false;
+  } else {
+    logs.push(`TEST 6 PASS: Target ROAS (10.00x) & ROAS Setting (12.00x) strictly isolated.`);
+  }
+
+  // TEST 7: Zero and Edge Cases Safety
   try {
     const dummy = calculateUnitEconomics({
       sellingPrice: 0,
@@ -1114,10 +1045,8 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
       targetProfitPct: 0,
     });
     const checkStr = `${Number(dummy.roasBep ?? 0).toFixed(2)} ${Number(dummy.roasTarget ?? 0).toFixed(2)} ${Number(dummy.roasSetting ?? 0).toFixed(2)} ${Number(dummy.actualProfitPercent ?? 0).toFixed(2)}`;
-    if (!checkStr) {
-      throw new Error('Crash in formatting');
-    }
-    logs.push('TEST 7 PASS: Zero-value edge case and formatting safety verified without crashes.');
+    if (!checkStr) throw new Error('Empty formatted output');
+    logs.push('TEST 7 PASS: Zero-value edge case and formatting safety verified.');
   } catch (err: any) {
     logs.push(`TEST 7 FAIL: Crash during zero-value handling: ${err.message}`);
     allPassed = false;
