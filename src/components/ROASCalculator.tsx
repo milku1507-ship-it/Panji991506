@@ -1410,9 +1410,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   // FIND ROAS STATES
   const [useConservative, setUseConservative] = React.useState(false);
   const [biayaIklan, setBiayaIklan] = React.useState(100000);
-  const [alokasiIklanPct, setAlokasiIklanPct] = React.useState(50);
-  const [akselerasiPerforma, setAkselerasiPerforma] = React.useState(false);
-  const [customBufferPct, setCustomBufferPct] = React.useState(70);
+  const [customFactor, setCustomFactor] = React.useState<number>(3.0);
 
   // FIND PRICE STATES
   const [targetRoasInput, setTargetRoasInput] = React.useState(8);
@@ -1580,51 +1578,37 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   // Final H and M Selection (Nilai Transaksi & Margin per Order Paket)
   let H = 0;
   let M = 0;
-  let G_hppReal = 0;
   let displayTitle = '';
   
   if (adMode === 'variant') {
     H = v1HargaOrder;
     M = v1MarginOrder;
-    G_hppReal = v1HppOrder;
     displayTitle = `${v1Product?.nama || 'Produk'} - ${v1Variant?.nama || 'Varian'}${v1MinOrder > 1 ? ` (${v1MinOrder} pcs/order)` : ''}`;
   } else if (adMode === 'product') {
     H = useConservative ? v2Hsp : v2Asp;
     M = useConservative ? v2Lsm : v2Asm;
-    G_hppReal = v2Product && v2Product.varian?.length ? (v2Product.varian.reduce((acc, v) => acc + (calcHppPerPcs(v, ingredients) * Math.max(1, Number(v.min_order) || 1)), 0) / v2Product.varian.length) : 0;
     displayTitle = `${v2Product?.nama || 'Produk Multi-Varian'}${v2MinOrder > 1 ? ` (Min. Order ~${v2MinOrder} pcs)` : ''}`;
   } else {
     H = useConservative ? v3Hsp : v3Asp;
     M = useConservative ? v3Lsm : v3Asm;
-    let sumHppG = 0, countV = 0;
-    products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
-      p.varian?.forEach(v => {
-        sumHppG += calcHppPerPcs(v, ingredients) * Math.max(1, Number(v.min_order) || 1);
-        countV++;
-      });
-    });
-    G_hppReal = countV > 0 ? sumHppG / countV : 0;
     displayTitle = `Grup Iklan (${v3SelectedProductIds.length} Produk)`;
   }
 
-  // Target ROAS Math (Rumus Standar Aplikasi)
+  // Target ROAS Math
   const ppnFactor = usePpnIklan ? 1.11 : 1.0;
   const roasBep = M > 0 ? (H / M) * ppnFactor : 0;
   const roasMin = roasBep > 0 ? roasBep * 1.5 : 0;
   const roasIdeal = roasBep > 0 ? roasBep * 2.0 : 0;
+  const roasSetMarketplace = roasBep > 0 ? roasBep * 2.5 : 0;
+  const roasCustom = roasBep > 0 ? roasBep * (customFactor || 1) : 0;
 
-  // ROAS SET SELLER CENTER MATH (Sesuai Rumus Baku Aplikasi & Seller Center)
-  const markupRatio = G_hppReal > 0 ? (H / G_hppReal) : 0;
-  const H_grossProfit = M; // Keuntungan kotor riil setelah potongan biaya & event
-  const safeAlokasiIklan = Math.max(1, Math.min(100, alokasiIklanPct));
-  // ROAS Ideal = A / ((H * 50%) / 1.11) => sama dengan roasBep * 2.0
-  const effAlokasiProfit = (H_grossProfit * (safeAlokasiIklan / 100)) / ppnFactor;
-  const roasIdealMinimal = effAlokasiProfit > 0 ? (H / effAlokasiProfit) : roasIdeal;
-  const netRoasBep = roasBep;
-  const activeBufferPct = akselerasiPerforma ? 85 : 70;
-  const roasSetSellerCenter = roasIdeal > 0 ? (roasIdeal / (activeBufferPct / 100)) : 0;
-
-  const renderSimCard = (title: string, roas: number, color: string) => {
+  const renderSimCard = (
+    title: string, 
+    roas: number, 
+    color: 'slate' | 'yellow' | 'green' | 'indigo' | 'purple',
+    subtitle?: string,
+    badgeText?: string
+  ) => {
     const estOmset = biayaIklan * roas;
     const estOrder = H > 0 ? Math.floor(estOmset / H) : 0;
     const estMargin = estOrder * M;
@@ -1638,46 +1622,80 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     let textColor = '';
     let profitLabel = '';
     let profitValueClass = '';
+    let badgeClass = '';
     
-    if (color === 'red') {
+    if (color === 'slate') {
       bgClass = 'bg-slate-50 border-slate-200';
       textColor = 'text-slate-800';
       profitLabel = 'Profit Rp0 (Impas)';
       profitValueClass = 'text-slate-500';
+      badgeClass = 'bg-slate-200/80 text-slate-700 border-slate-300';
     } else if (color === 'yellow') {
-      bgClass = 'bg-amber-50 border-amber-200';
+      bgClass = 'bg-amber-50/90 border-amber-200';
       textColor = 'text-amber-900';
-      profitLabel = 'Est. Profit:';
+      profitLabel = 'Est. Profit Bersih:';
       profitValueClass = 'text-amber-700';
-    } else {
-      bgClass = 'bg-emerald-50 border-emerald-200';
+      badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
+    } else if (color === 'green') {
+      bgClass = 'bg-emerald-50/90 border-emerald-200';
       textColor = 'text-emerald-900';
-      profitLabel = 'Est. Profit:';
+      profitLabel = 'Est. Profit Bersih:';
       profitValueClass = 'text-emerald-700';
+      badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    } else if (color === 'indigo') {
+      bgClass = 'bg-indigo-50/90 border-indigo-200';
+      textColor = 'text-indigo-950';
+      profitLabel = 'Est. Profit Bersih:';
+      profitValueClass = 'text-indigo-700';
+      badgeClass = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    } else {
+      bgClass = 'bg-purple-50/90 border-purple-200';
+      textColor = 'text-purple-950';
+      profitLabel = 'Est. Profit Bersih:';
+      profitValueClass = 'text-purple-700';
+      badgeClass = 'bg-purple-100 text-purple-800 border-purple-200';
     }
     
     return (
-      <div className={`p-4 rounded-2xl border ${bgClass} flex flex-col justify-between shadow-sm`}>
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <div className={`font-black uppercase tracking-wider text-[11px] mb-1 ${textColor} opacity-80`}>{title}</div>
-            <div className={`text-3xl font-black ${textColor}`}>{roas > 0 ? roas.toFixed(2) : '0.00'}x</div>
+      <div className={`p-4 rounded-2xl border ${bgClass} flex flex-col justify-between shadow-sm hover:shadow-md transition-all`}>
+        <div>
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <div className={`font-black uppercase tracking-wider text-[11px] ${textColor} opacity-90 flex items-center gap-1.5`}>
+                {title}
+              </div>
+              {subtitle && (
+                <div className="text-[10px] text-gray-500 font-semibold mt-0.5">{subtitle}</div>
+              )}
+            </div>
+            {badgeText && (
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${badgeClass} shrink-0 ml-1`}>
+                {badgeText}
+              </span>
+            )}
           </div>
-          <div className="text-right">
-            <div className={`font-bold text-[10px] uppercase ${textColor} opacity-80`}>{profitLabel}</div>
-            <div className={`font-black text-lg ${profitValueClass}`}>{color === 'red' ? 'Rp0' : formatCurrency(estProfit)}</div>
-            {color !== 'red' && <div className={`font-bold text-[10px] ${profitValueClass}`}>Margin Bersih: {marginPct}%</div>}
+
+          <div className="flex justify-between items-end my-3">
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Target ROAS</span>
+              <div className={`text-2xl sm:text-3xl font-black ${textColor}`}>{roas > 0 ? roas.toFixed(2) : '0.00'}x</div>
+            </div>
+            <div className="text-right">
+              <div className={`font-bold text-[10px] uppercase ${textColor} opacity-80`}>{profitLabel}</div>
+              <div className={`font-black text-base sm:text-lg ${profitValueClass}`}>{color === 'slate' ? 'Rp0' : formatCurrency(estProfit)}</div>
+              {color !== 'slate' && <div className={`font-bold text-[10px] ${profitValueClass}`}>Margin Bersih: {marginPct}%</div>}
+            </div>
           </div>
         </div>
         
-        <div className="grid grid-cols-3 gap-2 text-xs border-t border-black/10 pt-3">
+        <div className="grid grid-cols-3 gap-2 text-xs border-t border-black/10 pt-3 mt-2">
           <div>
-            <span className="text-slate-500 block text-[10px] uppercase font-bold">Omset</span>
-            <span className="font-bold text-slate-900">{formatCurrency(estOmset)}</span>
+            <span className="text-slate-500 block text-[10px] uppercase font-bold">Est. Omset</span>
+            <span className="font-bold text-slate-900 truncate block text-[11px] sm:text-xs">{formatCurrency(estOmset)}</span>
           </div>
           <div>
-            <span className="text-slate-500 block text-[10px] uppercase font-bold">Terjual</span>
-            <span className="font-bold text-slate-900">
+            <span className="text-slate-500 block text-[10px] uppercase font-bold">Est. Terjual</span>
+            <span className="font-bold text-slate-900 block text-[11px] sm:text-xs">
               {estOrder} {isSingleVariantMinOrder ? 'order' : 'pcs'}
               {isSingleVariantMinOrder && (
                 <span className="block text-[9px] text-gray-500 font-semibold font-mono">({totalPcs} pcs)</span>
@@ -1686,7 +1704,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
           </div>
           <div>
             <span className="text-slate-500 block text-[10px] uppercase font-bold">Tot. Margin</span>
-            <span className="font-bold text-slate-900">{formatCurrency(estMargin)}</span>
+            <span className="font-bold text-slate-900 truncate block text-[11px] sm:text-xs">{formatCurrency(estMargin)}</span>
           </div>
         </div>
       </div>
@@ -1711,17 +1729,26 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     const feeNominalOrder = (feeNominalPerUnit * mOrd) + feeNominalPerOrder;
 
     const baseDenom = (1 - (feePct / 100) - dPct - ePct);
+    
+    // BEP (1.0x)
     const denomBep = baseDenom - (pFact * 1.0 / tRoas);
     const hargaOrderBep = denomBep > 0 ? (hppOrder + feeNominalOrder + dNom) / denomBep : 0;
     const hargaPcsBep = mOrd > 0 ? hargaOrderBep / mOrd : 0;
 
+    // Minimum (1.5x)
     const denomMin = baseDenom - (pFact * 1.5 / tRoas);
     const hargaOrderMin = denomMin > 0 ? (hppOrder + feeNominalOrder + dNom) / denomMin : 0;
     const hargaPcsMin = mOrd > 0 ? hargaOrderMin / mOrd : 0;
 
+    // Ideal (2.0x)
     const denomIdeal = baseDenom - (pFact * 2.0 / tRoas);
     const hargaOrderIdeal = denomIdeal > 0 ? (hppOrder + feeNominalOrder + dNom) / denomIdeal : 0;
     const hargaPcsIdeal = mOrd > 0 ? hargaOrderIdeal / mOrd : 0;
+
+    // Set ROAS Marketplace (2.5x)
+    const denomSet = baseDenom - (pFact * 2.5 / tRoas);
+    const hargaOrderSet = denomSet > 0 ? (hppOrder + feeNominalOrder + dNom) / denomSet : 0;
+    const hargaPcsSet = mOrd > 0 ? hargaOrderSet / mOrd : 0;
     
     const currentHOrder = hargaOrderIdeal;
     const extraDiscount = dNom + (currentHOrder * dPct);
@@ -1730,6 +1757,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     const marginIdealOrder = effectiveHOrder - hppOrder - (currentHOrder * (feePct / 100)) - feeNominalOrder - extraFee;
     const marginIdealPcs = mOrd > 0 ? marginIdealOrder / mOrd : 0;
 
+    const currentHOrderSet = hargaOrderSet;
+    const extraDiscountSet = dNom + (currentHOrderSet * dPct);
+    const extraFeeSet = currentHOrderSet * ePct;
+    const effectiveHOrderSet = currentHOrderSet - extraDiscountSet;
+    const marginSetOrder = effectiveHOrderSet - hppOrder - (currentHOrderSet * (feePct / 100)) - feeNominalOrder - extraFeeSet;
+    const marginSetPcs = mOrd > 0 ? marginSetOrder / mOrd : 0;
+
     return { 
       hargaOrderBep, 
       hargaPcsBep, 
@@ -1737,8 +1771,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
       hargaPcsMin, 
       hargaOrderIdeal, 
       hargaPcsIdeal, 
+      hargaOrderSet,
+      hargaPcsSet,
       marginIdealOrder, 
       marginIdealPcs,
+      marginSetOrder,
+      marginSetPcs,
       hppOrder,
       feeNominalOrder
     };
@@ -2142,201 +2180,75 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
               </div>
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pt-2">
-              {renderSimCard('ROAS BEP', roasBep, 'red')}
-              {renderSimCard('ROAS Minimum (1.5x)', roasMin, 'yellow')}
-              {renderSimCard('ROAS Ideal (2.0x)', roasIdeal, 'green')}
-            </div>
-          </div>
-
-          {/* =========================================================================
-              ROAS SET DI SELLER CENTER (PERSIS SESUAI GAMBAR DOKUMENTASI)
-              ========================================================================= */}
-          <div className="bg-[#1b2438] text-slate-100 p-6 rounded-3xl shadow-xl border border-slate-700/80 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/80 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-black shadow-inner">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-lg text-white tracking-wide flex items-center gap-2">
-                    ROAS SET di Seller Center
-                    <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 px-2 py-0.5 rounded-md">
-                      Formula Standar Marketplace
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400">Target input ROAS otomatis untuk Shopee / TikTok Seller Center dengan buffer performa.</p>
-                </div>
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Hasil Simulasi Preset Level Target ROAS</span>
+                <span className="text-[11px] text-gray-400 font-medium">Budget: {formatCurrency(biayaIklan)}</span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {renderSimCard('ROAS BEP (1.0x)', roasBep, 'slate', 'Batas Impas (Profit Rp0)', '1.0x BEP')}
+                {renderSimCard('ROAS Min (1.5x)', roasMin, 'yellow', 'Batas Aman Beriklan', '1.5x BEP')}
+                {renderSimCard('ROAS Ideal (2.0x)', roasIdeal, 'green', 'Profit Optimal Standard', '2.0x BEP')}
+                {renderSimCard('Set ROAS MP (2.5x)', roasSetMarketplace, 'indigo', 'Target Profit Tebal', '2.5x Target')}
               </div>
 
-              {/* TOGGLE AKSELERASI PERFORMA */}
-              <label className="flex items-center gap-2.5 bg-slate-800/90 border border-slate-700 hover:border-slate-600 px-3.5 py-2 rounded-xl cursor-pointer transition-all self-start sm:self-auto select-none shadow-sm">
-                <input 
-                  type="checkbox"
-                  checked={akselerasiPerforma}
-                  onChange={e => setAkselerasiPerforma(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
-                />
-                <span className="text-xs font-black text-slate-200">Akselerasi Performa ON</span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${akselerasiPerforma ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'}`}>
-                  {akselerasiPerforma ? '85%' : `${customBufferPct}%`}
-                </span>
-              </label>
-            </div>
-
-            {/* BARIS G: HPP REAL */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60">
-              <div className="flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
-                  G
-                </span>
-                <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide uppercase">HPP REAL</span>
-                <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md hidden sm:inline-block">
-                  Bahan + Biaya Operasional
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="font-black text-base md:text-lg text-white font-mono">{formatCurrency(G_hppReal)}</span>
-              </div>
-            </div>
-
-            {/* PERBANDINGAN HARGA FINAL / HPP REAL */}
-            <div className="p-4 bg-[#3a2818]/80 border border-[#8a5b28]/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col items-center justify-center bg-amber-600/40 border border-amber-500/50 rounded-xl px-2.5 py-1 text-[11px] font-black text-amber-300">
-                  <span>A</span>
-                  <div className="w-full h-px bg-amber-400/60 my-0.5"></div>
-                  <span>G</span>
-                </div>
-                <div>
-                  <span className="font-black text-xs md:text-sm text-amber-200 tracking-wide">
-                    Perbandingan Harga Final / HPP REAL
-                  </span>
-                  <p className="text-[11px] text-amber-300/70">Tingkat kelipatan harga jual terhadap modal pokok produksi.</p>
-                </div>
-              </div>
-              <div className="text-left sm:text-right">
-                <span className="font-black text-base md:text-lg text-amber-300">
-                  Harga Final = {markupRatio.toFixed(1)}x HPP Real
-                </span>
-              </div>
-            </div>
-
-            {/* BARIS H: GROSS PROFIT REAL */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60">
-              <div className="flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
-                  H
-                </span>
-                <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide uppercase">GROSS PROFIT REAL</span>
-                <span className="text-[10px] font-bold bg-amber-600/40 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded-md font-mono hidden sm:inline-block">
-                  D - G
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="font-black text-base md:text-lg text-emerald-400 font-mono">{formatCurrency(H_grossProfit)}</span>
-              </div>
-            </div>
-
-            {/* BARIS I: ALOKASI KEUNTUNGAN KOTOR UNTUK IKLAN */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60 gap-3">
-              <div className="flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
-                  I
-                </span>
-                <div>
-                  <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide">
-                    Berapa % dr keuntungan kotor anda utk jadi iklan?
-                  </span>
-                  <p className="text-[11px] text-slate-400">Rekomendasi standar: 50% untuk menjaga profit margin tetap sehat.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <Input 
-                  type="number"
-                  min="5"
-                  max="100"
-                  value={alokasiIklanPct}
-                  onChange={e => setAlokasiIklanPct(Math.max(1, Math.min(100, Number(e.target.value) || 0)))}
-                  className="w-20 h-10 bg-slate-900 border-slate-600 text-white font-black text-center text-base rounded-xl"
-                />
-                <span className="font-black text-slate-300 text-base">%</span>
-              </div>
-            </div>
-
-            {/* BARIS J: ROAS IDEAL MINIMAL */}
-            <div className="space-y-2">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-800/90 rounded-2xl border border-slate-700 gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm shrink-0">
-                    J
-                  </span>
-                  <div className="flex flex-col">
-                    <span className="font-black text-xs md:text-sm text-white tracking-wide uppercase">ROAS IDEAL MINIMAL</span>
-                    <div className="mt-1 bg-amber-600/40 border border-amber-500/60 text-amber-200 px-3 py-1 rounded-xl text-xs font-black font-mono w-fit">
-                      A / ((H × {safeAlokasiIklan}%) {usePpnIklan ? '/ 1,11' : ''})
+              {/* CUSTOM FACTOR SIMULATOR */}
+              <div className="bg-gradient-to-br from-purple-50/70 to-indigo-50/50 p-5 rounded-2xl border border-purple-200/80 shadow-sm space-y-4 mt-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 bg-purple-600 text-white rounded-lg">
+                        <Calculator className="w-4 h-4" />
+                      </span>
+                      <h4 className="font-black text-gray-900 text-sm sm:text-base">Simulasi Pengali Kustom (Custom Factor)</h4>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5">Uji performa iklan dengan pengali bebas sesuai strategi campaign marketplace Anda.</p>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-purple-200 shadow-sm self-stretch sm:self-auto justify-between sm:justify-start">
+                    <Label className="text-xs font-bold text-purple-900 whitespace-nowrap">Pengali (x BEP):</Label>
+                    <div className="flex items-center gap-1">
+                      <Input 
+                        type="number" 
+                        step="0.1" 
+                        min="0.5"
+                        max="20"
+                        value={customFactor} 
+                        onChange={e => setCustomFactor(Math.max(0.1, Number(e.target.value) || 0.1))} 
+                        className="w-20 h-8 rounded-lg font-black text-purple-900 border-purple-200 text-center text-sm bg-purple-50/50" 
+                      />
+                      <span className="font-bold text-xs text-purple-700">x</span>
                     </div>
                   </div>
                 </div>
-                <div className="text-right self-end sm:self-auto">
-                  <span className="text-3xl md:text-4xl font-black text-white">{roasIdealMinimal.toFixed(1)}</span>
-                  <span className="text-base font-bold text-slate-400 ml-1">x</span>
+
+                {/* Quick Presets for Custom Factor */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-500 mr-1">Preset Cepat:</span>
+                  {[1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 2.8, 3.0, 3.5, 4.0].map(factor => (
+                    <button
+                      key={factor}
+                      onClick={() => setCustomFactor(factor)}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        customFactor === factor 
+                          ? 'bg-purple-600 text-white shadow-sm scale-105' 
+                          : 'bg-white text-gray-700 border border-gray-200 hover:bg-purple-50 hover:border-purple-200'
+                      }`}
+                    >
+                      {factor.toFixed(1)}x
+                    </button>
+                  ))}
                 </div>
-              </div>
 
-              {/* KETERANGAN J */}
-              <div className="p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl text-xs text-slate-400 leading-relaxed">
-                <strong className="text-slate-300 font-bold">ROAS IDEAL MINIMAL (J)</strong> itu adalah roas MINIMAL yang MESTI ANDA DAPATKAN dengan profit masih cukup sehat.
-              </div>
-            </div>
-
-            {/* BARIS K: NET ROAS (NOT RECOMMENDED) */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-800/60 rounded-2xl border border-slate-700/40">
-              <div className="flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-400 text-sm">
-                  K
-                </span>
-                <span className="font-black text-xs md:text-sm text-slate-300 uppercase">NET ROAS</span>
-                <span className="text-[10px] font-bold text-rose-400/90 italic">*not recommended</span>
-                <span className="text-[10px] font-bold bg-slate-700/70 text-slate-300 px-2 py-0.5 rounded-md font-mono hidden sm:inline-block">
-                  (I=100%)
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="font-black text-lg md:text-xl text-slate-300 font-mono">{netRoasBep.toFixed(1)}</span>
-                <span className="text-xs font-bold text-slate-500 ml-0.5">x</span>
-              </div>
-            </div>
-
-            {/* BARIS L: ROAS SET DI SELLER CENTER (PROMINENT RESULT) */}
-            <div className="p-5 bg-gradient-to-r from-[#201d4a] via-[#1e274b] to-[#1c2e4f] border-2 border-indigo-500/60 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
-              <div className="flex items-center gap-3.5 z-10">
-                <span className="w-9 h-9 rounded-2xl bg-indigo-600 border border-indigo-400/50 flex items-center justify-center font-black text-white text-base shadow-md shrink-0">
-                  L
-                </span>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-black text-base md:text-lg text-white tracking-wide uppercase">
-                      ROAS SET di Seller Center
-                    </span>
-                    <div className="bg-amber-500/30 border border-amber-400/60 text-amber-300 px-2.5 py-0.5 rounded-lg text-xs font-black font-mono">
-                      J / {activeBufferPct}%
-                    </div>
-                  </div>
-                  <p className="text-xs text-indigo-200/80 mt-0.5">
-                    Nilai Target ROAS yang diisikan ke pengaturan Iklan Shopee / TikTok Seller Center.
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-right z-10 self-end sm:self-auto">
-                <div className="text-4xl md:text-5xl font-black text-[#818cf8] tracking-tight drop-shadow-md">
-                  {roasSetSellerCenter.toFixed(1)}
-                  <span className="text-xl md:text-2xl font-bold text-indigo-300 ml-1">x</span>
-                </div>
-                <div className="text-[10px] font-bold text-indigo-300/80 mt-0.5">
-                  Buffer Keamanan: {activeBufferPct}%
+                <div className="pt-1">
+                  {renderSimCard(
+                    `ROAS Kustom (${customFactor.toFixed(1)}x BEP)`, 
+                    roasCustom, 
+                    'purple', 
+                    `Formula: (H / M) * ${customFactor.toFixed(1)}`, 
+                    `${customFactor.toFixed(1)}x Custom`
+                  )}
                 </div>
               </div>
             </div>
@@ -2371,9 +2283,10 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <tr>
                       <th className="p-4">SKU / Varian</th>
                       <th className="p-4 hidden md:table-cell">Struktur Biaya Dasar</th>
-                      <th className="p-4">Harga BEP</th>
+                      <th className="p-4">Harga BEP (1.0x)</th>
                       <th className="p-4 text-amber-700">Harga Min (1.5x)</th>
                       <th className="p-4 text-emerald-700">Harga Ideal (2.0x)</th>
+                      <th className="p-4 text-indigo-700">Harga Set ROAS (2.5x)</th>
                       <th className="p-4 text-center">Aksi</th>
                     </tr>
                   </thead>
@@ -2431,13 +2344,31 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                               {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
                             </div>
                           </td>
+                          <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
+                            {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
+                            {v1MinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
+                            )}
+                            <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
+                              Margin Order: {formatCurrency(prices.marginSetOrder)}
+                              {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
+                            </div>
+                          </td>
                           <td className="p-4 text-center">
-                            <Button 
-                              onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
-                            >
-                              Terapkan Harga
-                            </Button>
+                            <div className="flex flex-col gap-1.5">
+                              <Button 
+                                onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal)})} 
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                              >
+                                Terapkan 2.0x
+                              </Button>
+                              <Button 
+                                onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsSet)})} 
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                              >
+                                Terapkan 2.5x
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2497,13 +2428,31 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                               {vMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
                             </div>
                           </td>
+                          <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
+                            {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
+                            {vMinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
+                            )}
+                            <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
+                              Margin Order: {formatCurrency(prices.marginSetOrder)}
+                              {vMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
+                            </div>
+                          </td>
                           <td className="p-4 text-center">
-                            <Button 
-                              onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
-                            >
-                              Terapkan
-                            </Button>
+                            <div className="flex flex-col gap-1.5">
+                              <Button 
+                                onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                              >
+                                Terapkan 2.0x
+                              </Button>
+                              <Button 
+                                onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsSet)})} 
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                              >
+                                Terapkan 2.5x
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2565,13 +2514,31 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                                 {pMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
                               </div>
                             </td>
+                            <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
+                              {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
+                              {pMinOrder > 1 && (
+                                <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
+                              )}
+                              <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
+                                Margin Order: {formatCurrency(prices.marginSetOrder)}
+                                {pMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
+                              </div>
+                            </td>
                             <td className="p-4 text-center">
-                              <Button 
-                                onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
-                              >
-                                Terapkan
-                              </Button>
+                              <div className="flex flex-col gap-1.5">
+                                <Button 
+                                  onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                                >
+                                  Terapkan 2.0x
+                                </Button>
+                                <Button 
+                                  onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsSet)})} 
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
+                                >
+                                  Terapkan 2.5x
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         );
