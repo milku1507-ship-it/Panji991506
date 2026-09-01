@@ -1658,30 +1658,30 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
           <p className="text-gray-500 text-sm mt-1">Hitung target ROAS iklan dan rekomendasi harga jual berdasarkan unit economics.</p>
         </div>
         
-        <div className="flex flex-wrap gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded-2xl w-fit">
+        <div className="grid grid-cols-2 gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded-2xl w-full">
           <button 
             onClick={() => setCalcMode('find_roas')} 
-            className={`px-6 py-3 rounded-xl text-sm font-black transition-all flex items-center gap-2 ${calcMode === 'find_roas' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
+            className={`flex items-center justify-center py-3 rounded-xl text-sm font-black transition-all gap-2 ${calcMode === 'find_roas' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
           >
             <Calculator className="w-4 h-4" /> CARI ROAS
           </button>
           <button 
             onClick={() => setCalcMode('find_price')} 
-            className={`px-6 py-3 rounded-xl text-sm font-black transition-all flex items-center gap-2 ${calcMode === 'find_price' ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
+            className={`flex items-center justify-center py-3 rounded-xl text-sm font-black transition-all gap-2 ${calcMode === 'find_price' ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
           >
             <DollarSign className="w-4 h-4" /> CARI HARGA
           </button>
         </div>
 
         {/* TABS TIPE IKLAN */}
-        <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+        <div className="grid grid-cols-3 gap-2 pt-4 border-t border-gray-100 w-full">
           {(['variant', 'product', 'group'] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => setAdMode(mode)}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${adMode === mode ? 'bg-gray-900 text-white border-transparent' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+              className={`flex items-center justify-center text-center px-1 sm:px-3 py-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all leading-tight ${adMode === mode ? 'bg-gray-900 text-white border-transparent shadow-sm' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
             >
-              {mode === 'variant' ? 'Single Varian' : mode === 'product' ? 'Produk Multi-Varian' : 'Grup Iklan / Toko'}
+              {mode === 'variant' ? 'Single Varian' : mode === 'product' ? 'Multi-Varian' : 'Grup Iklan'}
             </button>
           ))}
         </div>
@@ -1696,7 +1696,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
         
         {adMode === 'variant' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
                 <Select value={v1SelectedProductId} onValueChange={setV1SelectedProductId}>
@@ -1749,7 +1749,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
         
         {adMode === 'product' && (
           <div className="space-y-4">
-            <div className="space-y-1.5 max-w-md">
+            <div className="space-y-1.5 w-full">
               <Label className="text-xs font-bold text-gray-600">Pilih Produk Multi-Varian</Label>
               <Select value={v2SelectedProductId} onValueChange={setV2SelectedProductId}>
                 <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Produk" /></SelectTrigger>
