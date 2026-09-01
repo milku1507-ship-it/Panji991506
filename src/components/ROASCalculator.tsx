@@ -427,7 +427,7 @@ function ROASResultDisplay({
               )}
               {isAggregated && (
                 <Badge variant="outline" className="bg-purple-50 text-purple-800 border-purple-200 text-[10px] font-bold">
-                  Rata-rata Tertimbang (Weighted Average)
+                  Harga Rata-rata (ASP)
                 </Badge>
               )}
             </h3>
@@ -528,7 +528,7 @@ function ROASResultDisplay({
         <div className="p-5 bg-gradient-to-r from-violet-50/90 via-purple-50/50 to-white rounded-2xl border border-violet-200 shadow-2xs flex flex-col sm:flex-row items-baseline justify-between gap-4">
           <div>
             <p className="text-[11px] font-black text-gray-500 uppercase tracking-wider">
-              {isAggregated ? 'RATA-RATA HARGA JUAL TERTIMBANG' : 'HARGA JUAL SIMULASI / REKOMENDASI'}
+              {isAggregated ? 'HARGA RATA-RATA (ASP)' : 'HARGA JUAL SIMULASI / REKOMENDASI'}
             </p>
             <p className="text-3xl sm:text-4xl font-black text-violet-700 tracking-tight mt-0.5">
               {formatCurrency(hargaJualPcs)}
@@ -4253,12 +4253,12 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
 
                 <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row items-baseline justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold text-gray-500 uppercase">RATA-RATA HARGA REKOMENDASI TERTIMBANG</p>
+                    <p className="text-xs font-bold text-gray-500 uppercase">HARGA RATA-RATA (ASP) REKOMENDASI</p>
                     <p className="text-3xl sm:text-4xl font-black text-emerald-600 tracking-tight">
                       {formatCurrency(v2ReverseCalc.weightedPriceRecommended)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Nilai gabungan ini adalah rata-rata tertimbang berdasarkan bobot estimasi penjualan. Setiap varian memiliki harga rekomendasi tersendiri di bawah ini.
+                      Nilai gabungan ini adalah ASP (Average Selling Price) berdasarkan bobot estimasi penjualan. Setiap varian memiliki harga rekomendasi tersendiri di bawah ini.
                     </p>
                   </div>
                 </div>
@@ -4357,13 +4357,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">
-                      RATA-RATA HARGA REKOMENDASI GABUNGAN PORTOFOLIO
+                      HARGA RATA-RATA (ASP) REKOMENDASI GABUNGAN PORTOFOLIO
                     </span>
                     <p className="text-2xl sm:text-3xl font-black text-emerald-600 mt-1">
                       {formatCurrency(v3ReverseCalc.groupWeightedRecommendedPrice)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Rata-rata tertimbang dari seluruh grup produk. Setiap varian di dalam masing-masing produk memiliki rekomendasi harga individual.
+                      Nilai gabungan ini adalah ASP (Average Selling Price) dari seluruh grup produk. Setiap varian di dalam masing-masing produk memiliki rekomendasi harga individual.
                     </p>
                   </div>
                   <Button
