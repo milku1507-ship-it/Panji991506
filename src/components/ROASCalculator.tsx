@@ -1452,6 +1452,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   const v1Variant = v1Product?.varian?.find(v => v.id === v1SelectedVariantId);
   let v1Hpp = 0, v1FeePct = 0, v1Margin = 0, v1Harga = 0, v1FeeNominal = 0, v1MinOrder = 1;
   let v1FeeAmount = 0;
+  let v1DiskonAmount = 0;
+  let v1ExtraFeeAmount = 0;
+  let v1TotalPotonganAmount = 0;
+  let v1TotalFeePct = 0;
+  let v1TotalFeeNominal = 0;
+
   if (v1Product && v1Variant) {
     v1MinOrder = Math.max(1, Number(v1Variant.min_order) || 1);
     v1Hpp = calcHppPerPcs(v1Variant, ingredients);
@@ -1469,6 +1475,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
       extraFeeEvent = currentH * promoExtraFeePersen / 100;
       currentH = currentH - diskonEvent;
     }
+
+    v1DiskonAmount = diskonEvent;
+    v1ExtraFeeAmount = extraFeeEvent;
+    v1TotalPotonganAmount = v1FeeAmount + extraFeeEvent + diskonEvent;
+    v1TotalFeePct = v1FeePct + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
+    v1TotalFeeNominal = v1FeeNominal + (usePromoEvent ? promoDiskonNominal : 0);
     
     v1Margin = currentH - v1Hpp - v1FeeAmount - extraFeeEvent;
   }
@@ -1476,14 +1488,16 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   // V2: Product Logic
   const v2Product = products.find(p => p.id === v2SelectedProductId);
   let v2Asp = 0, v2Asm = 0, v2Hsp = 0, v2Lsm = 0, v2MinOrder = 1;
+  let v2AvgFeePct = 0, v2AvgTotalPotongan = 0;
   if (v2Product && v2Product.varian?.length) {
-    let sumPrice = 0, sumMargin = 0;
+    let sumPrice = 0, sumMargin = 0, sumFeePct = 0, sumPotongan = 0;
     v2Product.varian.forEach(v => {
       const vMinOrder = Math.max(1, Number(v.min_order) || 1);
       if (vMinOrder > v2MinOrder) v2MinOrder = vMinOrder;
       const hpp = calcHppPerPcs(v, ingredients);
       const feeConf = extractFeeRates(v2Product, v);
       const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / vMinOrder);
+      const feeAmount = (v.harga_jual * feeConf.percentRate / 100) + feeN;
       
       let currentH = v.harga_jual;
       let diskonEvent = 0;
@@ -1494,21 +1508,27 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
         currentH = currentH - diskonEvent;
       }
       
+      const totalPotongan = feeAmount + extraFeeEvent + diskonEvent;
       const margin = currentH - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN) - extraFeeEvent;
       sumPrice += v.harga_jual;
       sumMargin += margin;
+      sumFeePct += feeConf.percentRate;
+      sumPotongan += totalPotongan;
       if (v.harga_jual > v2Hsp) v2Hsp = v.harga_jual;
       if (v2Lsm === 0 || margin < v2Lsm) v2Lsm = margin;
     });
     v2Asp = sumPrice / v2Product.varian.length;
     v2Asm = sumMargin / v2Product.varian.length;
+    v2AvgFeePct = (sumFeePct / v2Product.varian.length) + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
+    v2AvgTotalPotongan = sumPotongan / v2Product.varian.length;
   }
 
   // V3: Group Logic
   let v3Asp = 0, v3Asm = 0, v3Hsp = 0, v3Lsm = 0;
+  let v3AvgFeePct = 0, v3AvgTotalPotongan = 0;
   let totalVariantsGroup = 0;
   if (v3SelectedProductIds.length > 0) {
-    let sumPrice = 0, sumMargin = 0;
+    let sumPrice = 0, sumMargin = 0, sumFeePct = 0, sumPotongan = 0;
     products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
       p.varian?.forEach(v => {
         const pMinOrder = Math.max(1, Number(v.min_order) || 1);
@@ -1516,6 +1536,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
         const hpp = calcHppPerPcs(v, ingredients);
         const feeConf = extractFeeRates(p, v);
         const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / pMinOrder);
+        const feeAmount = (v.harga_jual * feeConf.percentRate / 100) + feeN;
         
         let currentH = v.harga_jual;
         let diskonEvent = 0;
@@ -1526,9 +1547,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
           currentH = currentH - diskonEvent;
         }
         
+        const totalPotongan = feeAmount + extraFeeEvent + diskonEvent;
         const margin = currentH - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN) - extraFeeEvent;
         sumPrice += v.harga_jual;
         sumMargin += margin;
+        sumFeePct += feeConf.percentRate;
+        sumPotongan += totalPotongan;
         if (v.harga_jual > v3Hsp) v3Hsp = v.harga_jual;
         if (v3Lsm === 0 || margin < v3Lsm) v3Lsm = margin;
       });
@@ -1536,6 +1560,8 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     if (totalVariantsGroup > 0) {
       v3Asp = sumPrice / totalVariantsGroup;
       v3Asm = sumMargin / totalVariantsGroup;
+      v3AvgFeePct = (sumFeePct / totalVariantsGroup) + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
+      v3AvgTotalPotongan = sumPotongan / totalVariantsGroup;
     }
   }
 
@@ -1732,9 +1758,20 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     {v1MinOrder > 1 && <p className="text-[10px] text-gray-500 mt-1">HPP Paket: {formatCurrency(v1Hpp * v1MinOrder)}</p>}
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Total Fee Marketplace</p>
-                    <p className="font-black text-gray-900">{v1FeePct}% + {formatCurrency(v1FeeNominal)}</p>
-                    <p className="text-[10px] text-gray-500 mt-1">Estimasi: {formatCurrency(v1FeeAmount)}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{usePromoEvent ? 'Total Fee & Event' : 'Total Fee Marketplace'}</p>
+                    <p className="font-black text-gray-900">
+                      {usePromoEvent ? (
+                        <span className="text-amber-700">{v1TotalFeePct}%{v1TotalFeeNominal > 0 ? ` + ${formatCurrency(v1TotalFeeNominal)}` : ''}</span>
+                      ) : (
+                        `${v1FeePct}% + ${formatCurrency(v1FeeNominal)}`
+                      )}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Estimasi: <span className="font-bold text-gray-800">{formatCurrency(usePromoEvent ? v1TotalPotonganAmount : v1FeeAmount)}</span>
+                      {usePromoEvent && (
+                        <span className="block text-[9px] text-amber-700 font-semibold mt-0.5">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</span>
+                      )}
+                    </p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Margin Bersih (M)</p>
@@ -1779,6 +1816,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <p className="font-black text-emerald-600 text-sm">{formatCurrency(v2Asm)}</p>
                     <p className="text-[10px] text-emerald-600/80 font-bold mt-0.5">({v2Asp > 0 ? (v2Asm/v2Asp*100).toFixed(1) : 0}%)</p>
                   </div>
+                  {usePromoEvent && (
+                    <div className="min-w-[120px]">
+                      <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Fee MP + Event</p>
+                      <p className="font-black text-amber-700 text-sm">{v2AvgFeePct.toFixed(1)}%</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Est: ~{formatCurrency(v2AvgTotalPotongan)}</p>
+                    </div>
+                  )}
                   <div className="min-w-[120px]">
                     <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">LSM (Margin Bawah)</p>
                     <p className="font-black text-amber-600 text-sm">{formatCurrency(v2Lsm)}</p>
@@ -1829,6 +1873,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <p className="font-black text-emerald-600 text-sm">{formatCurrency(v3Asm)}</p>
                     <p className="text-[10px] text-emerald-600/80 font-bold mt-0.5">({v3Asp > 0 ? (v3Asm/v3Asp*100).toFixed(1) : 0}%)</p>
                   </div>
+                  {usePromoEvent && (
+                    <div className="min-w-[120px]">
+                      <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Fee MP + Event</p>
+                      <p className="font-black text-amber-700 text-sm">{v3AvgFeePct.toFixed(1)}%</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Est: ~{formatCurrency(v3AvgTotalPotongan)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1871,27 +1922,73 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
             </label>
 
             {usePromoEvent && (
-              <div className="pt-3 border-t border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-3 animate-in slide-in-from-top-2">
-                <div>
-                  <Label className="text-xs font-bold text-gray-600 mb-1.5 block">Diskon Event</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-gray-400 text-sm font-bold">Rp</span>
-                    <Input type="number" min="0" value={promoDiskonNominal} onChange={(e) => setPromoDiskonNominal(Number(e.target.value))} className="pl-9 bg-white" />
+              <div className="pt-3 border-t border-gray-200 space-y-3 animate-in slide-in-from-top-2">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <div>
+                    <Label className="text-[11px] sm:text-xs font-bold text-gray-600 mb-1 block truncate">Diskon Event</Label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2 sm:top-2.5 text-gray-400 text-xs font-bold">Rp</span>
+                      <Input type="number" min="0" value={promoDiskonNominal} onChange={(e) => setPromoDiskonNominal(Number(e.target.value))} className="pl-7 pr-1 h-9 sm:h-10 text-xs sm:text-sm font-bold bg-white" placeholder="0" />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-[11px] sm:text-xs font-bold text-gray-600 mb-1 block truncate">Diskon %</Label>
+                    <div className="relative">
+                      <Input type="number" min="0" max="100" value={promoDiskonPersen} onChange={(e) => setPromoDiskonPersen(Number(e.target.value))} className="pl-2 pr-6 h-9 sm:h-10 text-xs sm:text-sm font-bold bg-white" placeholder="0" />
+                      <span className="absolute right-2 top-2 sm:top-2.5 text-gray-400 text-xs font-bold">%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-[11px] sm:text-xs font-bold text-gray-600 mb-1 block truncate">Extra Fee</Label>
+                    <div className="relative">
+                      <Input type="number" min="0" max="100" value={promoExtraFeePersen} onChange={(e) => setPromoExtraFeePersen(Number(e.target.value))} className="pl-2 pr-6 h-9 sm:h-10 text-xs sm:text-sm font-bold bg-white" placeholder="0" />
+                      <span className="absolute right-2 top-2 sm:top-2.5 text-gray-400 text-xs font-bold">%</span>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs font-bold text-gray-600 mb-1.5 block">Diskon %</Label>
-                  <div className="relative">
-                    <Input type="number" min="0" max="100" value={promoDiskonPersen} onChange={(e) => setPromoDiskonPersen(Number(e.target.value))} className="pr-8 bg-white" />
-                    <span className="absolute right-3 top-2.5 text-gray-400 text-sm font-bold">%</span>
+
+                {/* TOTAL POTONGAN & GABUNGAN FEE BANNER */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between font-bold text-amber-950">
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      Total Potongan Event:
+                    </span>
+                    <span className="text-amber-800 bg-white px-2 py-0.5 rounded-md border border-amber-200 font-black shadow-xs">
+                      {(promoDiskonPersen + promoExtraFeePersen)}% {promoDiskonNominal > 0 ? `+ ${formatCurrency(promoDiskonNominal)}` : ''}
+                    </span>
                   </div>
-                </div>
-                <div>
-                  <Label className="text-xs font-bold text-gray-600 mb-1.5 block">Extra Fee</Label>
-                  <div className="relative">
-                    <Input type="number" min="0" max="100" value={promoExtraFeePersen} onChange={(e) => setPromoExtraFeePersen(Number(e.target.value))} className="pr-8 bg-white" />
-                    <span className="absolute right-3 top-2.5 text-gray-400 text-sm font-bold">%</span>
-                  </div>
+
+                  {/* Summary satukan dengan fee marketplace */}
+                  {adMode === 'variant' && v1Variant && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-amber-500/20 text-[11px]">
+                      <span className="text-amber-900 font-semibold">Total Gabungan (Fee MP + Event):</span>
+                      <span className="font-black text-amber-900">
+                        {v1TotalFeePct}%{v1TotalFeeNominal > 0 ? ` + ${formatCurrency(v1TotalFeeNominal)}` : ''}
+                        <span className="font-bold text-amber-700 ml-1">({formatCurrency(v1TotalPotonganAmount)}/pcs)</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {adMode === 'product' && v2Product && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-amber-500/20 text-[11px]">
+                      <span className="text-amber-900 font-semibold">Rata-Rata Gabungan (Fee MP + Event):</span>
+                      <span className="font-black text-amber-900">
+                        ~{v2AvgFeePct.toFixed(1)}%
+                        <span className="font-bold text-amber-700 ml-1">(~{formatCurrency(v2AvgTotalPotongan)}/pcs)</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {adMode === 'group' && v3SelectedProductIds.length > 0 && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-amber-500/20 text-[11px]">
+                      <span className="text-amber-900 font-semibold">Rata-Rata Grup (Fee MP + Event):</span>
+                      <span className="font-black text-amber-900">
+                        ~{v3AvgFeePct.toFixed(1)}%
+                        <span className="font-bold text-amber-700 ml-1">(~{formatCurrency(v3AvgTotalPotongan)}/pcs)</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1911,6 +2008,20 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                   <div className="flex gap-2 items-center"><span className="w-32">Target Objek:</span><strong className="text-gray-900 bg-gray-100 px-2 py-0.5 rounded-md">{displayTitle}</strong></div>
                   <div className="flex gap-2 items-center"><span className="w-32">Harga Ref (H):</span><strong className="text-indigo-700 text-base">{formatCurrency(H)}</strong></div>
                   <div className="flex gap-2 items-center"><span className="w-32">Margin Ref (M):</span><strong className="text-emerald-700 text-base">{formatCurrency(M)}</strong></div>
+                  {(usePromoEvent || usePpnIklan) && (
+                    <div className="flex flex-wrap gap-1.5 pt-1.5">
+                      {usePromoEvent && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
+                          <Sparkles className="w-3 h-3 text-amber-600" /> Event Aktif: +{promoExtraFeePersen + promoDiskonPersen}% {promoDiskonNominal > 0 ? `+ ${formatCurrency(promoDiskonNominal)}` : ''}
+                        </span>
+                      )}
+                      {usePpnIklan && (
+                        <span className="inline-flex items-center text-[11px] font-bold bg-blue-100 text-blue-900 px-2 py-0.5 rounded-md border border-blue-300">
+                          PPN Iklan 11% Aktif
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -2001,7 +2112,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                         <td className="p-4 hidden md:table-cell">
                           <div className="text-xs">
                             <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(v1Hpp)}</span><br/>
-                            <span className="text-gray-500">Fee:</span> <span className="font-bold">{v1FeePct}% + {formatCurrency(v1FeeNominal)}</span>
+                            <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
+                            <span className="font-bold">
+                              {usePromoEvent ? `${v1TotalFeePct}% + ${formatCurrency(v1TotalFeeNominal)}` : `${v1FeePct}% + ${formatCurrency(v1FeeNominal)}`}
+                            </span>
+                            {usePromoEvent && (
+                              <div className="text-[10px] text-amber-700 font-semibold">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
+                            )}
                           </div>
                         </td>
                         <td className="p-4 font-bold text-gray-500">{formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaBep)}</td>
@@ -2033,7 +2150,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                           <td className="p-4 hidden md:table-cell">
                             <div className="text-xs">
                               <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
-                              <span className="text-gray-500">Fee:</span> <span className="font-bold">{feeConf.percentRate}% + {formatCurrency(feeN)}</span>
+                              <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
+                              <span className="font-bold">
+                                {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(feeN + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(feeN)}`}
+                              </span>
+                              {usePromoEvent && (
+                                <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
+                              )}
                             </div>
                           </td>
                           <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
@@ -2070,7 +2193,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                             <td className="p-4 hidden md:table-cell">
                               <div className="text-xs">
                                 <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
-                                <span className="text-gray-500">Fee:</span> <span className="font-bold">{feeConf.percentRate}% + {formatCurrency(feeN)}</span>
+                                <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
+                                <span className="font-bold">
+                                  {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(feeN + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(feeN)}`}
+                                </span>
+                                {usePromoEvent && (
+                                  <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
+                                )}
                               </div>
                             </td>
                             <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
