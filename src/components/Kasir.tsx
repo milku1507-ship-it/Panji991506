@@ -224,6 +224,8 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
   const addToCart = (product: Product, variant: { id: string; nama: string; harga_jual: number }) => {
     setCart(prev => {
       const existing = prev.find(i => i.variantId === variant.id);
+      const vData = product.varian.find(v => v.id === variant.id);
+      const minOrder = vData ? Math.max(1, Number(vData.min_order) || 1) : 1;
       if (existing) return prev.map(i => i.variantId === variant.id ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, {
         productId: product.id,
@@ -231,13 +233,23 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         variantId: variant.id,
         variantName: variant.nama,
         hargaJual: variant.harga_jual,
-        qty: 1
+        qty: minOrder
       }];
     });
   };
 
   const updateQty = (variantId: string, delta: number) => {
-    setCart(prev => prev.map(i => i.variantId === variantId ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0));
+    setCart(prev => prev.map(i => {
+      if (i.variantId === variantId) {
+        const product = products.find(p => p.id === i.productId);
+        const vData = product?.varian.find(v => v.id === variantId);
+        const minOrder = vData ? Math.max(1, Number(vData.min_order) || 1) : 1;
+        const newQty = i.qty + delta;
+        if (delta < 0 && newQty < minOrder) return { ...i, qty: 0 };
+        return { ...i, qty: newQty };
+      }
+      return i;
+    }).filter(i => i.qty > 0));
   };
 
   const removeFromCart = (variantId: string) => setCart(prev => prev.filter(i => i.variantId !== variantId));
