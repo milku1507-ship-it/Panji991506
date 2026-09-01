@@ -7,13 +7,19 @@ import {
   calculateReversePrice,
   calculatePromoTanggalCantik,
   calculatePriceSpread,
+  calculateAspHspAsmLsm,
   roundPrice,
   runUnitEconomicsSelfTests,
   UnitEconomicsResult,
   ReverseCalcResult,
   PromoTanggalCantikResult,
   ProductFeeDetail,
+  SkuEconomics,
+  AspHspAsmLsmResult,
+  PriceMethod,
+  MarginMethod,
 } from '../lib/unitEconomics';
+import { AspHspAsmLsmCard } from './AspHspAsmLsmCard';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, sanitizeData } from '../lib/firebase';
 import { toast } from 'sonner';
@@ -1339,6 +1345,13 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   const [isPromoActive, setIsPromoActive] = React.useState<boolean>(false);
   const [promoDiscountPct, setPromoDiscountPct] = React.useState<number>(5);
 
+  // ASP / HSP + ASM / LSM States
+  const [aspPriceMethod, setAspPriceMethod] = React.useState<PriceMethod>('ASP');
+  const [aspMarginMethod, setAspMarginMethod] = React.useState<MarginMethod>('ASM');
+  const [isConservativeMode, setIsConservativeMode] = React.useState<boolean>(false);
+  const [budgetIklan, setBudgetIklan] = React.useState<number>(100000);
+  const [customRoasSim, setCustomRoasSim] = React.useState<number>(0);
+
   // CARI HARGA specific states
   const [targetRoasInput, setTargetRoasInput] = React.useState<number>(6.5);
   const [voucherPctInput, setVoucherPctInput] = React.useState<number>(0);
@@ -1735,6 +1748,10 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         if (data.v3GroupName) setV3GroupName(data.v3GroupName);
         if (data.isPromoActive !== undefined) setIsPromoActive(data.isPromoActive);
         if (data.promoDiscountPct !== undefined) setPromoDiscountPct(data.promoDiscountPct);
+        if (data.aspPriceMethod) setAspPriceMethod(data.aspPriceMethod);
+        if (data.aspMarginMethod) setAspMarginMethod(data.aspMarginMethod);
+        if (data.isConservativeMode !== undefined) setIsConservativeMode(data.isConservativeMode);
+        if (data.budgetIklan !== undefined) setBudgetIklan(data.budgetIklan);
       }
     } catch {}
   }, [user?.uid]);
@@ -2038,10 +2055,35 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       numOrders,
     });
 
+    const v1Sku: SkuEconomics = {
+      id: v1ActiveVariant.id,
+      name: `${v1ActiveProduct.nama} - ${v1ActiveVariant.nama}`,
+      price: sellingPrice,
+      hpp: hppPcs,
+      minOrder,
+      marketplaceFee: (sellingPrice * feeConfig.percentRate / 100) + feeConfig.nominalPerUnit + (feeConfig.nominalPerOrder / minOrder),
+      voucher: voucherNominalInput + (sellingPrice * voucherPctInput / 100),
+      fixedCost: 0,
+      otherCost: 0,
+      totalNonAdCost: hppPcs + (sellingPrice * feeConfig.percentRate / 100) + feeConfig.nominalPerUnit + (feeConfig.nominalPerOrder / minOrder) + voucherNominalInput + (sellingPrice * voucherPctInput / 100),
+      margin: sellingPrice - (hppPcs + (sellingPrice * feeConfig.percentRate / 100) + feeConfig.nominalPerUnit + (feeConfig.nominalPerOrder / minOrder) + voucherNominalInput + (sellingPrice * voucherPctInput / 100)),
+      marginPct: sellingPrice > 0 ? ((sellingPrice - (hppPcs + (sellingPrice * feeConfig.percentRate / 100) + feeConfig.nominalPerUnit + (feeConfig.nominalPerOrder / minOrder) + voucherNominalInput + (sellingPrice * voucherPctInput / 100))) / sellingPrice) * 100 : 0,
+      weightPct: 100,
+    };
+
+    const aspHspResult = calculateAspHspAsmLsm([v1Sku], {
+      priceMethod: aspPriceMethod,
+      marginMethod: aspMarginMethod,
+      isConservative: isConservativeMode,
+      budgetIklan,
+      customRoas: customRoasSim,
+    });
+
     return {
       product: v1ActiveProduct,
       variant: v1ActiveVariant,
       unitEcon,
+      aspHspResult,
       price: sellingPrice,
       basePrice: masterPrice,
       hppPcs,
@@ -2074,6 +2116,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ppnRate,
     isPromoActive,
     promoDiscountPct,
+    aspPriceMethod,
+    aspMarginMethod,
+    isConservativeMode,
+    budgetIklan,
+    customRoasSim,
   ]);
 
   // CARI HARGA Engine: Mode 1
@@ -2307,6 +2354,40 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       weightedPrice
     );
 
+    const v2Skus: SkuEconomics[] = selectedVariants.map((v) => {
+      const { price } = getEffectiveVariantPrice(v2ActiveProduct.id, v);
+      const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+      const hppPcs = calcHppPerPcs(v, ingredients);
+      const minOrder = Math.max(1, Number(v.min_order) || 1);
+      const vFeeConfig = extractFeeRates(v2ActiveProduct, v);
+      const w = normWeights[v.id] || 0;
+      const totalNonAdCost = hppPcs + (sellingPrice * vFeeConfig.percentRate / 100) + vFeeConfig.nominalPerUnit + (vFeeConfig.nominalPerOrder / minOrder) + voucherNominalInput + (sellingPrice * voucherPctInput / 100);
+      const margin = sellingPrice - totalNonAdCost;
+      return {
+        id: v.id,
+        name: v.nama,
+        price: sellingPrice,
+        hpp: hppPcs,
+        minOrder,
+        marketplaceFee: (sellingPrice * vFeeConfig.percentRate / 100) + vFeeConfig.nominalPerUnit + (vFeeConfig.nominalPerOrder / minOrder),
+        voucher: voucherNominalInput + (sellingPrice * voucherPctInput / 100),
+        fixedCost: 0,
+        otherCost: 0,
+        totalNonAdCost,
+        margin,
+        marginPct: sellingPrice > 0 ? (margin / sellingPrice) * 100 : 0,
+        weightPct: Math.round(w * 100),
+      };
+    });
+
+    const aspHspResult = calculateAspHspAsmLsm(v2Skus, {
+      priceMethod: aspPriceMethod,
+      marginMethod: aspMarginMethod,
+      isConservative: isConservativeMode,
+      budgetIklan,
+      customRoas: customRoasSim,
+    });
+
     return {
       product: v2ActiveProduct,
       selectedVariantsCount: selectedVariants.length,
@@ -2317,6 +2398,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       weightedBasePrice,
       weightedHppPcs,
       productEcon,
+      aspHspResult,
       isPriceOverridden: anyPriceOverridden,
       roasWorst: worstDetail ? worstDetail.vEcon.roasBep : 0,
       worstVariantName: worstDetail?.variant?.nama || '-',
@@ -2339,6 +2421,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ppnRate,
     isPromoActive,
     promoDiscountPct,
+    aspPriceMethod,
+    aspMarginMethod,
+    isConservativeMode,
+    budgetIklan,
+    customRoasSim,
   ]);
 
   // CARI HARGA Engine: Mode 2 (INDIVIDUAL SKU + WEIGHTED AVERAGE)
@@ -2599,6 +2686,50 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       groupWeightedPrice
     );
 
+    const v3Skus: SkuEconomics[] = [];
+    groupProds.forEach((prod) => {
+      const prodWeight = (v3ProductWeights[prod.id] || 0) / totalProductWeightSum;
+      const allVariants = prod.varian || [];
+      const activeVarIds = v3GroupProductVariants[prod.id] || allVariants.map((v) => v.id);
+      const activeVariants = allVariants.filter((v) => activeVarIds.includes(v.id));
+      const vCount = Math.max(1, activeVariants.length);
+
+      activeVariants.forEach((v) => {
+        const { price } = getEffectiveVariantPrice(prod.id, v);
+        const sellingPrice = isPromoActive ? price * (1 - promoDiscountPct / 100) : price;
+        const hppPcs = calcHppPerPcs(v, ingredients);
+        const minOrder = Math.max(1, Number(v.min_order) || 1);
+        const vFeeConfig = extractFeeRates(prod, v);
+        const totalNonAdCost = hppPcs + (sellingPrice * vFeeConfig.percentRate / 100) + vFeeConfig.nominalPerUnit + (vFeeConfig.nominalPerOrder / minOrder) + voucherNominalInput + (sellingPrice * voucherPctInput / 100);
+        const margin = sellingPrice - totalNonAdCost;
+        const skuWeightPct = Math.round((prodWeight / vCount) * 100);
+
+        v3Skus.push({
+          id: `${prod.id}_${v.id}`,
+          name: `${prod.nama} - ${v.nama}`,
+          price: sellingPrice,
+          hpp: hppPcs,
+          minOrder,
+          marketplaceFee: (sellingPrice * vFeeConfig.percentRate / 100) + vFeeConfig.nominalPerUnit + (vFeeConfig.nominalPerOrder / minOrder),
+          voucher: voucherNominalInput + (sellingPrice * voucherPctInput / 100),
+          fixedCost: 0,
+          otherCost: 0,
+          totalNonAdCost,
+          margin,
+          marginPct: sellingPrice > 0 ? (margin / sellingPrice) * 100 : 0,
+          weightPct: skuWeightPct,
+        });
+      });
+    });
+
+    const aspHspResult = calculateAspHspAsmLsm(v3Skus, {
+      priceMethod: aspPriceMethod,
+      marginMethod: aspMarginMethod,
+      isConservative: isConservativeMode,
+      budgetIklan,
+      customRoas: customRoasSim,
+    });
+
     return {
       groupName: v3GroupName,
       productsCount: groupProds.length,
@@ -2606,6 +2737,7 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
       groupWeightedBasePrice,
       groupWeightedHppPcs,
       groupEcon,
+      aspHspResult,
       isPriceOverridden: anyPriceOverridden,
       roasWorstGroup: worstProduct ? worstProduct.pEcon.roasBep : 0,
       worstProductName: worstProduct?.product?.nama || '-',
@@ -2631,6 +2763,11 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     v3GroupName,
     isPromoActive,
     promoDiscountPct,
+    aspPriceMethod,
+    aspMarginMethod,
+    isConservativeMode,
+    budgetIklan,
+    customRoasSim,
   ]);
 
   // CARI HARGA Engine: Mode 3 (INDIVIDUAL SKU + GROUP WEIGHTED AVERAGE)
@@ -3515,130 +3652,214 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         <div className="space-y-6">
           {/* MODE 1: IKLAN VARIAN */}
           {adMode === 'variant' && v1Calculation && (
-            <ROASResultDisplay
-              modeTitle="Iklan Varian"
-              name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
-              targetProduct={v1Calculation.product}
-              targetVariant={v1Calculation.variant}
-              onApplyPrice={handleApplyPriceRequest}
-              isPriceFromCariHarga={v1Calculation.isPriceOverridden}
-              masterPrice={v1Calculation.basePrice}
-              onResetPrice={() => handleResetVariantPrice(v1Calculation.product.id, v1Calculation.variant.id)}
-              minOrder={v1Calculation.minOrder}
-              hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
-              hargaCoretPcs={v1Calculation.variant.harga_coret}
-              diskonPersen={isPromoActive ? promoDiscountPct : v1Calculation.variant.diskon_persen}
-              hppPcs={v1Calculation.hppPcs}
-              biayaProsesOrder={v1Calculation.unitEcon.nominalPerOrder}
-              hargaJualOrder={v1Calculation.unitEcon.sellingPrice * v1Calculation.minOrder}
-              hppProdukOrder={v1Calculation.hppPcs * v1Calculation.minOrder}
-              totalHppRealOrder={v1Calculation.unitEcon.realHppPerUnit * v1Calculation.minOrder}
-              voucherPerPcs={v1Calculation.unitEcon.voucherPerUnit}
-              omzetRealOrder={v1Calculation.unitEcon.omzetRealPerUnit * v1Calculation.minOrder}
-              profitSebelumIklanOrder={v1Calculation.unitEcon.profitBeforeAdsPerUnit * v1Calculation.minOrder}
-              marginSebelumIklanPct={v1Calculation.unitEcon.marginBeforeAdsPct}
-              targetProfitPct={targetProfitPct}
-              targetProfitNominalOrder={v1Calculation.unitEcon.targetProfitNominalPerUnit * v1Calculation.minOrder}
-              maxAdSpendOrder={v1Calculation.unitEcon.maxAdSpendPerUnit * v1Calculation.minOrder}
-              roasBep={v1Calculation.unitEcon.roasBep}
-              roasTarget={v1Calculation.unitEcon.roasTarget}
-              roasSetting={v1Calculation.unitEcon.roasSetting}
-              bufferPct={bufferPct}
-              isTargetFeasible={v1Calculation.unitEcon.isTargetFeasible}
-              simRoas={v1SimRoas}
-              setSimRoas={setV1SimRoas}
-              includePpn={includePpn}
-              ppnRate={ppnRate}
-              numOrders={v1OrderSim}
-              setNumOrders={setV1OrderSim}
-            />
+            <div className="space-y-6">
+              <AspHspAsmLsmCard
+                result={v1Calculation.aspHspResult}
+                priceMethod={aspPriceMethod}
+                setPriceMethod={(m) => {
+                  setAspPriceMethod(m);
+                  savePreferences('aspPriceMethod', m);
+                }}
+                marginMethod={aspMarginMethod}
+                setMarginMethod={(m) => {
+                  setAspMarginMethod(m);
+                  savePreferences('aspMarginMethod', m);
+                }}
+                isConservative={isConservativeMode}
+                setIsConservative={(c) => {
+                  setIsConservativeMode(c);
+                  savePreferences('isConservativeMode', c);
+                }}
+                budgetIklan={budgetIklan}
+                setBudgetIklan={(b) => {
+                  setBudgetIklan(b);
+                  savePreferences('budgetIklan', b);
+                }}
+                customRoas={customRoasSim}
+                setCustomRoas={setCustomRoasSim}
+                title={`Analisis & Rekomendasi ROAS — ${v1Calculation.product.nama} (${v1Calculation.variant.nama})`}
+              />
+              <ROASResultDisplay
+                modeTitle="Iklan Varian"
+                name={`${v1Calculation.product.nama} - ${v1Calculation.variant.nama}`}
+                targetProduct={v1Calculation.product}
+                targetVariant={v1Calculation.variant}
+                onApplyPrice={handleApplyPriceRequest}
+                isPriceFromCariHarga={v1Calculation.isPriceOverridden}
+                masterPrice={v1Calculation.basePrice}
+                onResetPrice={() => handleResetVariantPrice(v1Calculation.product.id, v1Calculation.variant.id)}
+                minOrder={v1Calculation.minOrder}
+                hargaJualPcs={v1Calculation.unitEcon.sellingPrice}
+                hargaCoretPcs={v1Calculation.variant.harga_coret}
+                diskonPersen={isPromoActive ? promoDiscountPct : v1Calculation.variant.diskon_persen}
+                hppPcs={v1Calculation.hppPcs}
+                biayaProsesOrder={v1Calculation.unitEcon.nominalPerOrder}
+                hargaJualOrder={v1Calculation.unitEcon.sellingPrice * v1Calculation.minOrder}
+                hppProdukOrder={v1Calculation.hppPcs * v1Calculation.minOrder}
+                totalHppRealOrder={v1Calculation.unitEcon.realHppPerUnit * v1Calculation.minOrder}
+                voucherPerPcs={v1Calculation.unitEcon.voucherPerUnit}
+                omzetRealOrder={v1Calculation.unitEcon.omzetRealPerUnit * v1Calculation.minOrder}
+                profitSebelumIklanOrder={v1Calculation.unitEcon.profitBeforeAdsPerUnit * v1Calculation.minOrder}
+                marginSebelumIklanPct={v1Calculation.unitEcon.marginBeforeAdsPct}
+                targetProfitPct={targetProfitPct}
+                targetProfitNominalOrder={v1Calculation.unitEcon.targetProfitNominalPerUnit * v1Calculation.minOrder}
+                maxAdSpendOrder={v1Calculation.unitEcon.maxAdSpendPerUnit * v1Calculation.minOrder}
+                roasBep={v1Calculation.unitEcon.roasBep}
+                roasTarget={v1Calculation.unitEcon.roasTarget}
+                roasSetting={v1Calculation.unitEcon.roasSetting}
+                bufferPct={bufferPct}
+                isTargetFeasible={v1Calculation.unitEcon.isTargetFeasible}
+                simRoas={v1SimRoas}
+                setSimRoas={setV1SimRoas}
+                includePpn={includePpn}
+                ppnRate={ppnRate}
+                numOrders={v1OrderSim}
+                setNumOrders={setV1OrderSim}
+              />
+            </div>
           )}
 
           {/* MODE 2: IKLAN PRODUK */}
           {adMode === 'product' && v2Calculation && (
-            <ROASResultDisplay
-              modeTitle="Iklan Produk (Weighted Average)"
-              name={v2Calculation.product.nama}
-              isPriceFromCariHarga={v2Calculation.isPriceOverridden}
-              masterPrice={v2Calculation.weightedBasePrice}
-              onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
-              minOrder={v2Calculation.effectiveMinOrder}
-              hargaJualPcs={v2Calculation.weightedPrice}
-              diskonPersen={isPromoActive ? promoDiscountPct : undefined}
-              hppPcs={v2Calculation.weightedHppPcs}
-              biayaProsesOrder={v2Calculation.productEcon.nominalPerOrder}
-              hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
-              hppProdukOrder={v2Calculation.weightedHppPcs * v2Calculation.effectiveMinOrder}
-              totalHppRealOrder={v2Calculation.productEcon.realHppPerUnit * v2Calculation.effectiveMinOrder}
-              voucherPerPcs={v2Calculation.productEcon.voucherPerUnit}
-              omzetRealOrder={v2Calculation.productEcon.omzetRealPerUnit * v2Calculation.effectiveMinOrder}
-              profitSebelumIklanOrder={v2Calculation.productEcon.profitBeforeAdsPerUnit * v2Calculation.effectiveMinOrder}
-              marginSebelumIklanPct={v2Calculation.productEcon.marginBeforeAdsPct}
-              targetProfitPct={targetProfitPct}
-              targetProfitNominalOrder={v2Calculation.productEcon.targetProfitNominalPerUnit * v2Calculation.effectiveMinOrder}
-              maxAdSpendOrder={v2Calculation.productEcon.maxAdSpendPerUnit * v2Calculation.effectiveMinOrder}
-              roasBep={v2Calculation.productEcon.roasBep}
-              roasTarget={v2Calculation.productEcon.roasTarget}
-              roasSetting={v2Calculation.productEcon.roasSetting}
-              bufferPct={bufferPct}
-              roasWorst={v2Calculation.roasWorst}
-              worstName={v2Calculation.worstVariantName}
-              isTargetFeasible={v2Calculation.productEcon.isTargetFeasible}
-              simRoas={v2SimRoas}
-              setSimRoas={setV2SimRoas}
-              includePpn={includePpn}
-              ppnRate={ppnRate}
-              numOrders={v2OrderSim}
-              setNumOrders={setV2OrderSim}
-              isAggregated={true}
-              priceSpread={v2Calculation.priceSpread}
-              variantBreakdown={v2Calculation.variantDetails}
-              targetProduct={v2Calculation.product}
-              onApplyVariantPrice={handleApplyPriceRequest}
-              onResetVariantPrice={handleResetVariantPrice}
-            />
+            <div className="space-y-6">
+              <AspHspAsmLsmCard
+                result={v2Calculation.aspHspResult}
+                priceMethod={aspPriceMethod}
+                setPriceMethod={(m) => {
+                  setAspPriceMethod(m);
+                  savePreferences('aspPriceMethod', m);
+                }}
+                marginMethod={aspMarginMethod}
+                setMarginMethod={(m) => {
+                  setAspMarginMethod(m);
+                  savePreferences('aspMarginMethod', m);
+                }}
+                isConservative={isConservativeMode}
+                setIsConservative={(c) => {
+                  setIsConservativeMode(c);
+                  savePreferences('isConservativeMode', c);
+                }}
+                budgetIklan={budgetIklan}
+                setBudgetIklan={(b) => {
+                  setBudgetIklan(b);
+                  savePreferences('budgetIklan', b);
+                }}
+                customRoas={customRoasSim}
+                setCustomRoas={setCustomRoasSim}
+                title={`Analisis & Rekomendasi ROAS Iklan Produk — ${v2Calculation.product.nama}`}
+              />
+              <ROASResultDisplay
+                modeTitle="Iklan Produk (Weighted Average)"
+                name={v2Calculation.product.nama}
+                isPriceFromCariHarga={v2Calculation.isPriceOverridden}
+                masterPrice={v2Calculation.weightedBasePrice}
+                onResetPrice={() => handleResetProductPrices(v2Calculation.product.id)}
+                minOrder={v2Calculation.effectiveMinOrder}
+                hargaJualPcs={v2Calculation.weightedPrice}
+                diskonPersen={isPromoActive ? promoDiscountPct : undefined}
+                hppPcs={v2Calculation.weightedHppPcs}
+                biayaProsesOrder={v2Calculation.productEcon.nominalPerOrder}
+                hargaJualOrder={v2Calculation.weightedPrice * v2Calculation.effectiveMinOrder}
+                hppProdukOrder={v2Calculation.weightedHppPcs * v2Calculation.effectiveMinOrder}
+                totalHppRealOrder={v2Calculation.productEcon.realHppPerUnit * v2Calculation.effectiveMinOrder}
+                voucherPerPcs={v2Calculation.productEcon.voucherPerUnit}
+                omzetRealOrder={v2Calculation.productEcon.omzetRealPerUnit * v2Calculation.effectiveMinOrder}
+                profitSebelumIklanOrder={v2Calculation.productEcon.profitBeforeAdsPerUnit * v2Calculation.effectiveMinOrder}
+                marginSebelumIklanPct={v2Calculation.productEcon.marginBeforeAdsPct}
+                targetProfitPct={targetProfitPct}
+                targetProfitNominalOrder={v2Calculation.productEcon.targetProfitNominalPerUnit * v2Calculation.effectiveMinOrder}
+                maxAdSpendOrder={v2Calculation.productEcon.maxAdSpendPerUnit * v2Calculation.effectiveMinOrder}
+                roasBep={v2Calculation.productEcon.roasBep}
+                roasTarget={v2Calculation.productEcon.roasTarget}
+                roasSetting={v2Calculation.productEcon.roasSetting}
+                bufferPct={bufferPct}
+                roasWorst={v2Calculation.roasWorst}
+                worstName={v2Calculation.worstVariantName}
+                isTargetFeasible={v2Calculation.productEcon.isTargetFeasible}
+                simRoas={v2SimRoas}
+                setSimRoas={setV2SimRoas}
+                includePpn={includePpn}
+                ppnRate={ppnRate}
+                numOrders={v2OrderSim}
+                setNumOrders={setV2OrderSim}
+                isAggregated={true}
+                priceSpread={v2Calculation.priceSpread}
+                variantBreakdown={v2Calculation.variantDetails}
+                targetProduct={v2Calculation.product}
+                onApplyVariantPrice={handleApplyPriceRequest}
+                onResetVariantPrice={handleResetVariantPrice}
+              />
+            </div>
           )}
 
           {/* MODE 3: IKLAN GRUP */}
           {adMode === 'group' && v3Calculation && (
-            <ROASResultDisplay
-              modeTitle="Iklan Grup (Consolidated Portfolio)"
-              name={v3Calculation.groupName}
-              isPriceFromCariHarga={v3Calculation.isPriceOverridden}
-              masterPrice={v3Calculation.groupWeightedBasePrice}
-              onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
-              minOrder={1}
-              hargaJualPcs={v3Calculation.groupWeightedPrice}
-              diskonPersen={isPromoActive ? promoDiscountPct : undefined}
-              hppPcs={v3Calculation.groupWeightedHppPcs}
-              biayaProsesOrder={v3Calculation.groupEcon.nominalPerOrder}
-              hargaJualOrder={v3Calculation.groupWeightedPrice}
-              hppProdukOrder={v3Calculation.groupWeightedHppPcs}
-              totalHppRealOrder={v3Calculation.groupEcon.realHppPerUnit}
-              voucherPerPcs={v3Calculation.groupEcon.voucherPerUnit}
-              omzetRealOrder={v3Calculation.groupEcon.omzetRealPerUnit}
-              profitSebelumIklanOrder={v3Calculation.groupEcon.profitBeforeAdsPerUnit}
-              marginSebelumIklanPct={v3Calculation.groupEcon.marginBeforeAdsPct}
-              targetProfitPct={targetProfitPct}
-              targetProfitNominalOrder={v3Calculation.groupEcon.targetProfitNominalPerUnit}
-              maxAdSpendOrder={v3Calculation.groupEcon.maxAdSpendPerUnit}
-              roasBep={v3Calculation.groupEcon.roasBep}
-              roasTarget={v3Calculation.groupEcon.roasTarget}
-              roasSetting={v3Calculation.groupEcon.roasSetting}
-              bufferPct={bufferPct}
-              roasWorst={v3Calculation.roasWorstGroup}
-              worstName={v3Calculation.worstProductName}
-              isTargetFeasible={v3Calculation.groupEcon.isTargetFeasible}
-              simRoas={v3SimRoas}
-              setSimRoas={setV3SimRoas}
-              includePpn={includePpn}
-              ppnRate={ppnRate}
-              numOrders={v3OrderSim}
-              setNumOrders={setV3OrderSim}
-              isAggregated={true}
-              priceSpread={v3Calculation.priceSpread}
-              productBreakdown={v3Calculation.productBreakdown}
-            />
+            <div className="space-y-6">
+              <AspHspAsmLsmCard
+                result={v3Calculation.aspHspResult}
+                priceMethod={aspPriceMethod}
+                setPriceMethod={(m) => {
+                  setAspPriceMethod(m);
+                  savePreferences('aspPriceMethod', m);
+                }}
+                marginMethod={aspMarginMethod}
+                setMarginMethod={(m) => {
+                  setAspMarginMethod(m);
+                  savePreferences('aspMarginMethod', m);
+                }}
+                isConservative={isConservativeMode}
+                setIsConservative={(c) => {
+                  setIsConservativeMode(c);
+                  savePreferences('isConservativeMode', c);
+                }}
+                budgetIklan={budgetIklan}
+                setBudgetIklan={(b) => {
+                  setBudgetIklan(b);
+                  savePreferences('budgetIklan', b);
+                }}
+                customRoas={customRoasSim}
+                setCustomRoas={setCustomRoasSim}
+                title={`Analisis & Rekomendasi ROAS Iklan Grup — ${v3Calculation.groupName}`}
+              />
+              <ROASResultDisplay
+                modeTitle="Iklan Grup (Consolidated Portfolio)"
+                name={v3Calculation.groupName}
+                isPriceFromCariHarga={v3Calculation.isPriceOverridden}
+                masterPrice={v3Calculation.groupWeightedBasePrice}
+                onResetPrice={() => handleResetGroupPrices(v3SelectedProductIds)}
+                minOrder={1}
+                hargaJualPcs={v3Calculation.groupWeightedPrice}
+                diskonPersen={isPromoActive ? promoDiscountPct : undefined}
+                hppPcs={v3Calculation.groupWeightedHppPcs}
+                biayaProsesOrder={v3Calculation.groupEcon.nominalPerOrder}
+                hargaJualOrder={v3Calculation.groupWeightedPrice}
+                hppProdukOrder={v3Calculation.groupWeightedHppPcs}
+                totalHppRealOrder={v3Calculation.groupEcon.realHppPerUnit}
+                voucherPerPcs={v3Calculation.groupEcon.voucherPerUnit}
+                omzetRealOrder={v3Calculation.groupEcon.omzetRealPerUnit}
+                profitSebelumIklanOrder={v3Calculation.groupEcon.profitBeforeAdsPerUnit}
+                marginSebelumIklanPct={v3Calculation.groupEcon.marginBeforeAdsPct}
+                targetProfitPct={targetProfitPct}
+                targetProfitNominalOrder={v3Calculation.groupEcon.targetProfitNominalPerUnit}
+                maxAdSpendOrder={v3Calculation.groupEcon.maxAdSpendPerUnit}
+                roasBep={v3Calculation.groupEcon.roasBep}
+                roasTarget={v3Calculation.groupEcon.roasTarget}
+                roasSetting={v3Calculation.groupEcon.roasSetting}
+                bufferPct={bufferPct}
+                roasWorst={v3Calculation.roasWorstGroup}
+                worstName={v3Calculation.worstProductName}
+                isTargetFeasible={v3Calculation.groupEcon.isTargetFeasible}
+                simRoas={v3SimRoas}
+                setSimRoas={setV3SimRoas}
+                includePpn={includePpn}
+                ppnRate={ppnRate}
+                numOrders={v3OrderSim}
+                setNumOrders={setV3OrderSim}
+                isAggregated={true}
+                priceSpread={v3Calculation.priceSpread}
+                productBreakdown={v3Calculation.productBreakdown}
+              />
+            </div>
           )}
         </div>
       )}
