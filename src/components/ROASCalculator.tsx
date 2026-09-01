@@ -1410,6 +1410,9 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   // FIND ROAS STATES
   const [useConservative, setUseConservative] = React.useState(false);
   const [biayaIklan, setBiayaIklan] = React.useState(100000);
+  const [alokasiIklanPct, setAlokasiIklanPct] = React.useState(50);
+  const [akselerasiPerforma, setAkselerasiPerforma] = React.useState(false);
+  const [customBufferPct, setCustomBufferPct] = React.useState(70);
 
   // FIND PRICE STATES
   const [targetRoasInput, setTargetRoasInput] = React.useState(8);
@@ -1577,27 +1580,49 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   // Final H and M Selection (Nilai Transaksi & Margin per Order Paket)
   let H = 0;
   let M = 0;
+  let G_hppReal = 0;
   let displayTitle = '';
   
   if (adMode === 'variant') {
     H = v1HargaOrder;
     M = v1MarginOrder;
+    G_hppReal = v1HppOrder;
     displayTitle = `${v1Product?.nama || 'Produk'} - ${v1Variant?.nama || 'Varian'}${v1MinOrder > 1 ? ` (${v1MinOrder} pcs/order)` : ''}`;
   } else if (adMode === 'product') {
     H = useConservative ? v2Hsp : v2Asp;
     M = useConservative ? v2Lsm : v2Asm;
+    G_hppReal = v2Product && v2Product.varian?.length ? (v2Product.varian.reduce((acc, v) => acc + (calcHppPerPcs(v, ingredients) * Math.max(1, Number(v.min_order) || 1)), 0) / v2Product.varian.length) : 0;
     displayTitle = `${v2Product?.nama || 'Produk Multi-Varian'}${v2MinOrder > 1 ? ` (Min. Order ~${v2MinOrder} pcs)` : ''}`;
   } else {
     H = useConservative ? v3Hsp : v3Asp;
     M = useConservative ? v3Lsm : v3Asm;
+    let sumHppG = 0, countV = 0;
+    products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
+      p.varian?.forEach(v => {
+        sumHppG += calcHppPerPcs(v, ingredients) * Math.max(1, Number(v.min_order) || 1);
+        countV++;
+      });
+    });
+    G_hppReal = countV > 0 ? sumHppG / countV : 0;
     displayTitle = `Grup Iklan (${v3SelectedProductIds.length} Produk)`;
   }
 
-  // Target ROAS Math
+  // Target ROAS Math (Rumus Standar Aplikasi)
   const ppnFactor = usePpnIklan ? 1.11 : 1.0;
   const roasBep = M > 0 ? (H / M) * ppnFactor : 0;
   const roasMin = roasBep > 0 ? roasBep * 1.5 : 0;
   const roasIdeal = roasBep > 0 ? roasBep * 2.0 : 0;
+
+  // ROAS SET SELLER CENTER MATH (Sesuai Rumus Baku Aplikasi & Seller Center)
+  const markupRatio = G_hppReal > 0 ? (H / G_hppReal) : 0;
+  const H_grossProfit = M; // Keuntungan kotor riil setelah potongan biaya & event
+  const safeAlokasiIklan = Math.max(1, Math.min(100, alokasiIklanPct));
+  // ROAS Ideal = A / ((H * 50%) / 1.11) => sama dengan roasBep * 2.0
+  const effAlokasiProfit = (H_grossProfit * (safeAlokasiIklan / 100)) / ppnFactor;
+  const roasIdealMinimal = effAlokasiProfit > 0 ? (H / effAlokasiProfit) : roasIdeal;
+  const netRoasBep = roasBep;
+  const activeBufferPct = akselerasiPerforma ? 85 : 70;
+  const roasSetSellerCenter = roasIdeal > 0 ? (roasIdeal / (activeBufferPct / 100)) : 0;
 
   const renderSimCard = (title: string, roas: number, color: string) => {
     const estOmset = biayaIklan * roas;
@@ -2121,6 +2146,199 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
               {renderSimCard('ROAS BEP', roasBep, 'red')}
               {renderSimCard('ROAS Minimum (1.5x)', roasMin, 'yellow')}
               {renderSimCard('ROAS Ideal (2.0x)', roasIdeal, 'green')}
+            </div>
+          </div>
+
+          {/* =========================================================================
+              ROAS SET DI SELLER CENTER (PERSIS SESUAI GAMBAR DOKUMENTASI)
+              ========================================================================= */}
+          <div className="bg-[#1b2438] text-slate-100 p-6 rounded-3xl shadow-xl border border-slate-700/80 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/80 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-black shadow-inner">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-white tracking-wide flex items-center gap-2">
+                    ROAS SET di Seller Center
+                    <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 px-2 py-0.5 rounded-md">
+                      Formula Standar Marketplace
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">Target input ROAS otomatis untuk Shopee / TikTok Seller Center dengan buffer performa.</p>
+                </div>
+              </div>
+
+              {/* TOGGLE AKSELERASI PERFORMA */}
+              <label className="flex items-center gap-2.5 bg-slate-800/90 border border-slate-700 hover:border-slate-600 px-3.5 py-2 rounded-xl cursor-pointer transition-all self-start sm:self-auto select-none shadow-sm">
+                <input 
+                  type="checkbox"
+                  checked={akselerasiPerforma}
+                  onChange={e => setAkselerasiPerforma(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
+                />
+                <span className="text-xs font-black text-slate-200">Akselerasi Performa ON</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${akselerasiPerforma ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'}`}>
+                  {akselerasiPerforma ? '85%' : `${customBufferPct}%`}
+                </span>
+              </label>
+            </div>
+
+            {/* BARIS G: HPP REAL */}
+            <div className="flex items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
+                  G
+                </span>
+                <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide uppercase">HPP REAL</span>
+                <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md hidden sm:inline-block">
+                  Bahan + Biaya Operasional
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="font-black text-base md:text-lg text-white font-mono">{formatCurrency(G_hppReal)}</span>
+              </div>
+            </div>
+
+            {/* PERBANDINGAN HARGA FINAL / HPP REAL */}
+            <div className="p-4 bg-[#3a2818]/80 border border-[#8a5b28]/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-center justify-center bg-amber-600/40 border border-amber-500/50 rounded-xl px-2.5 py-1 text-[11px] font-black text-amber-300">
+                  <span>A</span>
+                  <div className="w-full h-px bg-amber-400/60 my-0.5"></div>
+                  <span>G</span>
+                </div>
+                <div>
+                  <span className="font-black text-xs md:text-sm text-amber-200 tracking-wide">
+                    Perbandingan Harga Final / HPP REAL
+                  </span>
+                  <p className="text-[11px] text-amber-300/70">Tingkat kelipatan harga jual terhadap modal pokok produksi.</p>
+                </div>
+              </div>
+              <div className="text-left sm:text-right">
+                <span className="font-black text-base md:text-lg text-amber-300">
+                  Harga Final = {markupRatio.toFixed(1)}x HPP Real
+                </span>
+              </div>
+            </div>
+
+            {/* BARIS H: GROSS PROFIT REAL */}
+            <div className="flex items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
+                  H
+                </span>
+                <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide uppercase">GROSS PROFIT REAL</span>
+                <span className="text-[10px] font-bold bg-amber-600/40 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded-md font-mono hidden sm:inline-block">
+                  D - G
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="font-black text-base md:text-lg text-emerald-400 font-mono">{formatCurrency(H_grossProfit)}</span>
+              </div>
+            </div>
+
+            {/* BARIS I: ALOKASI KEUNTUNGAN KOTOR UNTUK IKLAN */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700/60 gap-3">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm">
+                  I
+                </span>
+                <div>
+                  <span className="font-black text-xs md:text-sm text-slate-200 tracking-wide">
+                    Berapa % dr keuntungan kotor anda utk jadi iklan?
+                  </span>
+                  <p className="text-[11px] text-slate-400">Rekomendasi standar: 50% untuk menjaga profit margin tetap sehat.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <Input 
+                  type="number"
+                  min="5"
+                  max="100"
+                  value={alokasiIklanPct}
+                  onChange={e => setAlokasiIklanPct(Math.max(1, Math.min(100, Number(e.target.value) || 0)))}
+                  className="w-20 h-10 bg-slate-900 border-slate-600 text-white font-black text-center text-base rounded-xl"
+                />
+                <span className="font-black text-slate-300 text-base">%</span>
+              </div>
+            </div>
+
+            {/* BARIS J: ROAS IDEAL MINIMAL */}
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-800/90 rounded-2xl border border-slate-700 gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-300 text-sm shrink-0">
+                    J
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-black text-xs md:text-sm text-white tracking-wide uppercase">ROAS IDEAL MINIMAL</span>
+                    <div className="mt-1 bg-amber-600/40 border border-amber-500/60 text-amber-200 px-3 py-1 rounded-xl text-xs font-black font-mono w-fit">
+                      A / ((H × {safeAlokasiIklan}%) {usePpnIklan ? '/ 1,11' : ''})
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right self-end sm:self-auto">
+                  <span className="text-3xl md:text-4xl font-black text-white">{roasIdealMinimal.toFixed(1)}</span>
+                  <span className="text-base font-bold text-slate-400 ml-1">x</span>
+                </div>
+              </div>
+
+              {/* KETERANGAN J */}
+              <div className="p-3 bg-slate-800/40 border border-slate-700/40 rounded-xl text-xs text-slate-400 leading-relaxed">
+                <strong className="text-slate-300 font-bold">ROAS IDEAL MINIMAL (J)</strong> itu adalah roas MINIMAL yang MESTI ANDA DAPATKAN dengan profit masih cukup sehat.
+              </div>
+            </div>
+
+            {/* BARIS K: NET ROAS (NOT RECOMMENDED) */}
+            <div className="flex items-center justify-between p-3.5 bg-slate-800/60 rounded-2xl border border-slate-700/40">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-xl bg-slate-700/80 border border-slate-600 flex items-center justify-center font-black text-slate-400 text-sm">
+                  K
+                </span>
+                <span className="font-black text-xs md:text-sm text-slate-300 uppercase">NET ROAS</span>
+                <span className="text-[10px] font-bold text-rose-400/90 italic">*not recommended</span>
+                <span className="text-[10px] font-bold bg-slate-700/70 text-slate-300 px-2 py-0.5 rounded-md font-mono hidden sm:inline-block">
+                  (I=100%)
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="font-black text-lg md:text-xl text-slate-300 font-mono">{netRoasBep.toFixed(1)}</span>
+                <span className="text-xs font-bold text-slate-500 ml-0.5">x</span>
+              </div>
+            </div>
+
+            {/* BARIS L: ROAS SET DI SELLER CENTER (PROMINENT RESULT) */}
+            <div className="p-5 bg-gradient-to-r from-[#201d4a] via-[#1e274b] to-[#1c2e4f] border-2 border-indigo-500/60 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+              <div className="flex items-center gap-3.5 z-10">
+                <span className="w-9 h-9 rounded-2xl bg-indigo-600 border border-indigo-400/50 flex items-center justify-center font-black text-white text-base shadow-md shrink-0">
+                  L
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-base md:text-lg text-white tracking-wide uppercase">
+                      ROAS SET di Seller Center
+                    </span>
+                    <div className="bg-amber-500/30 border border-amber-400/60 text-amber-300 px-2.5 py-0.5 rounded-lg text-xs font-black font-mono">
+                      J / {activeBufferPct}%
+                    </div>
+                  </div>
+                  <p className="text-xs text-indigo-200/80 mt-0.5">
+                    Nilai Target ROAS yang diisikan ke pengaturan Iklan Shopee / TikTok Seller Center.
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right z-10 self-end sm:self-auto">
+                <div className="text-4xl md:text-5xl font-black text-[#818cf8] tracking-tight drop-shadow-md">
+                  {roasSetSellerCenter.toFixed(1)}
+                  <span className="text-xl md:text-2xl font-bold text-indigo-300 ml-1">x</span>
+                </div>
+                <div className="text-[10px] font-bold text-indigo-300/80 mt-0.5">
+                  Buffer Keamanan: {activeBufferPct}%
+                </div>
+              </div>
             </div>
           </div>
         </div>
