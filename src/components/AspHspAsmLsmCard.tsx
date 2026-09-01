@@ -7,8 +7,6 @@ import { Label } from '@/components/ui/label';
 import { formatCurrency } from '../lib/formatUtils';
 import {
   AspHspAsmLsmResult,
-  PriceMethod,
-  MarginMethod,
   SkuEconomics,
 } from '../lib/unitEconomics';
 import {
@@ -30,12 +28,6 @@ import {
 
 interface AspHspAsmLsmCardProps {
   result: AspHspAsmLsmResult;
-  priceMethod: PriceMethod;
-  setPriceMethod: (val: PriceMethod) => void;
-  marginMethod: MarginMethod;
-  setMarginMethod: (val: MarginMethod) => void;
-  isConservative: boolean;
-  setIsConservative: (val: boolean) => void;
   budgetIklan: number;
   setBudgetIklan: (val: number) => void;
   customRoas?: number;
@@ -45,17 +37,11 @@ interface AspHspAsmLsmCardProps {
 
 export function AspHspAsmLsmCard({
   result,
-  priceMethod,
-  setPriceMethod,
-  marginMethod,
-  setMarginMethod,
-  isConservative,
-  setIsConservative,
   budgetIklan,
   setBudgetIklan,
   customRoas = 0,
   setCustomRoas,
-  title = 'Analisis & Rekomendasi ROAS (ASP/HSP + ASM/LSM)',
+  title = 'Analisis & Rekomendasi ROAS (Berdasarkan ASP & ASM)',
 }: AspHspAsmLsmCardProps) {
   const [showSkuTable, setShowSkuTable] = React.useState<boolean>(false);
   const [localCustomRoas, setLocalCustomRoas] = React.useState<number>(
@@ -70,8 +56,8 @@ export function AspHspAsmLsmCard({
     }
   }, [customRoas, result.roasIdeal]);
 
-  const activePriceMethod = isConservative ? 'HSP' : priceMethod;
-  const activeMarginMethod = isConservative ? 'LSM' : marginMethod;
+  const activePriceMethod = 'ASP';
+  const activeMarginMethod = 'ASM';
 
   // Custom simulation calculation with FLOOR unit rule
   const customSim = React.useMemo(() => {
@@ -101,7 +87,7 @@ export function AspHspAsmLsmCard({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded-md">
-                METODE ASP/HSP + ASM/LSM
+                METODE ASP & ASM
               </span>
               <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-400/30 text-[10px] font-bold">
                 Faktor Keamanan 1.5x & 2.0x
@@ -114,23 +100,6 @@ export function AspHspAsmLsmCard({
             <p className="text-[11px] text-slate-300">
               ROAS ditentukan berdasarkan Harga Jual Aktual & Margin setelah biaya marketplace / non-iklan.
             </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsConservative(!isConservative)}
-              className={`rounded-xl text-xs font-black h-8 px-3 transition-all border ${
-                isConservative
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 hover:bg-amber-400'
-                  : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 mr-1" />
-              <span>{isConservative ? '✓ Mode Konservatif Aktif' : 'Mode Konservatif (HSP+LSM)'}</span>
-            </Button>
           </div>
         </div>
       </CardHeader>
@@ -153,110 +122,23 @@ export function AspHspAsmLsmCard({
           </div>
         )}
 
-        {/* 1. SELECTION CONTROLS: HARGA REFERENSI & MARGIN REFERENSI */}
-        <div className="p-4 rounded-2xl bg-white border border-indigo-100 shadow-xs space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-gray-100 pb-2">
-            <div className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-black uppercase tracking-wider text-gray-800">
-                PILIHAN METODE HARGA & MARGIN REFERENSI
-              </span>
-            </div>
-            <span className="text-[11px] text-gray-500 font-medium">
-              Harga Ref: <strong className="text-indigo-700">{formatCurrency(result.referencePrice)}</strong> | Margin Ref: <strong className="text-indigo-700">{formatCurrency(result.referenceMargin)}</strong>
-            </span>
+        {/* 1. INFORMASI METRIK: ASP, HSP, ASM, LSM */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">ASP (Rata-rata Penjualan)</span>
+            <span className="text-lg font-black text-indigo-700">{formatCurrency(result.asp)}</span>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Pilihan Metode Harga Jual */}
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-gray-700 flex items-center justify-between">
-                <span>Metode Harga Jual:</span>
-                <span className="text-[10px] text-gray-500 font-semibold">
-                  {activePriceMethod === 'ASP' ? 'Rata-rata Penjualan' : 'Harga Tertinggi (Konservatif)'}
-                </span>
-              </Label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={isConservative}
-                  onClick={() => setPriceMethod('ASP')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    activePriceMethod === 'ASP'
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                      : 'bg-gray-50/80 text-gray-700 border-gray-200 hover:bg-gray-100'
-                  } ${isConservative ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase">ASP (Rata-rata)</span>
-                    {activePriceMethod === 'ASP' && <span className="text-[9px] bg-white/20 px-1 rounded">Aktif</span>}
-                  </div>
-                  <p className="text-sm font-black mt-0.5">{formatCurrency(result.asp)}</p>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isConservative}
-                  onClick={() => setPriceMethod('HSP')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    activePriceMethod === 'HSP'
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                      : 'bg-gray-50/80 text-gray-700 border-gray-200 hover:bg-gray-100'
-                  } ${isConservative ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase">HSP (Tertinggi)</span>
-                    {activePriceMethod === 'HSP' && <span className="text-[9px] bg-white/20 px-1 rounded">Aktif</span>}
-                  </div>
-                  <p className="text-sm font-black mt-0.5">{formatCurrency(result.hsp)}</p>
-                </button>
-              </div>
-            </div>
-
-            {/* Pilihan Metode Margin */}
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-gray-700 flex items-center justify-between">
-                <span>Metode Margin Non-Iklan:</span>
-                <span className="text-[10px] text-gray-500 font-semibold">
-                  {activeMarginMethod === 'ASM' ? 'Margin Rata-rata' : 'Margin Terendah (Paling Aman)'}
-                </span>
-              </Label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={isConservative}
-                  onClick={() => setMarginMethod('ASM')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    activeMarginMethod === 'ASM'
-                      ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                      : 'bg-gray-50/80 text-gray-700 border-gray-200 hover:bg-gray-100'
-                  } ${isConservative ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase">ASM (Rata-rata)</span>
-                    {activeMarginMethod === 'ASM' && <span className="text-[9px] bg-white/20 px-1 rounded">Aktif</span>}
-                  </div>
-                  <p className="text-sm font-black mt-0.5">{formatCurrency(result.asm)}</p>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isConservative}
-                  onClick={() => setMarginMethod('LSM')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    activeMarginMethod === 'LSM'
-                      ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                      : 'bg-gray-50/80 text-gray-700 border-gray-200 hover:bg-gray-100'
-                  } ${isConservative ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase">LSM (Terendah)</span>
-                    {activeMarginMethod === 'LSM' && <span className="text-[9px] bg-white/20 px-1 rounded">Aktif</span>}
-                  </div>
-                  <p className="text-sm font-black mt-0.5">{formatCurrency(result.lsm)}</p>
-                </button>
-              </div>
-            </div>
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">HSP (Harga Tertinggi)</span>
+            <span className="text-lg font-black text-gray-700">{formatCurrency(result.hsp)}</span>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">ASM (Margin Rata-rata)</span>
+            <span className="text-lg font-black text-purple-700">{formatCurrency(result.asm)}</span>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+            <span className="text-[10px] font-black uppercase text-gray-500 block mb-1">LSM (Margin Terendah)</span>
+            <span className="text-lg font-black text-gray-700">{formatCurrency(result.lsm)}</span>
           </div>
         </div>
 

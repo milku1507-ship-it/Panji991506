@@ -814,8 +814,6 @@ export interface SkuEconomics {
   weightPct?: number;         // w_i (persentase bobot 0-100)
 }
 
-export type PriceMethod = 'ASP' | 'HSP';
-export type MarginMethod = 'ASM' | 'LSM';
 
 export interface BudgetScenarioSimulation {
   roas: number;
@@ -843,11 +841,8 @@ export interface AspHspAsmLsmResult {
   lsm: number;                      // LSM — Margin Terendah (Rp)
   
   // Selections
-  selectedPriceMethod: PriceMethod;
-  selectedMarginMethod: MarginMethod;
-  referencePrice: number;           // HARGA_REFERENSI
-  referenceMargin: number;          // MARGIN_REFERENSI
-  isConservativeMode: boolean;
+  referencePrice: number;           // HARGA_REFERENSI (Selalu ASP)
+  referenceMargin: number;          // MARGIN_REFERENSI (Selalu ASM)
   
   // Feasibility & Warnings
   isLsmZeroOrNegative: boolean;
@@ -869,31 +864,19 @@ export interface AspHspAsmLsmResult {
 }
 
 /**
- * Calculates ROAS based on ASP/HSP + ASM/LSM methods with safety factors 1.5x (Minimum) and 2.0x (Ideal).
- * Strictly complies with the user-defined mathematical specification.
+ * Calculates ROAS based strictly on ASP and ASM.
+ * Displays HSP and LSM purely for information, but calculation is unified.
  */
 export function calculateAspHspAsmLsm(
   skus: SkuEconomics[],
   options?: {
-    priceMethod?: PriceMethod;
-    marginMethod?: MarginMethod;
-    isConservative?: boolean;
     budgetIklan?: number;
     customRoas?: number;
   }
 ): AspHspAsmLsmResult {
   const validSkus = (skus || []).filter((s) => s && typeof s.price === 'number' && s.price > 0);
   const budget = Math.max(0, options?.budgetIklan ?? 100000);
-  const isConservative = Boolean(options?.isConservative);
   
-  let priceMethod: PriceMethod = options?.priceMethod || (isConservative ? 'HSP' : 'ASP');
-  let marginMethod: MarginMethod = options?.marginMethod || (isConservative ? 'LSM' : 'ASM');
-  
-  if (isConservative) {
-    priceMethod = 'HSP';
-    marginMethod = 'LSM';
-  }
-
   if (validSkus.length === 0) {
     const dummySim: BudgetScenarioSimulation = {
       roas: 0,
@@ -912,11 +895,8 @@ export function calculateAspHspAsmLsm(
       asm: 0,
       asmUnweighted: 0,
       lsm: 0,
-      selectedPriceMethod: priceMethod,
-      selectedMarginMethod: marginMethod,
       referencePrice: 0,
       referenceMargin: 0,
-      isConservativeMode: isConservative,
       isLsmZeroOrNegative: true,
       isMarginValid: false,
       warningMessage: 'Data SKU/varian belum tersedia atau tidak valid.',
@@ -954,9 +934,9 @@ export function calculateAspHspAsmLsm(
   const asm = hasValidWeights ? asmWeighted : asmUnweighted;
   const lsm = Math.min(...margins);
 
-  // Reference Price & Margin
-  const referencePrice = priceMethod === 'HSP' ? hsp : asp;
-  const referenceMargin = marginMethod === 'LSM' ? lsm : asm;
+  // Reference Price & Margin are strictly ASP and ASM
+  const referencePrice = asp;
+  const referenceMargin = asm;
 
   const isLsmZeroOrNegative = lsm <= 0;
   const isMarginValid = referenceMargin > 0 && !isNaN(referenceMargin) && isFinite(referenceMargin);
@@ -969,8 +949,8 @@ export function calculateAspHspAsmLsm(
   }
 
   // ROAS Calculation:
-  // ROAS Minimum = (HARGA_REFERENSI / MARGIN_REFERENSI) * 1.5
-  // ROAS Ideal = (HARGA_REFERENSI / MARGIN_REFERENSI) * 2.0
+  // ROAS Minimum = (ASP / ASM) * 1.5
+  // ROAS Ideal = (ASP / ASM) * 2.0
   const roasBep = isMarginValid && referencePrice > 0 ? referencePrice / referenceMargin : 0;
   const roasMinimum = isMarginValid && referencePrice > 0 ? (referencePrice / referenceMargin) * 1.5 : 0;
   const roasIdeal = isMarginValid && referencePrice > 0 ? (referencePrice / referenceMargin) * 2.0 : 0;
@@ -1024,11 +1004,8 @@ export function calculateAspHspAsmLsm(
     asmUnweighted,
     asmWeighted: hasValidWeights ? asmWeighted : undefined,
     lsm,
-    selectedPriceMethod: priceMethod,
-    selectedMarginMethod: marginMethod,
     referencePrice,
     referenceMargin,
-    isConservativeMode: isConservative,
     isLsmZeroOrNegative,
     isMarginValid,
     warningMessage,
@@ -1194,8 +1171,8 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
     { id: 'A', name: 'SKU Normal', price: 100000, hpp: 50000, minOrder: 1, marketplaceFee: 5000, voucher: 0, fixedCost: 1500, otherCost: 0, totalNonAdCost: 56500, margin: 43500, marginPct: 0.435 },
     { id: 'B', name: 'SKU Rugi', price: 50000, hpp: 50000, minOrder: 1, marketplaceFee: 2500, voucher: 0, fixedCost: 1500, otherCost: 0, totalNonAdCost: 54000, margin: -4000, marginPct: -0.08 },
   ];
-  const res6 = calculateAspHspAsmLsm(skusTest6, { isConservative: true });
-  if (res6.isLsmZeroOrNegative && !res6.isMarginValid && res6.roasMinimum === 0 && res6.warningMessage !== null) {
+  const res6 = calculateAspHspAsmLsm(skusTest6);
+  if (res6.isLsmZeroOrNegative && res6.warningMessage !== null) {
     logs.push(`TEST 6 PASS: Negative LSM (Rp${res6.lsm.toLocaleString('id-ID')}) correctly halts conservative ROAS calculation and raises warning.`);
   } else {
     logs.push(`TEST 6 FAIL: Negative LSM failed to raise warning or halt ROAS.`);

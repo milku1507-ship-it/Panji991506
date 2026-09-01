@@ -16,8 +16,6 @@ import {
   ProductFeeDetail,
   SkuEconomics,
   AspHspAsmLsmResult,
-  PriceMethod,
-  MarginMethod,
 } from '../lib/unitEconomics';
 import { AspHspAsmLsmCard } from './AspHspAsmLsmCard';
 import { doc, setDoc } from 'firebase/firestore';
@@ -292,12 +290,6 @@ interface ROASResultDisplayProps {
   onApplyVariantPrice?: (product: Product, variant: Variant, newPrice: number) => void;
   onResetVariantPrice?: (productId: string, variantId: string) => void;
   aspHspResult?: AspHspAsmLsmResult;
-  aspPriceMethod?: PriceMethod;
-  setAspPriceMethod?: (m: PriceMethod) => void;
-  aspMarginMethod?: MarginMethod;
-  setAspMarginMethod?: (m: MarginMethod) => void;
-  isConservativeMode?: boolean;
-  setIsConservativeMode?: (c: boolean) => void;
   budgetIklan?: number;
   setBudgetIklan?: (b: number) => void;
   customRoasSim?: number;
@@ -350,12 +342,6 @@ function ROASResultDisplay({
   onApplyVariantPrice,
   onResetVariantPrice,
   aspHspResult,
-  aspPriceMethod = 'ASP',
-  setAspPriceMethod,
-  aspMarginMethod = 'ASM',
-  setAspMarginMethod,
-  isConservativeMode = false,
-  setIsConservativeMode,
   budgetIklan = 100000,
   setBudgetIklan,
   customRoasSim = 5,
@@ -613,18 +599,6 @@ function ROASResultDisplay({
             {aspHspResult && (
               <AspHspAsmLsmCard
                 result={aspHspResult}
-                priceMethod={aspPriceMethod}
-                setPriceMethod={(m) => {
-                  if (setAspPriceMethod) setAspPriceMethod(m);
-                }}
-                marginMethod={aspMarginMethod}
-                setMarginMethod={(m) => {
-                  if (setAspMarginMethod) setAspMarginMethod(m);
-                }}
-                isConservative={isConservativeMode}
-                setIsConservative={(c) => {
-                  if (setIsConservativeMode) setIsConservativeMode(c);
-                }}
                 budgetIklan={budgetIklan}
                 setBudgetIklan={(b) => {
                   if (setBudgetIklan) setBudgetIklan(b);
@@ -1441,9 +1415,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
   const [promoDiscountPct, setPromoDiscountPct] = React.useState<number>(5);
 
   // ASP / HSP + ASM / LSM States
-  const [aspPriceMethod, setAspPriceMethod] = React.useState<PriceMethod>('ASP');
-  const [aspMarginMethod, setAspMarginMethod] = React.useState<MarginMethod>('ASM');
-  const [isConservativeMode, setIsConservativeMode] = React.useState<boolean>(false);
   const [budgetIklan, setBudgetIklan] = React.useState<number>(100000);
   const [customRoasSim, setCustomRoasSim] = React.useState<number>(0);
 
@@ -1844,9 +1815,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
         if (data.v3GroupName) setV3GroupName(data.v3GroupName);
         if (data.isPromoActive !== undefined) setIsPromoActive(data.isPromoActive);
         if (data.promoDiscountPct !== undefined) setPromoDiscountPct(data.promoDiscountPct);
-        if (data.aspPriceMethod) setAspPriceMethod(data.aspPriceMethod);
-        if (data.aspMarginMethod) setAspMarginMethod(data.aspMarginMethod);
-        if (data.isConservativeMode !== undefined) setIsConservativeMode(data.isConservativeMode);
         if (data.budgetIklan !== undefined) setBudgetIklan(data.budgetIklan);
       }
     } catch {}
@@ -2168,9 +2136,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     };
 
     const aspHspResult = calculateAspHspAsmLsm([v1Sku], {
-      priceMethod: aspPriceMethod,
-      marginMethod: aspMarginMethod,
-      isConservative: isConservativeMode,
       budgetIklan,
       customRoas: customRoasSim,
     });
@@ -2212,9 +2177,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ppnRate,
     isPromoActive,
     promoDiscountPct,
-    aspPriceMethod,
-    aspMarginMethod,
-    isConservativeMode,
     budgetIklan,
     customRoasSim,
   ]);
@@ -2477,9 +2439,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     });
 
     const aspHspResult = calculateAspHspAsmLsm(v2Skus, {
-      priceMethod: aspPriceMethod,
-      marginMethod: aspMarginMethod,
-      isConservative: isConservativeMode,
       budgetIklan,
       customRoas: customRoasSim,
     });
@@ -2517,9 +2476,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     ppnRate,
     isPromoActive,
     promoDiscountPct,
-    aspPriceMethod,
-    aspMarginMethod,
-    isConservativeMode,
     budgetIklan,
     customRoasSim,
   ]);
@@ -2819,9 +2775,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     });
 
     const aspHspResult = calculateAspHspAsmLsm(v3Skus, {
-      priceMethod: aspPriceMethod,
-      marginMethod: aspMarginMethod,
-      isConservative: isConservativeMode,
       budgetIklan,
       customRoas: customRoasSim,
     });
@@ -2859,9 +2812,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
     v3GroupName,
     isPromoActive,
     promoDiscountPct,
-    aspPriceMethod,
-    aspMarginMethod,
-    isConservativeMode,
     budgetIklan,
     customRoasSim,
   ]);
@@ -3786,21 +3736,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 numOrders={v1OrderSim}
                 setNumOrders={setV1OrderSim}
                 aspHspResult={v1Calculation.aspHspResult}
-                aspPriceMethod={aspPriceMethod}
-                setAspPriceMethod={(m) => {
-                  setAspPriceMethod(m);
-                  savePreferences('aspPriceMethod', m);
-                }}
-                aspMarginMethod={aspMarginMethod}
-                setAspMarginMethod={(m) => {
-                  setAspMarginMethod(m);
-                  savePreferences('aspMarginMethod', m);
-                }}
-                isConservativeMode={isConservativeMode}
-                setIsConservativeMode={(c) => {
-                  setIsConservativeMode(c);
-                  savePreferences('isConservativeMode', c);
-                }}
                 budgetIklan={budgetIklan}
                 setBudgetIklan={(b) => {
                   setBudgetIklan(b);
@@ -3856,21 +3791,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 onApplyVariantPrice={handleApplyPriceRequest}
                 onResetVariantPrice={handleResetVariantPrice}
                 aspHspResult={v2Calculation.aspHspResult}
-                aspPriceMethod={aspPriceMethod}
-                setAspPriceMethod={(m) => {
-                  setAspPriceMethod(m);
-                  savePreferences('aspPriceMethod', m);
-                }}
-                aspMarginMethod={aspMarginMethod}
-                setAspMarginMethod={(m) => {
-                  setAspMarginMethod(m);
-                  savePreferences('aspMarginMethod', m);
-                }}
-                isConservativeMode={isConservativeMode}
-                setIsConservativeMode={(c) => {
-                  setIsConservativeMode(c);
-                  savePreferences('isConservativeMode', c);
-                }}
                 budgetIklan={budgetIklan}
                 setBudgetIklan={(b) => {
                   setBudgetIklan(b);
@@ -3923,21 +3843,6 @@ export function ROASCalculator({ products: rawProducts = [], ingredients: rawIng
                 priceSpread={v3Calculation.priceSpread}
                 productBreakdown={v3Calculation.productBreakdown}
                 aspHspResult={v3Calculation.aspHspResult}
-                aspPriceMethod={aspPriceMethod}
-                setAspPriceMethod={(m) => {
-                  setAspPriceMethod(m);
-                  savePreferences('aspPriceMethod', m);
-                }}
-                aspMarginMethod={aspMarginMethod}
-                setAspMarginMethod={(m) => {
-                  setAspMarginMethod(m);
-                  savePreferences('aspMarginMethod', m);
-                }}
-                isConservativeMode={isConservativeMode}
-                setIsConservativeMode={(c) => {
-                  setIsConservativeMode(c);
-                  savePreferences('isConservativeMode', c);
-                }}
                 budgetIklan={budgetIklan}
                 setBudgetIklan={(b) => {
                   setBudgetIklan(b);
