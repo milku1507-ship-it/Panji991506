@@ -1444,140 +1444,149 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   };
 
   // ---------------------------------------------------------
-  // CORE LOGIC EXTRACTOR
+  // CORE LOGIC EXTRACTOR (SESUAI MINIMAL ORDER / PAKET ORDER)
   // ---------------------------------------------------------
   
   // V1: Variant Logic
   const v1Product = products.find(p => p.id === v1SelectedProductId);
   const v1Variant = v1Product?.varian?.find(v => v.id === v1SelectedVariantId);
-  let v1Hpp = 0, v1FeePct = 0, v1Margin = 0, v1Harga = 0, v1FeeNominal = 0, v1MinOrder = 1;
-  let v1FeeAmount = 0;
-  let v1DiskonAmount = 0;
-  let v1ExtraFeeAmount = 0;
-  let v1TotalPotonganAmount = 0;
-  let v1TotalFeePct = 0;
-  let v1TotalFeeNominal = 0;
+  let v1MinOrder = 1;
+  let v1HargaPcs = 0, v1HppPcs = 0;
+  let v1HargaOrder = 0, v1HppOrder = 0;
+  let v1FeePct = 0, v1FeeNominalPerOrder = 0;
+  let v1FeeAmountOrder = 0, v1MarginOrder = 0;
+  let v1DiskonAmountOrder = 0, v1ExtraFeeAmountOrder = 0, v1TotalPotonganAmountOrder = 0;
+  let v1TotalFeePct = 0, v1TotalFeeNominalOrder = 0;
 
   if (v1Product && v1Variant) {
     v1MinOrder = Math.max(1, Number(v1Variant.min_order) || 1);
-    v1Hpp = calcHppPerPcs(v1Variant, ingredients);
+    v1HargaPcs = v1Variant.harga_jual;
+    v1HppPcs = calcHppPerPcs(v1Variant, ingredients);
+    
+    // Perhitungan berskala minimal order (paket order per transaksi)
+    v1HargaOrder = v1HargaPcs * v1MinOrder;
+    v1HppOrder = v1HppPcs * v1MinOrder;
+    
     const feeConf = extractFeeRates(v1Product, v1Variant);
     v1FeePct = feeConf.percentRate; 
-    v1FeeNominal = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / v1MinOrder);
-    v1Harga = v1Variant.harga_jual;
-    v1FeeAmount = (v1Harga * v1FeePct / 100) + v1FeeNominal;
+    v1FeeNominalPerOrder = (feeConf.nominalPerUnit * v1MinOrder) + feeConf.nominalPerOrder;
+    v1FeeAmountOrder = (v1HargaOrder * v1FeePct / 100) + v1FeeNominalPerOrder;
     
-    let currentH = v1Harga;
+    let currentHOrder = v1HargaOrder;
     let diskonEvent = 0;
     let extraFeeEvent = 0;
     if (usePromoEvent) {
-      diskonEvent = promoDiskonNominal + (currentH * promoDiskonPersen / 100);
-      extraFeeEvent = currentH * promoExtraFeePersen / 100;
-      currentH = currentH - diskonEvent;
+      diskonEvent = promoDiskonNominal + (currentHOrder * promoDiskonPersen / 100);
+      extraFeeEvent = currentHOrder * promoExtraFeePersen / 100;
+      currentHOrder = currentHOrder - diskonEvent;
     }
 
-    v1DiskonAmount = diskonEvent;
-    v1ExtraFeeAmount = extraFeeEvent;
-    v1TotalPotonganAmount = v1FeeAmount + extraFeeEvent + diskonEvent;
+    v1DiskonAmountOrder = diskonEvent;
+    v1ExtraFeeAmountOrder = extraFeeEvent;
+    v1TotalPotonganAmountOrder = v1FeeAmountOrder + extraFeeEvent + diskonEvent;
     v1TotalFeePct = v1FeePct + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
-    v1TotalFeeNominal = v1FeeNominal + (usePromoEvent ? promoDiskonNominal : 0);
+    v1TotalFeeNominalOrder = v1FeeNominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
     
-    v1Margin = currentH - v1Hpp - v1FeeAmount - extraFeeEvent;
+    v1MarginOrder = currentHOrder - v1HppOrder - v1FeeAmountOrder - extraFeeEvent;
   }
 
-  // V2: Product Logic
+  // V2: Product Logic (Multi-Variant dengan min_order masing-masing)
   const v2Product = products.find(p => p.id === v2SelectedProductId);
   let v2Asp = 0, v2Asm = 0, v2Hsp = 0, v2Lsm = 0, v2MinOrder = 1;
   let v2AvgFeePct = 0, v2AvgTotalPotongan = 0;
   if (v2Product && v2Product.varian?.length) {
-    let sumPrice = 0, sumMargin = 0, sumFeePct = 0, sumPotongan = 0;
+    let sumOrderPrice = 0, sumOrderMargin = 0, sumFeePct = 0, sumPotongan = 0;
     v2Product.varian.forEach(v => {
       const vMinOrder = Math.max(1, Number(v.min_order) || 1);
       if (vMinOrder > v2MinOrder) v2MinOrder = vMinOrder;
-      const hpp = calcHppPerPcs(v, ingredients);
-      const feeConf = extractFeeRates(v2Product, v);
-      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / vMinOrder);
-      const feeAmount = (v.harga_jual * feeConf.percentRate / 100) + feeN;
       
-      let currentH = v.harga_jual;
+      const vHargaOrder = v.harga_jual * vMinOrder;
+      const vHppOrder = calcHppPerPcs(v, ingredients) * vMinOrder;
+      const feeConf = extractFeeRates(v2Product, v);
+      const vFeeNominal = (feeConf.nominalPerUnit * vMinOrder) + feeConf.nominalPerOrder;
+      const feeAmount = (vHargaOrder * feeConf.percentRate / 100) + vFeeNominal;
+      
+      let currentHOrder = vHargaOrder;
       let diskonEvent = 0;
       let extraFeeEvent = 0;
       if (usePromoEvent) {
-        diskonEvent = promoDiskonNominal + (currentH * promoDiskonPersen / 100);
-        extraFeeEvent = currentH * promoExtraFeePersen / 100;
-        currentH = currentH - diskonEvent;
+        diskonEvent = promoDiskonNominal + (currentHOrder * promoDiskonPersen / 100);
+        extraFeeEvent = currentHOrder * promoExtraFeePersen / 100;
+        currentHOrder = currentHOrder - diskonEvent;
       }
       
       const totalPotongan = feeAmount + extraFeeEvent + diskonEvent;
-      const margin = currentH - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN) - extraFeeEvent;
-      sumPrice += v.harga_jual;
-      sumMargin += margin;
+      const marginOrder = currentHOrder - vHppOrder - feeAmount - extraFeeEvent;
+      sumOrderPrice += vHargaOrder;
+      sumOrderMargin += marginOrder;
       sumFeePct += feeConf.percentRate;
       sumPotongan += totalPotongan;
-      if (v.harga_jual > v2Hsp) v2Hsp = v.harga_jual;
-      if (v2Lsm === 0 || margin < v2Lsm) v2Lsm = margin;
+      if (vHargaOrder > v2Hsp) v2Hsp = vHargaOrder;
+      if (v2Lsm === 0 || marginOrder < v2Lsm) v2Lsm = marginOrder;
     });
-    v2Asp = sumPrice / v2Product.varian.length;
-    v2Asm = sumMargin / v2Product.varian.length;
+    v2Asp = sumOrderPrice / v2Product.varian.length;
+    v2Asm = sumOrderMargin / v2Product.varian.length;
     v2AvgFeePct = (sumFeePct / v2Product.varian.length) + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
     v2AvgTotalPotongan = sumPotongan / v2Product.varian.length;
   }
 
-  // V3: Group Logic
+  // V3: Group Logic (Grup Iklan dengan min_order masing-masing)
   let v3Asp = 0, v3Asm = 0, v3Hsp = 0, v3Lsm = 0;
   let v3AvgFeePct = 0, v3AvgTotalPotongan = 0;
   let totalVariantsGroup = 0;
   if (v3SelectedProductIds.length > 0) {
-    let sumPrice = 0, sumMargin = 0, sumFeePct = 0, sumPotongan = 0;
+    let sumOrderPrice = 0, sumOrderMargin = 0, sumFeePct = 0, sumPotongan = 0;
     products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
       p.varian?.forEach(v => {
         const pMinOrder = Math.max(1, Number(v.min_order) || 1);
         totalVariantsGroup++;
-        const hpp = calcHppPerPcs(v, ingredients);
-        const feeConf = extractFeeRates(p, v);
-        const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / pMinOrder);
-        const feeAmount = (v.harga_jual * feeConf.percentRate / 100) + feeN;
         
-        let currentH = v.harga_jual;
+        const vHargaOrder = v.harga_jual * pMinOrder;
+        const vHppOrder = calcHppPerPcs(v, ingredients) * pMinOrder;
+        const feeConf = extractFeeRates(p, v);
+        const vFeeNominal = (feeConf.nominalPerUnit * pMinOrder) + feeConf.nominalPerOrder;
+        const feeAmount = (vHargaOrder * feeConf.percentRate / 100) + vFeeNominal;
+        
+        let currentHOrder = vHargaOrder;
         let diskonEvent = 0;
         let extraFeeEvent = 0;
         if (usePromoEvent) {
-          diskonEvent = promoDiskonNominal + (currentH * promoDiskonPersen / 100);
-          extraFeeEvent = currentH * promoExtraFeePersen / 100;
-          currentH = currentH - diskonEvent;
+          diskonEvent = promoDiskonNominal + (currentHOrder * promoDiskonPersen / 100);
+          extraFeeEvent = currentHOrder * promoExtraFeePersen / 100;
+          currentHOrder = currentHOrder - diskonEvent;
         }
         
         const totalPotongan = feeAmount + extraFeeEvent + diskonEvent;
-        const margin = currentH - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN) - extraFeeEvent;
-        sumPrice += v.harga_jual;
-        sumMargin += margin;
+        const marginOrder = currentHOrder - vHppOrder - feeAmount - extraFeeEvent;
+        sumOrderPrice += vHargaOrder;
+        sumOrderMargin += marginOrder;
         sumFeePct += feeConf.percentRate;
         sumPotongan += totalPotongan;
-        if (v.harga_jual > v3Hsp) v3Hsp = v.harga_jual;
-        if (v3Lsm === 0 || margin < v3Lsm) v3Lsm = margin;
+        if (vHargaOrder > v3Hsp) v3Hsp = vHargaOrder;
+        if (v3Lsm === 0 || marginOrder < v3Lsm) v3Lsm = marginOrder;
       });
     });
     if (totalVariantsGroup > 0) {
-      v3Asp = sumPrice / totalVariantsGroup;
-      v3Asm = sumMargin / totalVariantsGroup;
+      v3Asp = sumOrderPrice / totalVariantsGroup;
+      v3Asm = sumOrderMargin / totalVariantsGroup;
       v3AvgFeePct = (sumFeePct / totalVariantsGroup) + (usePromoEvent ? (promoExtraFeePersen + promoDiskonPersen) : 0);
       v3AvgTotalPotongan = sumPotongan / totalVariantsGroup;
     }
   }
 
-  // Final H and M Selection
+  // Final H and M Selection (Nilai Transaksi & Margin per Order Paket)
   let H = 0;
   let M = 0;
   let displayTitle = '';
   
   if (adMode === 'variant') {
-    H = v1Harga;
-    M = v1Margin;
-    displayTitle = `${v1Product?.nama || 'Produk'} - ${v1Variant?.nama || 'Varian'}`;
+    H = v1HargaOrder;
+    M = v1MarginOrder;
+    displayTitle = `${v1Product?.nama || 'Produk'} - ${v1Variant?.nama || 'Varian'}${v1MinOrder > 1 ? ` (${v1MinOrder} pcs/order)` : ''}`;
   } else if (adMode === 'product') {
     H = useConservative ? v2Hsp : v2Asp;
     M = useConservative ? v2Lsm : v2Asm;
-    displayTitle = v2Product?.nama || 'Produk Multi-Varian';
+    displayTitle = `${v2Product?.nama || 'Produk Multi-Varian'}${v2MinOrder > 1 ? ` (Min. Order ~${v2MinOrder} pcs)` : ''}`;
   } else {
     H = useConservative ? v3Hsp : v3Asp;
     M = useConservative ? v3Lsm : v3Asm;
@@ -1592,11 +1601,13 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
   const renderSimCard = (title: string, roas: number, color: string) => {
     const estOmset = biayaIklan * roas;
-    const estQty = H > 0 ? Math.floor(estOmset / H) : 0;
-    const estMargin = estQty * M;
+    const estOrder = H > 0 ? Math.floor(estOmset / H) : 0;
+    const estMargin = estOrder * M;
     const effectiveBiayaIklan = biayaIklan * ppnFactor;
     const estProfit = estMargin - effectiveBiayaIklan;
     const marginPct = estOmset > 0 ? ((estProfit / estOmset) * 100).toFixed(1) : '0.0';
+    const isSingleVariantMinOrder = adMode === 'variant' && v1MinOrder > 1;
+    const totalPcs = isSingleVariantMinOrder ? estOrder * v1MinOrder : estOrder;
     
     let bgClass = '';
     let textColor = '';
@@ -1641,7 +1652,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
           </div>
           <div>
             <span className="text-slate-500 block text-[10px] uppercase font-bold">Terjual</span>
-            <span className="font-bold text-slate-900">{estQty} pcs</span>
+            <span className="font-bold text-slate-900">
+              {estOrder} {isSingleVariantMinOrder ? 'order' : 'pcs'}
+              {isSingleVariantMinOrder && (
+                <span className="block text-[9px] text-gray-500 font-semibold font-mono">({totalPcs} pcs)</span>
+              )}
+            </span>
           </div>
           <div>
             <span className="text-slate-500 block text-[10px] uppercase font-bold">Tot. Margin</span>
@@ -1652,27 +1668,55 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     );
   };
 
-  const calcReversePrice = (hpp: number, feePct: number, feeNominal: number, tRoas: number) => {
+  const calcReversePrice = (
+    hppPcs: number,
+    minOrder: number,
+    feePct: number,
+    feeNominalPerUnit: number,
+    feeNominalPerOrder: number,
+    tRoas: number
+  ) => {
     const dNom = usePromoEvent ? promoDiskonNominal : 0;
     const dPct = usePromoEvent ? (promoDiskonPersen / 100) : 0;
     const ePct = usePromoEvent ? (promoExtraFeePersen / 100) : 0;
     const pFact = usePpnIklan ? 1.11 : 1.0;
+    const mOrd = Math.max(1, minOrder || 1);
 
-    const baseDenom = (1 - (feePct/100) - dPct - ePct);
+    const hppOrder = hppPcs * mOrd;
+    const feeNominalOrder = (feeNominalPerUnit * mOrd) + feeNominalPerOrder;
+
+    const baseDenom = (1 - (feePct / 100) - dPct - ePct);
     const denomBep = baseDenom - (pFact * 1.0 / tRoas);
-    const hargaBep = denomBep > 0 ? (hpp + feeNominal + dNom) / denomBep : 0;
-    const denomMin = baseDenom - (pFact * 1.5 / tRoas);
-    const hargaMin = denomMin > 0 ? (hpp + feeNominal + dNom) / denomMin : 0;
-    const denomIdeal = baseDenom - (pFact * 2.0 / tRoas);
-    const hargaIdeal = denomIdeal > 0 ? (hpp + feeNominal + dNom) / denomIdeal : 0;
-    
-    const currentH = hargaIdeal;
-    const extraDiscount = dNom + (currentH * dPct);
-    const extraFee = currentH * ePct;
-    const effectiveH = currentH - extraDiscount;
-    const marginIdeal = effectiveH - hpp - (currentH * (feePct / 100)) - feeNominal - extraFee;
+    const hargaOrderBep = denomBep > 0 ? (hppOrder + feeNominalOrder + dNom) / denomBep : 0;
+    const hargaPcsBep = mOrd > 0 ? hargaOrderBep / mOrd : 0;
 
-    return { hargaBep, hargaMin, hargaIdeal, marginIdeal };
+    const denomMin = baseDenom - (pFact * 1.5 / tRoas);
+    const hargaOrderMin = denomMin > 0 ? (hppOrder + feeNominalOrder + dNom) / denomMin : 0;
+    const hargaPcsMin = mOrd > 0 ? hargaOrderMin / mOrd : 0;
+
+    const denomIdeal = baseDenom - (pFact * 2.0 / tRoas);
+    const hargaOrderIdeal = denomIdeal > 0 ? (hppOrder + feeNominalOrder + dNom) / denomIdeal : 0;
+    const hargaPcsIdeal = mOrd > 0 ? hargaOrderIdeal / mOrd : 0;
+    
+    const currentHOrder = hargaOrderIdeal;
+    const extraDiscount = dNom + (currentHOrder * dPct);
+    const extraFee = currentHOrder * ePct;
+    const effectiveHOrder = currentHOrder - extraDiscount;
+    const marginIdealOrder = effectiveHOrder - hppOrder - (currentHOrder * (feePct / 100)) - feeNominalOrder - extraFee;
+    const marginIdealPcs = mOrd > 0 ? marginIdealOrder / mOrd : 0;
+
+    return { 
+      hargaOrderBep, 
+      hargaPcsBep, 
+      hargaOrderMin, 
+      hargaPcsMin, 
+      hargaOrderIdeal, 
+      hargaPcsIdeal, 
+      marginIdealOrder, 
+      marginIdealPcs,
+      hppOrder,
+      feeNominalOrder
+    };
   };
 
   return (
@@ -1748,35 +1792,44 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Min. Order</p>
-                    <p className="font-black text-gray-900">{v1MinOrder} pcs</p>
-                    {v1MinOrder > 1 && <p className="text-[10px] text-indigo-600 font-bold mt-1">Skala Paket Aktif</p>}
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{v1MinOrder > 1 ? 'Harga Min. Order (H)' : 'Harga Jual (H)'}</p>
+                    <p className="font-black text-indigo-700 text-sm sm:text-base">{formatCurrency(v1HargaOrder)}</p>
+                    {v1MinOrder > 1 ? (
+                      <p className="text-[10px] text-gray-500 mt-0.5">{v1MinOrder} pcs @ {formatCurrency(v1HargaPcs)}</p>
+                    ) : (
+                      <p className="text-[10px] text-gray-500 mt-0.5">Min. Order: 1 pcs</p>
+                    )}
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">HPP Terpanggil</p>
-                    <p className="font-black text-gray-900">{formatCurrency(v1Hpp)} <span className="text-xs font-normal text-gray-500">/ pcs</span></p>
-                    {v1MinOrder > 1 && <p className="text-[10px] text-gray-500 mt-1">HPP Paket: {formatCurrency(v1Hpp * v1MinOrder)}</p>}
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{v1MinOrder > 1 ? 'HPP Min. Order' : 'HPP Terpanggil'}</p>
+                    <p className="font-black text-rose-600 text-sm sm:text-base">{formatCurrency(v1HppOrder)}</p>
+                    {v1MinOrder > 1 ? (
+                      <p className="text-[10px] text-gray-500 mt-0.5">{v1MinOrder} pcs @ {formatCurrency(v1HppPcs)}</p>
+                    ) : (
+                      <p className="text-[10px] text-gray-500 mt-0.5">per pcs</p>
+                    )}
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{usePromoEvent ? 'Total Fee & Event' : 'Total Fee Marketplace'}</p>
-                    <p className="font-black text-gray-900">
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{usePromoEvent ? 'Fee MP + Event' : 'Total Fee MP'}</p>
+                    <p className="font-black text-gray-900 text-sm sm:text-base">
                       {usePromoEvent ? (
-                        <span className="text-amber-700">{v1TotalFeePct}%{v1TotalFeeNominal > 0 ? ` + ${formatCurrency(v1TotalFeeNominal)}` : ''}</span>
+                        <span className="text-amber-700">{v1TotalFeePct}%{v1TotalFeeNominalOrder > 0 ? ` + ${formatCurrency(v1TotalFeeNominalOrder)}` : ''}</span>
                       ) : (
-                        `${v1FeePct}% + ${formatCurrency(v1FeeNominal)}`
+                        `${v1FeePct}% + ${formatCurrency(v1FeeNominalPerOrder)}`
                       )}
                     </p>
-                    <p className="text-[10px] text-gray-500 mt-1">
-                      Estimasi: <span className="font-bold text-gray-800">{formatCurrency(usePromoEvent ? v1TotalPotonganAmount : v1FeeAmount)}</span>
-                      {usePromoEvent && (
-                        <span className="block text-[9px] text-amber-700 font-semibold mt-0.5">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</span>
-                      )}
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      Est: <span className="font-bold text-gray-800">{formatCurrency(usePromoEvent ? v1TotalPotonganAmountOrder : v1FeeAmountOrder)}</span>
+                      {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> / {v1MinOrder} pcs</span>}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Margin Bersih (M)</p>
-                    <p className="font-black text-emerald-600">{formatCurrency(v1Margin)} <span className="text-xs font-normal text-gray-500">/ pcs</span></p>
-                    {v1MinOrder > 1 && <p className="text-[10px] text-emerald-600 mt-1">Margin Paket: {formatCurrency(v1Margin * v1MinOrder)}</p>}
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">{v1MinOrder > 1 ? 'Margin Min. Order (M)' : 'Margin Bersih (M)'}</p>
+                    <p className="font-black text-emerald-600 text-sm sm:text-base">{formatCurrency(v1MarginOrder)}</p>
+                    <p className="text-[10px] text-emerald-600/80 font-bold mt-0.5">
+                      {v1HargaOrder > 0 ? ((v1MarginOrder / v1HargaOrder) * 100).toFixed(1) : 0}% 
+                      {v1MinOrder > 1 && ` (@ ${formatCurrency(v1MarginOrder / v1MinOrder)}/pcs)`}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1964,8 +2017,10 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <div className="flex items-center justify-between pt-1.5 border-t border-amber-500/20 text-[11px]">
                       <span className="text-amber-900 font-semibold">Total Gabungan (Fee MP + Event):</span>
                       <span className="font-black text-amber-900">
-                        {v1TotalFeePct}%{v1TotalFeeNominal > 0 ? ` + ${formatCurrency(v1TotalFeeNominal)}` : ''}
-                        <span className="font-bold text-amber-700 ml-1">({formatCurrency(v1TotalPotonganAmount)}/pcs)</span>
+                        {v1TotalFeePct}%{v1TotalFeeNominalOrder > 0 ? ` + ${formatCurrency(v1TotalFeeNominalOrder)}` : ''}
+                        <span className="font-bold text-amber-700 ml-1">
+                          ({formatCurrency(v1TotalPotonganAmountOrder)}{v1MinOrder > 1 ? ` / ${v1MinOrder} pcs` : '/pcs'})
+                        </span>
                       </span>
                     </div>
                   )}
@@ -2106,68 +2161,127 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                   </thead>
                   <tbody className="divide-y divide-gray-100 bg-white">
                     
-                    {adMode === 'variant' && v1Variant && (
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">{v1Variant.nama}</td>
-                        <td className="p-4 hidden md:table-cell">
-                          <div className="text-xs">
-                            <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(v1Hpp)}</span><br/>
-                            <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
-                            <span className="font-bold">
-                              {usePromoEvent ? `${v1TotalFeePct}% + ${formatCurrency(v1TotalFeeNominal)}` : `${v1FeePct}% + ${formatCurrency(v1FeeNominal)}`}
-                            </span>
-                            {usePromoEvent && (
-                              <div className="text-[10px] text-amber-700 font-semibold">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
+                    {adMode === 'variant' && v1Variant && (() => {
+                      const feeConf = extractFeeRates(v1Product!, v1Variant);
+                      const prices = calcReversePrice(v1HppPcs, v1MinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
+                      return (
+                        <tr className="hover:bg-gray-50 transition-colors">
+                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
+                            {v1Variant.nama}
+                            {v1MinOrder > 1 && (
+                              <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
+                                Min. Order: {v1MinOrder} pcs
+                              </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="p-4 font-bold text-gray-500">{formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaBep)}</td>
-                        <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaMin)}</td>
-                        <td className="p-4 font-black text-emerald-600 text-base">
-                          {formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal)}
-                          <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).marginIdeal)} ({calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal > 0 ? (calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).marginIdeal / calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal * 100).toFixed(1) : 0}%)</div>
-                        </td>
-                        <td className="p-4 text-center">
-                          <Button 
-                            onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal})} 
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
-                          >
-                            Terapkan Harga
-                          </Button>
-                        </td>
-                      </tr>
-                    )}
+                          </td>
+                          <td className="p-4 hidden md:table-cell">
+                            <div className="text-xs">
+                              <span className="text-gray-500">HPP:</span>{' '}
+                              <span className="font-bold">
+                                {formatCurrency(prices.hppOrder)}
+                                {v1MinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({v1MinOrder} pcs @ {formatCurrency(v1HppPcs)})</span>}
+                              </span>
+                              <br/>
+                              <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
+                              <span className="font-bold">
+                                {usePromoEvent ? `${v1TotalFeePct}% + ${formatCurrency(prices.feeNominalOrder + (usePromoEvent ? promoDiskonNominal : 0))}` : `${v1FeePct}% + ${formatCurrency(prices.feeNominalOrder)}`}
+                              </span>
+                              {usePromoEvent && (
+                                <div className="text-[10px] text-amber-700 font-semibold">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4 font-bold text-gray-600">
+                            {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
+                            {v1MinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
+                            )}
+                          </td>
+                          <td className="p-4 font-black text-amber-600 text-base">
+                            {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
+                            {v1MinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
+                            )}
+                          </td>
+                          <td className="p-4 font-black text-emerald-600 text-base">
+                            {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
+                            {v1MinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
+                            )}
+                            <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
+                              Margin Order: {formatCurrency(prices.marginIdealOrder)}
+                              {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
+                            </div>
+                          </td>
+                          <td className="p-4 text-center">
+                            <Button 
+                              onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal)})} 
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
+                            >
+                              Terapkan Harga
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })()}
 
                     {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
                       const vMinOrder = Math.max(1, Number(v.min_order) || 1);
-                      const hpp = calcHppPerPcs(v, ingredients);
+                      const hppPcs = calcHppPerPcs(v, ingredients);
                       const feeConf = extractFeeRates(v2Product, v);
-                      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / vMinOrder);
-                      const prices = calcReversePrice(hpp, feeConf.percentRate, feeN, targetRoasInput);
+                      const prices = calcReversePrice(hppPcs, vMinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
                       return (
                         <tr key={v.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">{v.nama}</td>
+                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
+                            {v.nama}
+                            {vMinOrder > 1 && (
+                              <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
+                                Min. Order: {vMinOrder} pcs
+                              </span>
+                            )}
+                          </td>
                           <td className="p-4 hidden md:table-cell">
                             <div className="text-xs">
-                              <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
+                              <span className="text-gray-500">HPP:</span>{' '}
+                              <span className="font-bold">
+                                {formatCurrency(prices.hppOrder)}
+                                {vMinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({vMinOrder} pcs @ {formatCurrency(hppPcs)})</span>}
+                              </span>
+                              <br/>
                               <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
                               <span className="font-bold">
-                                {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(feeN + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(feeN)}`}
+                                {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(prices.feeNominalOrder + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(prices.feeNominalOrder)}`}
                               </span>
                               {usePromoEvent && (
                                 <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
                               )}
                             </div>
                           </td>
-                          <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
-                          <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(prices.hargaMin)}</td>
+                          <td className="p-4 font-bold text-gray-600">
+                            {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
+                            {vMinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
+                            )}
+                          </td>
+                          <td className="p-4 font-black text-amber-600 text-base">
+                            {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
+                            {vMinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
+                            )}
+                          </td>
                           <td className="p-4 font-black text-emerald-600 text-base">
-                            {formatCurrency(prices.hargaIdeal)}
-                            <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(prices.marginIdeal)} ({prices.hargaIdeal > 0 ? (prices.marginIdeal / prices.hargaIdeal * 100).toFixed(1) : 0}%)</div>
+                            {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
+                            {vMinOrder > 1 && (
+                              <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
+                            )}
+                            <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
+                              Margin Order: {formatCurrency(prices.marginIdealOrder)}
+                              {vMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
+                            </div>
                           </td>
                           <td className="p-4 text-center">
                             <Button 
-                              onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: prices.hargaIdeal})} 
+                              onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
                               className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
                             >
                               Terapkan
@@ -2180,37 +2294,62 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
                       return p.varian?.map(v => {
                         const pMinOrder = Math.max(1, Number(v.min_order) || 1);
-                        const hpp = calcHppPerPcs(v, ingredients);
+                        const hppPcs = calcHppPerPcs(v, ingredients);
                         const feeConf = extractFeeRates(p, v);
-                        const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / pMinOrder);
-                        const prices = calcReversePrice(hpp, feeConf.percentRate, feeN, targetRoasInput);
+                        const prices = calcReversePrice(hppPcs, pMinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
                         return (
                           <tr key={`${p.id}-${v.id}`} className="hover:bg-gray-50 transition-colors">
                             <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
                               <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{p.nama}</div>
                               {v.nama}
+                              {pMinOrder > 1 && (
+                                <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
+                                  Min. Order: {pMinOrder} pcs
+                                </span>
+                              )}
                             </td>
                             <td className="p-4 hidden md:table-cell">
                               <div className="text-xs">
-                                <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
+                                <span className="text-gray-500">HPP:</span>{' '}
+                                <span className="font-bold">
+                                  {formatCurrency(prices.hppOrder)}
+                                  {pMinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({pMinOrder} pcs @ {formatCurrency(hppPcs)})</span>}
+                                </span>
+                                <br/>
                                 <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
                                 <span className="font-bold">
-                                  {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(feeN + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(feeN)}`}
+                                  {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(prices.feeNominalOrder + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(prices.feeNominalOrder)}`}
                                 </span>
                                 {usePromoEvent && (
                                   <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
-                            <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(prices.hargaMin)}</td>
+                            <td className="p-4 font-bold text-gray-600">
+                              {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
+                              {pMinOrder > 1 && (
+                                <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
+                              )}
+                            </td>
+                            <td className="p-4 font-black text-amber-600 text-base">
+                              {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
+                              {pMinOrder > 1 && (
+                                <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
+                              )}
+                            </td>
                             <td className="p-4 font-black text-emerald-600 text-base">
-                              {formatCurrency(prices.hargaIdeal)}
-                              <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(prices.marginIdeal)} ({prices.hargaIdeal > 0 ? (prices.marginIdeal / prices.hargaIdeal * 100).toFixed(1) : 0}%)</div>
+                              {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
+                              {pMinOrder > 1 && (
+                                <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
+                              )}
+                              <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
+                                Margin Order: {formatCurrency(prices.marginIdealOrder)}
+                                {pMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
+                              </div>
                             </td>
                             <td className="p-4 text-center">
                               <Button 
-                                onClick={() => setConfirmModalData({product: p, variant: v, newPrice: prices.hargaIdeal})} 
+                                onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
                               >
                                 Terapkan
@@ -2238,8 +2377,15 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
             <p className="text-gray-600 text-sm leading-relaxed">
               Anda akan memperbarui harga <strong>{confirmModalData.product.nama} ({confirmModalData.variant.nama})</strong> secara permanen ke database menjadi:
             </p>
-            <div className="text-3xl font-black text-emerald-600 text-center py-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
-              {formatCurrency(confirmModalData.newPrice)}
+            <div className="text-center py-4 bg-emerald-50 border border-emerald-100 rounded-2xl space-y-1">
+              <div className="text-3xl font-black text-emerald-600">
+                {formatCurrency(confirmModalData.newPrice)} <span className="text-xs font-normal text-emerald-800">/ pcs</span>
+              </div>
+              {Number(confirmModalData.variant.min_order) > 1 && (
+                <p className="text-xs font-bold text-emerald-700">
+                  Total Order ({confirmModalData.variant.min_order} pcs): {formatCurrency(confirmModalData.newPrice * Number(confirmModalData.variant.min_order))}
+                </p>
+              )}
             </div>
             <div className="flex gap-3 pt-2">
               <Button variant="outline" className="flex-1 h-12 rounded-xl font-bold text-gray-600" onClick={() => setConfirmModalData(null)}>Batal</Button>
