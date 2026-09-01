@@ -1378,6 +1378,7 @@ function PromoTanggalCantikDisplayCard({ promoResult, product, variant, onTestIn
    ========================================================================== */
 
 
+
 export default function ROASCalculator({ products: rawProducts = [], ingredients: rawIngredients = [], transactions: rawTransactions = [], user }: Props) {
   const products = React.useMemo(() => {
     const arr = Array.isArray(rawProducts) ? rawProducts : [];
@@ -1411,7 +1412,6 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   const [v1SelectedVariantId, setV1SelectedVariantId] = React.useState<string>(() => products[0]?.varian?.[0]?.id || '');
   const [v2SelectedProductId, setV2SelectedProductId] = React.useState<string>(() => products[0]?.id || '');
 
-  // For group mode, we allow multi-select. But for simplicity in this iteration, we use all products or top 5.
   const [v3SelectedProductIds, setV3SelectedProductIds] = React.useState<string[]>(() => products.map(p => p.id));
 
   const toggleGroupProduct = (id: string) => {
@@ -1436,28 +1436,36 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     }
   };
 
-  // CORE LOGIC (Varian)
+  // ---------------------------------------------------------
+  // CORE LOGIC EXTRACTOR
+  // ---------------------------------------------------------
+  
+  // V1: Variant Logic
   const v1Product = products.find(p => p.id === v1SelectedProductId);
   const v1Variant = v1Product?.varian?.find(v => v.id === v1SelectedVariantId);
-  let v1Hpp = 0, v1Fee = 0, v1Margin = 0, v1Harga = 0, v1FeeNominal = 0;
+  let v1Hpp = 0, v1FeePct = 0, v1Margin = 0, v1Harga = 0, v1FeeNominal = 0, v1MinOrder = 1;
+  let v1FeeAmount = 0;
   if (v1Product && v1Variant) {
+    v1MinOrder = Math.max(1, Number(v1Product.min_order) || 1);
     v1Hpp = calcHppPerPcs(v1Variant, ingredients);
     const feeConf = extractFeeRates(v1Product, v1Variant);
-    v1Fee = feeConf.percentRate; 
-    v1FeeNominal = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / (Number(v1Product.min_order) || 1));
+    v1FeePct = feeConf.percentRate; 
+    v1FeeNominal = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / v1MinOrder);
     v1Harga = v1Variant.harga_jual;
-    v1Margin = v1Harga - (v1Hpp + (v1Harga * v1Fee / 100) + v1FeeNominal);
+    v1FeeAmount = (v1Harga * v1FeePct / 100) + v1FeeNominal;
+    v1Margin = v1Harga - v1Hpp - v1FeeAmount;
   }
 
-  // CORE LOGIC (Product Multi-Varian)
+  // V2: Product Logic
   const v2Product = products.find(p => p.id === v2SelectedProductId);
-  let v2Asp = 0, v2Asm = 0, v2Hsp = 0, v2Lsm = 0;
+  let v2Asp = 0, v2Asm = 0, v2Hsp = 0, v2Lsm = 0, v2MinOrder = 1;
   if (v2Product && v2Product.varian?.length) {
+    v2MinOrder = Math.max(1, Number(v2Product.min_order) || 1);
     let sumPrice = 0, sumMargin = 0;
     v2Product.varian.forEach(v => {
       const hpp = calcHppPerPcs(v, ingredients);
       const feeConf = extractFeeRates(v2Product, v);
-      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / (Number(v2Product.min_order) || 1));
+      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / v2MinOrder);
       const margin = v.harga_jual - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN);
       sumPrice += v.harga_jual;
       sumMargin += margin;
@@ -1468,17 +1476,18 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     v2Asm = sumMargin / v2Product.varian.length;
   }
 
-  // CORE LOGIC (Group)
+  // V3: Group Logic
   let v3Asp = 0, v3Asm = 0, v3Hsp = 0, v3Lsm = 0;
   let totalVariantsGroup = 0;
   if (v3SelectedProductIds.length > 0) {
     let sumPrice = 0, sumMargin = 0;
     products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
+      const pMinOrder = Math.max(1, Number(p.min_order) || 1);
       p.varian?.forEach(v => {
         totalVariantsGroup++;
         const hpp = calcHppPerPcs(v, ingredients);
         const feeConf = extractFeeRates(p, v);
-        const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / (Number(p.min_order) || 1));
+        const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / pMinOrder);
         const margin = v.harga_jual - (hpp + (v.harga_jual * feeConf.percentRate / 100) + feeN);
         sumPrice += v.harga_jual;
         sumMargin += margin;
@@ -1492,7 +1501,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     }
   }
 
-  // Determine H and M based on Mode
+  // Final H and M Selection
   let H = 0;
   let M = 0;
   let displayTitle = '';
@@ -1511,9 +1520,10 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     displayTitle = `Grup Iklan (${v3SelectedProductIds.length} Produk)`;
   }
 
+  // Target ROAS Math
   const roasBep = M > 0 ? H / M : 0;
-  const roasMin = roasBep * 1.5;
-  const roasIdeal = roasBep * 2.0;
+  const roasMin = roasBep > 0 ? roasBep * 1.5 : 0;
+  const roasIdeal = roasBep > 0 ? roasBep * 2.0 : 0;
 
   const renderSimCard = (title: string, roas: number, color: string) => {
     const estOmset = biayaIklan * roas;
@@ -1563,9 +1573,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     );
   };
 
-  // FIND PRICE CALCULATION 
   const calcReversePrice = (hpp: number, feePct: number, feeNominal: number, tRoas: number) => {
-    // Harga = (HPP + FeeNominal) / ((1 - Fee%) - (1.0 / Target ROAS))
     const denomBep = (1 - (feePct/100)) - (1.0 / tRoas);
     const hargaBep = denomBep > 0 ? (hpp + feeNominal) / denomBep : 0;
     const denomMin = (1 - (feePct/100)) - (1.5 / tRoas);
@@ -1573,14 +1581,12 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     const denomIdeal = (1 - (feePct/100)) - (2.0 / tRoas);
     const hargaIdeal = denomIdeal > 0 ? (hpp + feeNominal) / denomIdeal : 0;
     
-    // Detailed margin calculation for verification
     const marginIdeal = hargaIdeal - (hpp + (hargaIdeal * feePct / 100) + feeNominal);
-    
     return { hargaBep, hargaMin, hargaIdeal, marginIdeal };
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-6 pb-24">
+    <div className="max-w-6xl mx-auto p-4 space-y-6 pb-36">
       {/* HEADER & TABS MODE */}
       <div className="flex flex-col gap-5 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
         <div>
@@ -1617,44 +1623,106 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
         </div>
       </div>
 
-      {/* SELECTORS */}
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
+      {/* SELECTORS & TRANSPARENCY BOX */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
         <h2 className="font-black text-gray-900 text-sm uppercase tracking-wider flex items-center gap-2">
           <Package className="w-4 h-4 text-indigo-600" />
           Pilih Produk / Varian Target
         </h2>
         
         {adMode === 'variant' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
-              <Select value={v1SelectedProductId} onValueChange={setV1SelectedProductId}>
-                <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Produk" /></SelectTrigger>
-                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.nama}</SelectItem>)}</SelectContent>
-              </Select>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-600">Pilih Produk</Label>
+                <Select value={v1SelectedProductId} onValueChange={setV1SelectedProductId}>
+                  <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Produk" /></SelectTrigger>
+                  <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.nama}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-600">Pilih Varian</Label>
+                <Select value={v1SelectedVariantId} onValueChange={setV1SelectedVariantId}>
+                  <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Varian" /></SelectTrigger>
+                  <SelectContent>{v1Product?.varian?.map(v => <SelectItem key={v.id} value={v.id}>{v.nama}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold text-gray-600">Pilih Varian</Label>
-              <Select value={v1SelectedVariantId} onValueChange={setV1SelectedVariantId}>
-                <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Varian" /></SelectTrigger>
-                <SelectContent>{v1Product?.varian?.map(v => <SelectItem key={v.id} value={v.id}>{v.nama}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
+            
+            {/* Unit Economics Transparency Box */}
+            {v1Variant && (
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 mt-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <Info className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wide">Detail Unit Economics Terpanggil</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Min. Order</p>
+                    <p className="font-black text-gray-900">{v1MinOrder} pcs</p>
+                    {v1MinOrder > 1 && <p className="text-[10px] text-indigo-600 font-bold mt-1">Skala Paket Aktif</p>}
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">HPP Terpanggil</p>
+                    <p className="font-black text-gray-900">{formatCurrency(v1Hpp)} <span className="text-xs font-normal text-gray-500">/ pcs</span></p>
+                    {v1MinOrder > 1 && <p className="text-[10px] text-gray-500 mt-1">HPP Paket: {formatCurrency(v1Hpp * v1MinOrder)}</p>}
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Total Fee Marketplace</p>
+                    <p className="font-black text-gray-900">{v1FeePct}% + {formatCurrency(v1FeeNominal)}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">Estimasi: {formatCurrency(v1FeeAmount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Margin Bersih (M)</p>
+                    <p className="font-black text-emerald-600">{formatCurrency(v1Margin)} <span className="text-xs font-normal text-gray-500">/ pcs</span></p>
+                    {v1MinOrder > 1 && <p className="text-[10px] text-emerald-600 mt-1">Margin Paket: {formatCurrency(v1Margin * v1MinOrder)}</p>}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         
         {adMode === 'product' && (
-          <div className="space-y-1.5 max-w-md">
-            <Label className="text-xs font-bold text-gray-600">Pilih Produk Multi-Varian</Label>
-            <Select value={v2SelectedProductId} onValueChange={setV2SelectedProductId}>
-              <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Produk" /></SelectTrigger>
-              <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.nama}</SelectItem>)}</SelectContent>
-            </Select>
+          <div className="space-y-4">
+            <div className="space-y-1.5 max-w-md">
+              <Label className="text-xs font-bold text-gray-600">Pilih Produk Multi-Varian</Label>
+              <Select value={v2SelectedProductId} onValueChange={setV2SelectedProductId}>
+                <SelectTrigger className="h-11 rounded-xl bg-gray-50 border-gray-200 font-bold"><SelectValue placeholder="Pilih Produk" /></SelectTrigger>
+                <SelectContent>{products.map(p => <SelectItem key={p.id} value={p.id}>{p.nama}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+
+            {v2Product && (
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 mt-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <Info className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wide">Ringkasan Unit Economics Multi-Varian</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Total Varian</p>
+                    <p className="font-black text-gray-900">{v2Product.varian?.length || 0} Varian</p>
+                    <p className="text-[10px] text-gray-500 mt-1">Min. Order: {v2MinOrder} pcs</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">ASP (Harga Rata-rata)</p>
+                    <p className="font-black text-gray-900">{formatCurrency(v2Asp)}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">HSP (Tertinggi): {formatCurrency(v2Hsp)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">ASM (Margin Rata-rata)</p>
+                    <p className="font-black text-emerald-600">{formatCurrency(v2Asm)}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">LSM (Terendah): {formatCurrency(v2Lsm)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         
         {adMode === 'group' && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <Label className="text-xs font-bold text-gray-600">Pilih Produk dalam Grup Iklan</Label>
             <div className="flex flex-wrap gap-2">
               {products.map(p => {
@@ -1663,13 +1731,37 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                   <button
                     key={p.id}
                     onClick={() => toggleGroupProduct(p.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${isSelected ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-200 text-gray-500'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${isSelected ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
                   >
                     {isSelected && "✓ "} {p.nama}
                   </button>
                 )
               })}
             </div>
+
+            {v3SelectedProductIds.length > 0 && (
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 mt-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <Info className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-xs font-black text-indigo-900 uppercase tracking-wide">Ringkasan Unit Economics Grup</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">Produk & Varian</p>
+                    <p className="font-black text-gray-900">{v3SelectedProductIds.length} Produk</p>
+                    <p className="text-[10px] text-gray-500 mt-1">Total {totalVariantsGroup} Varian Terhitung</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">ASP Grup</p>
+                    <p className="font-black text-gray-900">{formatCurrency(v3Asp)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mb-1">ASM Grup</p>
+                    <p className="font-black text-emerald-600">{formatCurrency(v3Asm)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1755,98 +1847,62 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
               </div>
             </div>
 
-            {/* RENDER TABLE OF PRICES BASED ON AD MODE */}
             <div className="overflow-hidden border border-gray-200 rounded-2xl shadow-sm">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 text-gray-600 font-black border-b border-gray-200 uppercase text-[10px] tracking-wider">
-                  <tr>
-                    <th className="p-4">SKU / Varian</th>
-                    <th className="p-4 hidden md:table-cell">Struktur Biaya Dasar</th>
-                    <th className="p-4 hidden md:table-cell">Harga BEP</th>
-                    <th className="p-4 text-amber-700">Harga Min (1.5x)</th>
-                    <th className="p-4 text-emerald-700">Harga Ideal (2.0x)</th>
-                    <th className="p-4 text-center">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  
-                  {adMode === 'variant' && v1Variant && (
-                    <tr className="hover:bg-gray-50 transition-colors">
-                      <td className="p-4 font-bold text-gray-900">{v1Variant.nama}</td>
-                      <td className="p-4 hidden md:table-cell">
-                        <div className="text-xs">
-                          <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(v1Hpp)}</span><br/>
-                          <span className="text-gray-500">Fee:</span> <span className="font-bold">{v1Fee}% + {formatCurrency(v1FeeNominal)}</span>
-                        </div>
-                      </td>
-                      <td className="p-4 font-bold text-gray-500 hidden md:table-cell">{formatCurrency(calcReversePrice(v1Hpp, v1Fee, v1FeeNominal, targetRoasInput).hargaBep)}</td>
-                      <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(calcReversePrice(v1Hpp, v1Fee, v1FeeNominal, targetRoasInput).hargaMin)}</td>
-                      <td className="p-4 font-black text-emerald-600 text-base">
-                        {formatCurrency(calcReversePrice(v1Hpp, v1Fee, v1FeeNominal, targetRoasInput).hargaIdeal)}
-                        <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(calcReversePrice(v1Hpp, v1Fee, v1FeeNominal, targetRoasInput).marginIdeal)}</div>
-                      </td>
-                      <td className="p-4 text-center">
-                        <Button 
-                          onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: calcReversePrice(v1Hpp, v1Fee, v1FeeNominal, targetRoasInput).hargaIdeal})} 
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5"
-                        >
-                          Terapkan Harga
-                        </Button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap md:whitespace-normal">
+                  <thead className="bg-gray-50 text-gray-600 font-black border-b border-gray-200 uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="p-4">SKU / Varian</th>
+                      <th className="p-4 hidden md:table-cell">Struktur Biaya Dasar</th>
+                      <th className="p-4">Harga BEP</th>
+                      <th className="p-4 text-amber-700">Harga Min (1.5x)</th>
+                      <th className="p-4 text-emerald-700">Harga Ideal (2.0x)</th>
+                      <th className="p-4 text-center">Aksi</th>
                     </tr>
-                  )}
-
-                  {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
-                    const hpp = calcHppPerPcs(v, ingredients);
-                    const feeConf = extractFeeRates(v2Product, v);
-                    const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / (Number(v2Product.min_order) || 1));
-                    const prices = calcReversePrice(hpp, feeConf.percentRate, feeN, targetRoasInput);
-                    return (
-                      <tr key={v.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="p-4 font-bold text-gray-900">{v.nama}</td>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    
+                    {adMode === 'variant' && v1Variant && (
+                      <tr className="hover:bg-gray-50 transition-colors">
+                        <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">{v1Variant.nama}</td>
                         <td className="p-4 hidden md:table-cell">
                           <div className="text-xs">
-                            <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
-                            <span className="text-gray-500">Fee:</span> <span className="font-bold">{feeConf.percentRate}% + {formatCurrency(feeN)}</span>
+                            <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(v1Hpp)}</span><br/>
+                            <span className="text-gray-500">Fee:</span> <span className="font-bold">{v1FeePct}% + {formatCurrency(v1FeeNominal)}</span>
                           </div>
                         </td>
-                        <td className="p-4 font-bold text-gray-500 hidden md:table-cell">{formatCurrency(prices.hargaBep)}</td>
-                        <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(prices.hargaMin)}</td>
+                        <td className="p-4 font-bold text-gray-500">{formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaBep)}</td>
+                        <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaMin)}</td>
                         <td className="p-4 font-black text-emerald-600 text-base">
-                          {formatCurrency(prices.hargaIdeal)}
-                          <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(prices.marginIdeal)}</div>
+                          {formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal)}
+                          <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).marginIdeal)}</div>
                         </td>
                         <td className="p-4 text-center">
                           <Button 
-                            onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: prices.hargaIdeal})} 
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5"
+                            onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: calcReversePrice(v1Hpp, v1FeePct, v1FeeNominal, targetRoasInput).hargaIdeal})} 
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
                           >
-                            Terapkan
+                            Terapkan Harga
                           </Button>
                         </td>
                       </tr>
-                    );
-                  })}
+                    )}
 
-                  {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
-                    return p.varian?.map(v => {
+                    {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
                       const hpp = calcHppPerPcs(v, ingredients);
-                      const feeConf = extractFeeRates(p, v);
-                      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / (Number(p.min_order) || 1));
+                      const feeConf = extractFeeRates(v2Product, v);
+                      const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / v2MinOrder);
                       const prices = calcReversePrice(hpp, feeConf.percentRate, feeN, targetRoasInput);
                       return (
-                        <tr key={`${p.id}-${v.id}`} className="hover:bg-gray-50 transition-colors">
-                          <td className="p-4 font-bold text-gray-900">
-                            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{p.nama}</div>
-                            {v.nama}
-                          </td>
+                        <tr key={v.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">{v.nama}</td>
                           <td className="p-4 hidden md:table-cell">
                             <div className="text-xs">
                               <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
                               <span className="text-gray-500">Fee:</span> <span className="font-bold">{feeConf.percentRate}% + {formatCurrency(feeN)}</span>
                             </div>
                           </td>
-                          <td className="p-4 font-bold text-gray-500 hidden md:table-cell">{formatCurrency(prices.hargaBep)}</td>
+                          <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
                           <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(prices.hargaMin)}</td>
                           <td className="p-4 font-black text-emerald-600 text-base">
                             {formatCurrency(prices.hargaIdeal)}
@@ -1854,19 +1910,57 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                           </td>
                           <td className="p-4 text-center">
                             <Button 
-                              onClick={() => setConfirmModalData({product: p, variant: v, newPrice: prices.hargaIdeal})} 
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5"
+                              onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: prices.hargaIdeal})} 
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
                             >
                               Terapkan
                             </Button>
                           </td>
                         </tr>
                       );
-                    });
-                  })}
+                    })}
 
-                </tbody>
-              </table>
+                    {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
+                      const pMinOrder = Math.max(1, Number(p.min_order) || 1);
+                      return p.varian?.map(v => {
+                        const hpp = calcHppPerPcs(v, ingredients);
+                        const feeConf = extractFeeRates(p, v);
+                        const feeN = feeConf.nominalPerUnit + (feeConf.nominalPerOrder / pMinOrder);
+                        const prices = calcReversePrice(hpp, feeConf.percentRate, feeN, targetRoasInput);
+                        return (
+                          <tr key={`${p.id}-${v.id}`} className="hover:bg-gray-50 transition-colors">
+                            <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
+                              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{p.nama}</div>
+                              {v.nama}
+                            </td>
+                            <td className="p-4 hidden md:table-cell">
+                              <div className="text-xs">
+                                <span className="text-gray-500">HPP:</span> <span className="font-bold">{formatCurrency(hpp)}</span><br/>
+                                <span className="text-gray-500">Fee:</span> <span className="font-bold">{feeConf.percentRate}% + {formatCurrency(feeN)}</span>
+                              </div>
+                            </td>
+                            <td className="p-4 font-bold text-gray-500">{formatCurrency(prices.hargaBep)}</td>
+                            <td className="p-4 font-black text-amber-600 text-base">{formatCurrency(prices.hargaMin)}</td>
+                            <td className="p-4 font-black text-emerald-600 text-base">
+                              {formatCurrency(prices.hargaIdeal)}
+                              <div className="text-[10px] font-bold text-emerald-600/70 mt-1">Margin: {formatCurrency(prices.marginIdeal)}</div>
+                            </td>
+                            <td className="p-4 text-center">
+                              <Button 
+                                onClick={() => setConfirmModalData({product: p, variant: v, newPrice: prices.hargaIdeal})} 
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-5 h-10 w-full"
+                              >
+                                Terapkan
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })}
+
+                  </tbody>
+                </table>
+              </div>
             </div>
 
           </div>
@@ -1875,7 +1969,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
       {/* CONFIRMATION MODAL */}
       {confirmModalData && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
             <h3 className="font-black text-xl text-gray-900">Konfirmasi Update Harga</h3>
             <p className="text-gray-600 text-sm leading-relaxed">
