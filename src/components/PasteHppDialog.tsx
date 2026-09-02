@@ -96,6 +96,7 @@ export default function PasteHppDialog({
     try {
       const res = await fetch('/api/parse-hpp', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawText,

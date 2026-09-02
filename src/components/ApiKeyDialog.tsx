@@ -53,6 +53,7 @@ export default function ApiKeyDialog({ open, onOpenChange, user }: Props) {
     try {
       const res = await fetch('/api/test-gemini-key', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'x-gemini-api-key': apiKey.trim(),

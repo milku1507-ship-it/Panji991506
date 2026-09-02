@@ -112,6 +112,7 @@ export default function TransactionAIChat({ open, onOpenChange, products, catego
     try {
       const res = await fetch('/api/ai-parse', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           history: messages,

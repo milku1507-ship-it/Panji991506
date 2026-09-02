@@ -1549,6 +1549,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       const customApiKey = localStorage.getItem('gemini_api_key') || undefined;
       const res = await fetch('/api/ai-parse', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           ...(customApiKey ? { 'x-gemini-api-key': customApiKey } : {}),
