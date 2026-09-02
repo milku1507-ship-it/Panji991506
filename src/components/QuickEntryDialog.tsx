@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank, AlertCircle, RefreshCw as UpdateIcon, Sparkles, PlusCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank, AlertCircle, RefreshCw as UpdateIcon, Sparkles, PlusCircle, Database } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
@@ -26,6 +26,19 @@ export type QuickEntryFields = {
     produk_nama: string;
     varian: { varian_id: string; varian_nama: string; qty: number }[];
   }[];
+  ambiguousKeyword?: string;
+  ambiguousCandidates?: {
+    id: string;
+    name: string;
+    type: 'ingredient' | 'product';
+    category?: string;
+    price?: number;
+    unit?: string;
+    productRef?: Product;
+    ingredientRef?: Ingredient;
+  }[];
+  userConfirmedMatch?: boolean;
+  saveToDatabase?: boolean;
 };
 
 interface Props {
@@ -358,31 +371,67 @@ function parseLine(
   let keterangan = descTokens.join(' ').trim() || tokens.join(' ');
   let penjualan_detail: QuickEntryFields['penjualan_detail'] = undefined;
 
+  // ── Ambiguity detection state ─────────────────────────────────────────────
+  let ambiguousKeyword: string | undefined = undefined;
+  let ambiguousCandidates: QuickEntryFields['ambiguousCandidates'] = undefined;
+  let userConfirmedMatch = true;
+
   // ── Pengeluaran: ingredient / category matching ──────────────────────────
   let materialId: string | undefined = undefined;
   if (jenis === 'Pengeluaran') {
     const nd = keterangan.toLowerCase().trim();
     const ndExpanded = expandAliases(nd);
-    // Try matching an ingredient by name or alias
-    const matchedIng = ingredients.find(i => {
+    const words = normWords(nd);
+
+    // Filter ingredients matching input string or tokens
+    const matchedIngs = ingredients.filter(i => {
       const n = i.name.toLowerCase().trim();
-      return nd.includes(n) || ndExpanded.includes(n) || n.includes(nd.split(' ')[0]) || n.includes(ndExpanded.split(' ')[0]);
+      if (n === nd || n === ndExpanded) return true;
+      if (nd.includes(n) || ndExpanded.includes(n)) return true;
+      return words.some(w => w.length >= 2 && (n.includes(w) || w.includes(n)));
     });
-    if (matchedIng) {
-      materialId = matchedIng.id;
-      // Resolve category from ingredient if still "Lainnya"
-      if (kategori === 'Lainnya' && matchedIng.category) {
-        kategori = matchedIng.category;
-      }
-      // Auto-compute nominal or qty_beli if only one is provided
-      if (nominal === 0 && qty_beli > 0) {
-        nominal = Math.round(matchedIng.price * qty_beli);
-      } else if (nominal > 0 && qty_beli === 0 && matchedIng.price > 0) {
-        qty_beli = Math.round((nominal / matchedIng.price) * 100) / 100;
-      }
-      // Auto-set keterangan if not meaningful
-      if (!keterangan || keterangan.toLowerCase() === matchedIng.name.toLowerCase() || nd === 'bamer' || nd === 'baput') {
-        keterangan = `Beli ${matchedIng.name}`;
+
+    if (matchedIngs.length > 0) {
+      // Check for exact full name match first
+      const exactIng = matchedIngs.find(i => {
+        const n = i.name.toLowerCase().trim();
+        return n === nd || n === ndExpanded;
+      });
+
+      if (exactIng) {
+        materialId = exactIng.id;
+        if (kategori === 'Lainnya' && exactIng.category) kategori = exactIng.category;
+        if (nominal === 0 && qty_beli > 0) nominal = Math.round(exactIng.price * qty_beli);
+        else if (nominal > 0 && qty_beli === 0 && exactIng.price > 0) qty_beli = Math.round((nominal / exactIng.price) * 100) / 100;
+        keterangan = `Beli ${exactIng.name}`;
+      } else if (matchedIngs.length === 1) {
+        const singleIng = matchedIngs[0];
+        materialId = singleIng.id;
+        if (kategori === 'Lainnya' && singleIng.category) kategori = singleIng.category;
+        if (nominal === 0 && qty_beli > 0) nominal = Math.round(singleIng.price * qty_beli);
+        else if (nominal > 0 && qty_beli === 0 && singleIng.price > 0) qty_beli = Math.round((nominal / singleIng.price) * 100) / 100;
+        keterangan = `Beli ${singleIng.name}`;
+      } else {
+        // Multiple matches (e.g. user typed generic keyword "gula" -> "Gula Pasir", "Gula Merah")
+        const primaryIng = matchedIngs[0];
+        materialId = primaryIng.id;
+        if (kategori === 'Lainnya' && primaryIng.category) kategori = primaryIng.category;
+        if (nominal === 0 && qty_beli > 0) nominal = Math.round(primaryIng.price * qty_beli);
+        else if (nominal > 0 && qty_beli === 0 && primaryIng.price > 0) qty_beli = Math.round((nominal / primaryIng.price) * 100) / 100;
+        keterangan = `Beli ${primaryIng.name}`;
+
+        const matchedKw = words.find(w => matchedIngs.filter(i => i.name.toLowerCase().includes(w)).length > 1) || words[0] || nd;
+        ambiguousKeyword = matchedKw;
+        ambiguousCandidates = matchedIngs.map(ing => ({
+          id: ing.id,
+          name: ing.name,
+          type: 'ingredient',
+          category: ing.category,
+          price: ing.price,
+          unit: ing.unit,
+          ingredientRef: ing,
+        }));
+        userConfirmedMatch = false;
       }
     } else if (kategori === 'Lainnya') {
       const matchedCat = categories.find(c => c.type === 'Pengeluaran' && (nd.includes(c.name.toLowerCase()) || ndExpanded.includes(c.name.toLowerCase())));
@@ -413,6 +462,30 @@ function parseLine(
   let qty_total = 0;
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
     const descWords = normWords(keterangan);
+    const matchedProds = products.filter(p => {
+      const pName = p.nama.toLowerCase().trim();
+      if (pName === keterangan.toLowerCase().trim()) return true;
+      return descWords.some(w => w.length >= 2 && (pName.includes(w) || w.includes(pName)));
+    });
+
+    if (matchedProds.length > 1) {
+      const exactProd = matchedProds.find(p => p.nama.toLowerCase().trim() === keterangan.toLowerCase().trim());
+      if (!exactProd) {
+        const matchedKw = descWords.find(w => matchedProds.filter(p => p.nama.toLowerCase().includes(w)).length > 1) || descWords[0] || keterangan;
+        ambiguousKeyword = matchedKw;
+        ambiguousCandidates = matchedProds.map(prod => ({
+          id: prod.id,
+          name: prod.nama,
+          type: 'product',
+          category: prod.kategori,
+          price: prod.varian[0]?.harga_jual || 0,
+          unit: 'pcs',
+          productRef: prod,
+        }));
+        userConfirmedMatch = false;
+      }
+    }
+
     const bestMatch = fuzzyMatchProduct(descWords, products);
 
     if (bestMatch) {
@@ -455,7 +528,21 @@ function parseLine(
   kategori = resolveCategory(kategori, jenis, categories);
   // qty_beli = 0 untuk Penjualan (sama persis dengan form manual); qty digunakan di varian saja
   const finalQtyBeli = (jenis === 'Pemasukan' && penjualan_detail && penjualan_detail.length > 0) ? 0 : qty_beli;
-  return { tanggal, tanggal_akhir: null, jenis, kategori, keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1), nominal, qty_beli: finalQtyBeli, qty_total, materialId, penjualan_detail };
+  return {
+    tanggal,
+    tanggal_akhir: null,
+    jenis,
+    kategori,
+    keterangan: keterangan.charAt(0).toUpperCase() + keterangan.slice(1),
+    nominal,
+    qty_beli: finalQtyBeli,
+    qty_total,
+    materialId,
+    penjualan_detail,
+    ambiguousKeyword,
+    ambiguousCandidates,
+    userConfirmedMatch,
+  };
 }
 
 function parseAll(
@@ -513,20 +600,13 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
   const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
 
-  // Auto-fill calculation handlers (activates automatic scaling between Qty & Nominal, supporting both DB price and custom price)
+  // Auto-fill calculation handlers (only active for preset DB materials; disabled in custom mode)
   const handleQtyChange = (newQty: number) => {
     setDraft(prev => {
       let nextNominal = prev.nominal;
-      // Get unit price from custom ratio (if both were set) or material DB price
-      let unitPrice = 0;
-      if (prev.nominal > 0 && prev.qty_beli > 0) {
-        unitPrice = prev.nominal / prev.qty_beli;
-      } else if (selectedMaterial && selectedMaterial.price > 0) {
-        unitPrice = selectedMaterial.price;
-      }
-
-      if (unitPrice > 0 && newQty > 0) {
-        nextNominal = Math.round(newQty * unitPrice);
+      // Auto-compute nominal ONLY for non-custom items when a valid DB material with price is selected
+      if (!isCustomCategory && selectedMaterial && selectedMaterial.price > 0) {
+        nextNominal = Math.round(newQty * selectedMaterial.price);
       }
       return { ...prev, qty_beli: newQty, nominal: nextNominal };
     });
@@ -535,12 +615,9 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   const handleNominalChange = (newNominal: number) => {
     setDraft(prev => {
       let nextQty = prev.qty_beli;
-      // If Qty is 0 and we have a unit price, calculate Qty automatically from Nominal
-      if (prev.qty_beli === 0) {
-        let unitPrice = selectedMaterial && selectedMaterial.price > 0 ? selectedMaterial.price : 0;
-        if (unitPrice > 0 && newNominal > 0) {
-          nextQty = Math.round((newNominal / unitPrice) * 100) / 100;
-        }
+      // Auto-compute qty ONLY for non-custom items when a valid DB material with price is selected
+      if (!isCustomCategory && selectedMaterial && selectedMaterial.price > 0 && prev.qty_beli === 0) {
+        nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
       }
       return { ...prev, nominal: newNominal, qty_beli: nextQty };
     });
@@ -660,6 +737,64 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   const validCategories = categories.filter(c => c.type === draft.jenis);
   const isPenjualan = draft.jenis === 'Pemasukan' || draft.kategori === 'Penjualan' || draft.kategori.toLowerCase().includes('penjualan') || draft.kategori.toLowerCase().includes('jual');
 
+  const handleSelectCandidate = (candidate: NonNullable<QuickEntryFields['ambiguousCandidates']>[0]) => {
+    if (candidate.type === 'ingredient') {
+      const ing = candidate.ingredientRef || ingredients.find(i => i.id === candidate.id);
+      const targetQty = (editing ? draft.qty_beli : fields.qty_beli) || 1;
+      const price = ing?.price || candidate.price || 0;
+      const computedNominal = price > 0 ? Math.round(targetQty * price) : (editing ? draft.nominal : fields.nominal);
+      const newCat = ing?.category && ing.category !== 'Lainnya' ? ing.category : (editing ? draft.kategori : fields.kategori);
+
+      const updated: QuickEntryFields = {
+        ...(editing ? draft : fields),
+        materialId: candidate.id,
+        keterangan: `Beli ${candidate.name}`,
+        kategori: newCat,
+        nominal: computedNominal,
+        qty_beli: targetQty,
+        userConfirmedMatch: true,
+      };
+
+      if (editing) {
+        setDraft(updated);
+      } else {
+        onUpdate(updated);
+      }
+      toast.success(`Dikonfirmasi item DB: ${candidate.name}`);
+    } else if (candidate.type === 'product') {
+      const prod = candidate.productRef || products.find(p => p.id === candidate.id);
+      if (prod) {
+        const targetQty = (editing ? draft.qty_beli : fields.qty_beli) || 1;
+        const varianMatches = prod.varian.map((v, idx) => ({
+          varian_id: v.id,
+          varian_nama: v.nama,
+          qty: idx === 0 ? targetQty : 0
+        }));
+        const penjualan_detail = [{ produk_id: prod.id, produk_nama: prod.nama, varian: varianMatches }];
+        const price = prod.varian[0]?.harga_jual || candidate.price || 0;
+
+        const updated: QuickEntryFields = {
+          ...(editing ? draft : fields),
+          jenis: 'Pemasukan',
+          kategori: 'Penjualan',
+          keterangan: prod.nama,
+          penjualan_detail,
+          nominal: price * targetQty,
+          qty_total: targetQty,
+          qty_beli: 0,
+          userConfirmedMatch: true,
+        };
+
+        if (editing) {
+          setDraft(updated);
+        } else {
+          onUpdate(updated);
+        }
+        toast.success(`Dikonfirmasi produk DB: ${prod.nama}`);
+      }
+    }
+  };
+
   // ── View mode ──────────────────────────────────────────────────────────────
   if (!editing) {
     return (
@@ -736,6 +871,100 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
             </div>
           )}
         </div>
+
+        {/* Ambiguous DB Keyword Candidates Selector */}
+        {fields.ambiguousCandidates && fields.ambiguousCandidates.length > 1 && !fields.userConfirmedMatch && (
+          <div className="mt-2 p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-1.5 text-xs">
+            <div className="flex items-center gap-1.5 text-amber-900 font-bold">
+              <Sparkles className="w-3.5 h-3.5 text-amber-600 animate-pulse shrink-0" />
+              <span>Pilih item "{fields.ambiguousKeyword || 'database'}" yang dimaksud:</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {fields.ambiguousCandidates.map(candidate => {
+                const isSelected = fields.materialId === candidate.id || fields.penjualan_detail?.some(pd => pd.produk_id === candidate.id);
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => handleSelectCandidate(candidate)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg border text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-xs",
+                      isSelected
+                        ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-300"
+                        : "bg-white text-gray-800 border-amber-300 hover:bg-orange-100 hover:border-orange-400"
+                    )}
+                  >
+                    <span>{candidate.name}</span>
+                    {candidate.price ? (
+                      <span className={cn("text-[10px]", isSelected ? "text-amber-100" : "text-gray-500")}>
+                        ({formatCurrency(candidate.price, true)})
+                      </span>
+                    ) : null}
+                    {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Opsi Item Custom / Non-Database */}
+        {(!fields.materialId && (!fields.penjualan_detail || fields.penjualan_detail.length === 0)) && (
+          <div className="mt-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <Database className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                <span>Opsi Data Custom:</span>
+              </div>
+              <span className={cn(
+                "text-[9px] font-black px-2 py-0.5 rounded-full",
+                fields.saveToDatabase
+                  ? "bg-orange-100 text-orange-700 border border-orange-200"
+                  : "bg-slate-200 text-slate-600"
+              )}>
+                {fields.saveToDatabase ? "Simpan ke DB" : "Transaksi Biasa"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate({ ...fields, saveToDatabase: true });
+                  toast.success("Set ke: Simpan item baru ke Database Stok");
+                }}
+                className={cn(
+                  "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
+                  fields.saveToDatabase
+                    ? "bg-orange-500 text-white border-orange-600 shadow-xs ring-1 ring-orange-300"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-orange-50 hover:border-orange-300"
+                )}
+              >
+                <div className="text-[11px] font-black">1. Simpan ke Database</div>
+                <div className={cn("text-[9px]", fields.saveToDatabase ? "text-orange-100" : "text-gray-400")}>
+                  Buat item/bahan baru di DB
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate({ ...fields, saveToDatabase: false });
+                  toast.info("Set ke: Transaksi biasa tanpa merubah Database");
+                }}
+                className={cn(
+                  "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
+                  !fields.saveToDatabase
+                    ? "bg-slate-800 text-white border-slate-900 shadow-xs ring-1 ring-slate-700"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-slate-100"
+                )}
+              >
+                <div className="text-[11px] font-black">2. Jangan Simpan</div>
+                <div className={cn("text-[9px]", !fields.saveToDatabase ? "text-slate-300" : "text-gray-400")}>
+                  Hanya transaksi biasa (no DB)
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -755,6 +984,99 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
           </button>
         </div>
       </div>
+
+      {/* Ambiguous DB Keyword Candidates Selector in Edit Mode */}
+      {draft.ambiguousCandidates && draft.ambiguousCandidates.length > 1 && (
+        <div className="p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-1.5 text-xs">
+          <div className="flex items-center justify-between gap-1 text-amber-900 font-bold">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-600 animate-pulse shrink-0" />
+              <span>Cocokkan dengan item Database:</span>
+            </div>
+            {draft.userConfirmedMatch && (
+              <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-black">✓ Dikonfirmasi</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {draft.ambiguousCandidates.map(candidate => {
+              const isSelected = draft.materialId === candidate.id || draft.penjualan_detail?.some(pd => pd.produk_id === candidate.id);
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => handleSelectCandidate(candidate)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg border text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-xs",
+                    isSelected
+                      ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-300"
+                      : "bg-white text-gray-800 border-amber-300 hover:bg-orange-100 hover:border-orange-400"
+                  )}
+                >
+                  <span>{candidate.name}</span>
+                  {candidate.price ? (
+                    <span className={cn("text-[10px]", isSelected ? "text-amber-100" : "text-gray-500")}>
+                      ({formatCurrency(candidate.price, true)})
+                    </span>
+                  ) : null}
+                  {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Opsi Item Custom / Non-Database in Edit Mode */}
+      {(!draft.materialId && (!draft.penjualan_detail || draft.penjualan_detail.length === 0)) && (
+        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <Database className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+              <span>Opsi Penyimpanan Database:</span>
+            </div>
+            <span className={cn(
+              "text-[9px] font-black px-2 py-0.5 rounded-full",
+              draft.saveToDatabase
+                ? "bg-orange-100 text-orange-700 border border-orange-200"
+                : "bg-slate-200 text-slate-600"
+            )}>
+              {draft.saveToDatabase ? "Simpan ke DB" : "Transaksi Biasa"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+            <button
+              type="button"
+              onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: true }))}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
+                draft.saveToDatabase
+                  ? "bg-orange-500 text-white border-orange-600 shadow-xs ring-1 ring-orange-300"
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-orange-50 hover:border-orange-300"
+              )}
+            >
+              <div className="text-[11px] font-black">1. Simpan ke Database</div>
+              <div className={cn("text-[9px]", draft.saveToDatabase ? "text-orange-100" : "text-gray-400")}>
+                Tambah bahan/item baru ke DB
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: false }))}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
+                !draft.saveToDatabase
+                  ? "bg-slate-800 text-white border-slate-900 shadow-xs ring-1 ring-slate-700"
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-slate-100"
+              )}
+            >
+              <div className="text-[11px] font-black">2. Jangan Simpan</div>
+              <div className={cn("text-[9px]", !draft.saveToDatabase ? "text-slate-300" : "text-gray-400")}>
+                Hanya catat transaksi biasa
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tanggal */}
       <div className="space-y-1">
@@ -939,6 +1261,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                               keterangan: `Beli ${ing.name}`,
                               nominal: (prev.qty_beli || 0) * ing.price,
                             }));
+                            setIsCustomCategory(false);
                             setMaterialSearch('');
                           }}
                           className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-orange-50 transition-colors"
@@ -1351,6 +1674,40 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     setSaving(true);
     setShowSumberDana(false);
     try {
+      // Process custom entries flagged to save to database
+      for (const e of entries) {
+        if (e.parsed.saveToDatabase && !e.parsed.materialId && e.parsed.jenis === 'Pengeluaran') {
+          const rawClean = e.parsed.keterangan.replace(/^Beli\s+/i, '').trim() || 'Item Custom';
+          const newId = 'ing_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+          const unitPrice = e.parsed.qty_beli > 0 ? Math.round(e.parsed.nominal / e.parsed.qty_beli) : e.parsed.nominal;
+          
+          const newIng: Ingredient = {
+            id: newId,
+            name: rawClean,
+            category: e.parsed.kategori || 'Lainnya',
+            unit: 'pcs',
+            price: unitPrice,
+            initialStock: 0,
+            currentStock: e.parsed.qty_beli || 0,
+            minStock: 0,
+            fromHpp: false,
+          };
+
+          if (user) {
+            try {
+              await setDoc(doc(db, `users/${user.uid}/stok/${newId}`), newIng);
+            } catch (err) {
+              console.error("Gagal simpan ke DB stok:", err);
+            }
+          }
+          if (setIngredients) {
+            setIngredients(prev => [...prev, newIng]);
+          }
+          e.parsed.materialId = newId;
+          toast.success(`Item "${rawClean}" berhasil ditambahkan ke Database Stok!`);
+        }
+      }
+
       await onSaveBatch(entries.map(e => ({ ...e.parsed, sumber_dana: selectedSumberDana })));
       onOpenChange(false);
     } finally {
