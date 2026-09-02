@@ -257,6 +257,19 @@ function expandAliases(str: string): string {
   return result;
 }
 
+const ACTION_WORDS_SET = new Set([
+  'beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin', 'kulak', 'kulakan', 'restock', 'belanja',
+  'nota', 'jual', 'jualin', 'jualan', 'penjualan', 'pesan', 'pesanan', 'laku', 'terjual', 'dapat',
+  'pendapatan', 'pemasukan', 'pengeluaran', 'ongkir', 'transport', 'sewa', 'gaji', 'upah', 'karyawan', 'upahan',
+  'order', 'orderan', 'pembayaran'
+]);
+
+function stripActionWords(text: string): string {
+  const words = text.toLowerCase().trim().split(/\s+/);
+  const cleanWords = words.filter(w => !ACTION_WORDS_SET.has(w));
+  return cleanWords.join(' ').trim() || text.toLowerCase().trim();
+}
+
 // ─── Fuzzy Product Matching ───────────────────────────────────────────────────
 
 function normWords(s: string): string[] {
@@ -379,40 +392,51 @@ function parseLine(
   // ── Pengeluaran: ingredient / category matching ──────────────────────────
   let materialId: string | undefined = undefined;
   if (jenis === 'Pengeluaran') {
-    const nd = keterangan.toLowerCase().trim();
+    const rawClean = stripActionWords(keterangan);
+    const nd = rawClean.toLowerCase().trim();
     const ndExpanded = expandAliases(nd);
     const words = normWords(nd);
 
-    // Filter ingredients matching input string or tokens
-    const matchedIngs = ingredients.filter(i => {
+    // 1. PRIORITAS UTAMA: Exact match check
+    // If input contains specific item name existing in DB (e.g. "Cabe Jablay"), pick directly with no ambiguity.
+    const exactIng = ingredients.find(i => {
       const n = i.name.toLowerCase().trim();
-      if (n === nd || n === ndExpanded) return true;
-      if (nd.includes(n) || ndExpanded.includes(n)) return true;
-      return words.some(w => w.length >= 2 && (n.includes(w) || w.includes(n)));
+      const nClean = stripActionWords(n);
+      const nExpanded = expandAliases(n);
+      return n === nd || nClean === nd || nExpanded === nd || n === ndExpanded || nClean === ndExpanded || nd === n;
     });
 
-    if (matchedIngs.length > 0) {
-      // Check for exact full name match first
-      const exactIng = matchedIngs.find(i => {
+    if (exactIng) {
+      materialId = exactIng.id;
+      if (kategori === 'Lainnya' && exactIng.category) kategori = exactIng.category;
+      if (nominal === 0 && qty_beli > 0) nominal = Math.round(exactIng.price * qty_beli);
+      else if (nominal > 0 && qty_beli === 0 && exactIng.price > 0) qty_beli = Math.round((nominal / exactIng.price) * 100) / 100;
+      keterangan = `Beli ${exactIng.name}`;
+      userConfirmedMatch = true;
+      ambiguousKeyword = undefined;
+      ambiguousCandidates = undefined;
+    } else {
+      // 2. Filter ingredients matching input string or tokens
+      const matchedIngs = ingredients.filter(i => {
         const n = i.name.toLowerCase().trim();
-        return n === nd || n === ndExpanded;
+        const nClean = stripActionWords(n);
+        if (nd.includes(n) || nd.includes(nClean) || ndExpanded.includes(n) || ndExpanded.includes(nClean)) return true;
+        if (n.includes(nd) || nClean.includes(nd) || n.includes(ndExpanded)) return true;
+        return words.some(w => w.length >= 2 && (n.includes(w) || nClean.includes(w)));
       });
 
-      if (exactIng) {
-        materialId = exactIng.id;
-        if (kategori === 'Lainnya' && exactIng.category) kategori = exactIng.category;
-        if (nominal === 0 && qty_beli > 0) nominal = Math.round(exactIng.price * qty_beli);
-        else if (nominal > 0 && qty_beli === 0 && exactIng.price > 0) qty_beli = Math.round((nominal / exactIng.price) * 100) / 100;
-        keterangan = `Beli ${exactIng.name}`;
-      } else if (matchedIngs.length === 1) {
+      if (matchedIngs.length === 1) {
         const singleIng = matchedIngs[0];
         materialId = singleIng.id;
         if (kategori === 'Lainnya' && singleIng.category) kategori = singleIng.category;
         if (nominal === 0 && qty_beli > 0) nominal = Math.round(singleIng.price * qty_beli);
         else if (nominal > 0 && qty_beli === 0 && singleIng.price > 0) qty_beli = Math.round((nominal / singleIng.price) * 100) / 100;
         keterangan = `Beli ${singleIng.name}`;
-      } else {
-        // Multiple matches (e.g. user typed generic keyword "gula" -> "Gula Pasir", "Gula Merah")
+        userConfirmedMatch = true;
+        ambiguousKeyword = undefined;
+        ambiguousCandidates = undefined;
+      } else if (matchedIngs.length > 1) {
+        // Multiple matches & NO exact match -> Ambiguous keyword state
         const primaryIng = matchedIngs[0];
         materialId = primaryIng.id;
         if (kategori === 'Lainnya' && primaryIng.category) kategori = primaryIng.category;
@@ -425,7 +449,7 @@ function parseLine(
         ambiguousCandidates = matchedIngs.map(ing => ({
           id: ing.id,
           name: ing.name,
-          type: 'ingredient',
+          type: 'ingredient' as const,
           category: ing.category,
           price: ing.price,
           unit: ing.unit,
@@ -433,14 +457,16 @@ function parseLine(
         }));
         userConfirmedMatch = false;
       }
-    } else if (kategori === 'Lainnya') {
+    }
+
+    if (!materialId && kategori === 'Lainnya') {
       const matchedCat = categories.find(c => c.type === 'Pengeluaran' && (nd.includes(c.name.toLowerCase()) || ndExpanded.includes(c.name.toLowerCase())));
       if (matchedCat) kategori = matchedCat.name;
     }
     // If category is an HPP category and still no materialId, try matching by category-filtered ingredients
     if (!materialId && hppCategories.includes(kategori)) {
       const ingInCat = ingredients.filter(i => i.category?.toLowerCase().trim() === kategori.toLowerCase().trim());
-      const nd2 = keterangan.toLowerCase().trim();
+      const nd2 = stripActionWords(keterangan).toLowerCase().trim();
       const nd2Expanded = expandAliases(nd2);
       const fallback = ingInCat.find(i => {
         const n = i.name.toLowerCase().trim();
@@ -461,22 +487,36 @@ function parseLine(
   // ── Pemasukan: fuzzy product matching ───────────────────────────────────
   let qty_total = 0;
   if (jenis === 'Pemasukan' && kategori === 'Penjualan') {
-    const descWords = normWords(keterangan);
-    const matchedProds = products.filter(p => {
+    const rawClean = stripActionWords(keterangan);
+    const descClean = rawClean.toLowerCase().trim();
+    const descWords = normWords(rawClean);
+
+    // 1. Check for EXACT MATCH in products first
+    const exactProd = products.find(p => {
       const pName = p.nama.toLowerCase().trim();
-      if (pName === keterangan.toLowerCase().trim()) return true;
-      return descWords.some(w => w.length >= 2 && (pName.includes(w) || w.includes(pName)));
+      const pClean = stripActionWords(pName);
+      return pName === descClean || pClean === descClean || pName === keterangan.toLowerCase().trim();
     });
 
-    if (matchedProds.length > 1) {
-      const exactProd = matchedProds.find(p => p.nama.toLowerCase().trim() === keterangan.toLowerCase().trim());
-      if (!exactProd) {
-        const matchedKw = descWords.find(w => matchedProds.filter(p => p.nama.toLowerCase().includes(w)).length > 1) || descWords[0] || keterangan;
+    if (exactProd) {
+      userConfirmedMatch = true;
+      ambiguousKeyword = undefined;
+      ambiguousCandidates = undefined;
+    } else {
+      const matchedProds = products.filter(p => {
+        const pName = p.nama.toLowerCase().trim();
+        const pClean = stripActionWords(pName);
+        if (pName.includes(descClean) || descClean.includes(pName) || pClean.includes(descClean)) return true;
+        return descWords.some(w => w.length >= 2 && (pName.includes(w) || pClean.includes(w)));
+      });
+
+      if (matchedProds.length > 1) {
+        const matchedKw = descWords.find(w => matchedProds.filter(p => p.nama.toLowerCase().includes(w)).length > 1) || descWords[0] || descClean;
         ambiguousKeyword = matchedKw;
         ambiguousCandidates = matchedProds.map(prod => ({
           id: prod.id,
           name: prod.nama,
-          type: 'product',
+          type: 'product' as const,
           category: prod.kategori,
           price: prod.varian[0]?.harga_jual || 0,
           unit: 'pcs',
@@ -486,7 +526,7 @@ function parseLine(
       }
     }
 
-    const bestMatch = fuzzyMatchProduct(descWords, products);
+    const bestMatch = exactProd ? { product: exactProd, score: 99 } : fuzzyMatchProduct(descWords, products);
 
     if (bestMatch) {
       const prod = bestMatch.product;
@@ -929,7 +969,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
       </div>
 
       {/* Ambiguous DB Keyword Candidates Selector in Edit Mode */}
-      {draft.ambiguousCandidates && draft.ambiguousCandidates.length > 1 && (
+      {draft.ambiguousCandidates && draft.ambiguousCandidates.length > 1 && !draft.userConfirmedMatch && (
         <div className="p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-1.5 text-xs">
           <div className="flex items-center justify-between gap-1 text-amber-900 font-bold">
             <div className="flex items-center gap-1.5">
