@@ -25,32 +25,25 @@ export function aiParsePlugin(): Plugin {
   return {
     name: 'ai-parse-middleware',
     configureServer(server) {
-      server.middlewares.use('/api/test-gemini-key', async (req, res) => {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { success: false, message: 'Method not allowed' });
-          return;
-        }
+      server.middlewares.use('/api/test-gemini-key', async (req, res, next) => {
+        if (req.method !== 'POST') return next();
         try {
           const body = await readJson(req);
           const headerKey = req.headers['x-gemini-api-key'] as string;
           const apiKey = headerKey || body?.apiKey || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-
           if (!apiKey) {
             sendJson(res, 400, { success: false, message: 'API Key belum diisi.' });
             return;
           }
-
           const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
           const ai = new GoogleGenAI({
             apiKey,
             httpOptions: baseUrl ? { apiVersion: '', baseUrl } : undefined,
           });
-
           const response = await ai.models.generateContent({
             model: 'gemini-3.7-flash',
             contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
           });
-
           sendJson(res, 200, { success: true, message: 'Koneksi ke Gemini AI berhasil!', text: response.text });
         } catch (err: any) {
           console.error('[test-gemini-key] error', err);
@@ -58,11 +51,8 @@ export function aiParsePlugin(): Plugin {
         }
       });
 
-      server.middlewares.use('/api/ai-parse', async (req, res) => {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { error: 'Method not allowed' });
-          return;
-        }
+      server.middlewares.use('/api/ai-parse', async (req, res, next) => {
+        if (req.method !== 'POST') return next();
         try {
           const body = await readJson(req);
           const customApiKey = (req.headers['x-gemini-api-key'] as string) || body?.customApiKey;
@@ -74,11 +64,8 @@ export function aiParsePlugin(): Plugin {
         }
       });
 
-      server.middlewares.use('/api/parse-hpp', async (req, res) => {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { error: 'Method not allowed' });
-          return;
-        }
+      server.middlewares.use('/api/parse-hpp', async (req, res, next) => {
+        if (req.method !== 'POST') return next();
         try {
           const body = await readJson(req);
           const customApiKey = (req.headers['x-gemini-api-key'] as string) || body?.customApiKey;
@@ -92,4 +79,3 @@ export function aiParsePlugin(): Plugin {
     },
   };
 }
-
