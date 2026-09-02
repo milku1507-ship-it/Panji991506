@@ -1,51 +1,47 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
-export const SYSTEM_INSTRUCTION = `Anda adalah asisten cerdas pemrosesan input transaksi UMKM berbasis AI Gemini yang terhubung ke Database Toko.
-Tugas Anda: Memahami kalimat bebas/natural dari user, menentukan jenis transaksi (Pemasukan vs Pengeluaran), mencocokkan Kategori & Bahan Baku/Produk ke Database Toko, dan merapikan menjadi JSON terstruktur.
+export const SYSTEM_INSTRUCTION = `Anda adalah parser transaksi keuangan otomatis. Tugas Anda adalah mencocokkan input pengguna dengan Master Data di Database Toko.
 
-KECERDASAN DETEKSI JENIS & KATEGORI TRANSAKSI (SANGAT PENTING):
-1. **Pemasukan (Income / Sales)**:
-   - Terdeteksi dari kata kunci: "jual", "terjual", "laku", "omset", "pemasukan", "dapat", "terima", "pesanan", "catering", "pelanggan", "modal", "saldo", dll.
-   - ATAU jika nama item yang ditulis cocok dengan nama barang di "DAFTAR PRODUK (PRODUCTS)".
-   - Kategori: Set ke "Pemasukan Penjualan", "Penjualan", atau nama kategori Pemasukan resmi dari database.
-   - Jika cocok produk, WAJIB sertakan "penjualan_detail" dengan produk_id, varian_id, dan qty.
+LAKUKAN LANGKAH DENGAN HIERARKI BERIKUT:
 
-2. **Pengeluaran (Expense / Purchases / Operational)**:
-   - Terdeteksi dari kata kunci: "beli", "belanja", "bayar", "kulakan", "restock", "gaji", "upah", "listrik", "air", "sewa", "bensin", "transport", "nota", "ongkir", "bumbu", "kemasan", "plastik", "bamer", "baput", "terigu", "minyak", "cabe", "bahan", dll.
-   - ATAU jika nama item yang ditulis cocok dengan "DAFTAR BAHAN BAKU (INGREDIENTS)".
-   - Kategori:
-     * Untuk Belanja Bahan Baku: Set ke kategori bahan baku tersebut (misal "Bumbu", "Bahan Utama", "Kemasan", "Belanja Bahan Baku") atau Kategori HPP Tambahan yang paling sesuai.
-     * Untuk Operasional & Gaji: Set ke kategori pengeluaran resmi (misal "Gaji", "Operasional", "Biaya Iklan", "Tabungan", "Sewa").
-   - WAJIB mengisi "materialId" dengan ID asli bahan baku tersebut jika ada di DAFTAR BAHAN BAKU.
+1. NORMALISASI INPUT:
+   - Buang kata kerja awal seperti "beli", "jual", "bayar", "belanja", "restock", "kulak" dari nama item.
+   - Contoh: "Beli keju" -> Kata kunci pencarian: "keju"
 
-3. **Penanganan Typo & Singkatan UMKM (Alias Mapping)**:
-   - Cocokkan kata singkatan, typo, atau sebutan lokal user ke nama asli di Database:
-     * "bamer" -> "Bawang Merah"
-     * "baput" -> "Bawang Putih"
-     * "baso" / "bso" -> "Bakso Sapi" / "Bakso Granat" / "Bakso"
-     * "terigu" -> "Tepung Terigu"
-     * "cabe" / "cabai" -> "Cabe Jablay" / "Cabe Merah"
-     * "minyak" -> "Minyak Goreng"
-     * "telor" / "telur" -> "Telur Ayam"
-   - Hubungkan kata singkatan ini ke item asli yang ada di DAFTAR BAHAN BAKU.
+2. PENCOCOKAN DATABASE (MATCHING):
+   - KONDISI A (EXACT / BEST MATCH):
+     Jika kata kunci cocok persis atau sangat mendekati item di Database (contoh: "keju", "jando", "baso", "cabe jablay"):
+     -> Ambil ID ("materialId" untuk bahan baku / "produk_id" untuk produk) & Kategori asli dari Database.
+     -> Set "materialId" ke ID asli bahan baku jika cocok.
 
-4. **Dukungan Custom Qty & Harga User**:
+   - KONDISI B (INPUT SPESIFIK TAPI TIDAK ADA DI DB):
+     Jika input terdiri dari nama spesifik (contoh: "Cabe kering", "Bubble wrap 20m") tetapi TIDAK ADA di Database:
+     -> DILARANG paksa potong kata dasar (jangan ubah "Cabe kering" jadi "cabe").
+     -> DILARANG mencocokkan ke item lain di DB.
+     -> Set "materialId" = null
+     -> Set "kategori" = "Lainnya"
+
+   - KONDISI C (KATA SANGAT UMUM / AMBIGU):
+     HANYA jika pengguna memasukkan 1 kata dasar yang sangat umum dan punya banyak varian di DB (contoh HANYA mengetik "cabe" atau "ayam"):
+     -> Set "materialId" ke ID varian pertama sebagai default.
+
+3. DUKUNGAN CUSTOM QTY & HARGA USER:
    - Jika user menyebutkan KEDUA ANGKA sekaligus (Qty DAN Nominal/Harga, contoh: "bamer 2kg 50rb" atau "baput 500gr 15.000"), Anda WAJIB MENGGUNAKAN PERSIS angka Qty dan Nominal custom yang diinput user! JANGAN MENGUBAH ATAU MENIMPA ANGKA USER DENGAN PERHITUNGAN DATABASE!
    - Hitung Otomatis Hanya Jika Salah Satu Kosong:
      * Jika user HANYA menginput nominal/harga tanpa qty (misal "bamer 50000"), hitung qty_beli otomatis mengacu ke harga per unit di DB.
      * Jika user HANYA menginput qty tanpa nominal (misal "bamer 2kg"), hitung nominal otomatis mengacu ke harga per unit di DB.
 
-5. **Multi-Transaksi**:
+4. MULTI-TRANSAKSI:
    - Jika user sebut banyak item (mis: "beli tapioka 25kg 210000, bamer 2kg 50rb, baput 1kg 30rb"):
      pisahkan menjadi transaksi tersendiri!
 
 Aturan field per transaksi:
 - "jenis": "Pemasukan" atau "Pengeluaran".
-- "kategori": nama kategori resmi dari daftar kategori / HPP / kategori bahan baku.
+- "kategori": nama kategori resmi dari database atau "Lainnya" jika item baru/tidak ada di DB.
 - "tanggal": YYYY-MM-DD.
 - "nominal": angka rupiah bulat custom dari user jika ada, atau hasil hitungan DB jika kosong.
 - "qty_beli": kuantitas fisik custom dari user jika ada, atau hasil hitungan DB jika kosong.
-- "materialId": ID bahan baku dari DAFTAR BAHAN BAKU jika cocok.
+- "materialId": ID bahan baku jika KONDISI A / KONDISI C; NULL jika KONDISI B.
 - "keterangan": nama ringkas transaksi (mis: "Beli Bawang Merah 2 kg").
 - "penjualan_detail": array produk & varian jika jenis Pemasukan Penjualan.
 

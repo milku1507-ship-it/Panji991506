@@ -1539,13 +1539,15 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
           let cat = f.kategori || (isPengeluaran ? 'Lain-Lain' : 'Penjualan');
           let matId = f.materialId;
 
-          // If f.materialId wasn't returned by AI, check if description matches any ingredient in DB
+          // If f.materialId wasn't returned by AI, check ONLY if description is an exact match to an ingredient in DB
           if (!matId && isPengeluaran && ingredients.length > 0) {
-            const ketLower = (f.keterangan || '').toLowerCase();
+            const rawClean = stripActionWords(f.keterangan || '');
+            const ketLower = rawClean.toLowerCase().trim();
             const ketExpanded = expandAliases(ketLower);
             const matchedIng = ingredients.find(ing => {
-              const ingName = ing.name.toLowerCase();
-              return ketLower.includes(ingName) || ketExpanded.includes(ingName);
+              const ingName = ing.name.toLowerCase().trim();
+              const ingClean = stripActionWords(ingName);
+              return ingName === ketLower || ingClean === ketLower || ingName === ketExpanded;
             });
             if (matchedIng) matId = matchedIng.id;
           }
