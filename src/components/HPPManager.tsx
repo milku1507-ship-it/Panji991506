@@ -342,7 +342,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             lines.push(`   Minimal Order: ${v.min_order} pcs`);
           }
           lines.push(`   Batch Qty: ${v.qty_batch || 1} pcs`);
-          lines.push(`   Harga Packing: ${formatCurrency(v.harga_packing || 0, true)}`);
+          lines.push(`   Gaji / pack: ${formatCurrency(v.harga_packing || 0, true)}`);
 
           // List of ingredients (Bahan Baku)
           if (v.bahan && v.bahan.length > 0) {
@@ -773,7 +773,7 @@ function VariantPricingInputs({
         lines.push(`Minimal Order: ${variant.min_order} pcs`);
       }
       lines.push(`Batch Qty: ${variant.qty_batch || 1} pcs`);
-      lines.push(`Harga Packing: ${formatCurrency(variant.harga_packing || 0, true)}`);
+      lines.push(`Gaji / pack: ${formatCurrency(variant.harga_packing || 0, true)}`);
 
       // List of ingredients (Bahan Baku)
       if (variant.bahan && variant.bahan.length > 0) {
@@ -1912,7 +1912,7 @@ function VariantPricingInputs({
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500 font-bold">Packing / pcs</span>
+                      <span className="text-gray-500 font-bold">Gaji / pcs</span>
                       <span className="font-black text-gray-900">
                         {formatCurrency((Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1), true)}
                       </span>
@@ -2360,7 +2360,7 @@ function VariantPricingInputs({
             </div>
             <VariantPricingSection editingVariant={editingVariant} />
             <div className="space-y-2">
-              <Label htmlFor="harga_packing" className="font-bold">Harga Packing / pack</Label>
+              <Label htmlFor="harga_packing" className="font-bold">Gaji / pack</Label>
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
             </div>
             {(() => {
@@ -2379,7 +2379,7 @@ function VariantPricingInputs({
                   <Input id="min_order" name="min_order" type="number" min={1} defaultValue={defaultMin} required className="rounded-xl h-12" />
                   {suggested !== null ? (
                     <p className="text-[11px] text-gray-500 font-medium">
-                      Saran logis: <span className="font-bold text-primary">{suggested} pcs</span> — agar biaya packing 1 pak ({formatCurrency(hp, true)}) tertutup oleh margin per pcs ({formatCurrency(margin, true)}).
+                      Saran logis: <span className="font-bold text-primary">{suggested} pcs</span> — agar biaya gaji 1 pack ({formatCurrency(hp, true)}) tertutup oleh margin per pcs ({formatCurrency(margin, true)}).
                     </p>
                   ) : (
                     <p className="text-[11px] text-amber-600 font-medium">

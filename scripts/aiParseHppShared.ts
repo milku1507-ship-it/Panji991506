@@ -8,7 +8,7 @@ ATURAN PARSING VARIAN (top-level fields):
 - "nama_varian": ambil dari baris seperti "Nama Varian: X", "Varian: X", atau judul utama. Jika tidak ada, kosongkan.
 - "qty_batch": ambil dari "Qty/Batch", "Qty Batch", "Batch", "isi per batch". Default 1 jika tidak ada.
 - "harga_jual": ambil dari "Harga Jual/pcs", "Harga Jual", "Jual". Angka dalam Rupiah (tanpa titik/koma). "14998"=14998, "Rp 25.000"=25000, "1,5jt"=1500000.
-- "harga_packing": ambil dari "Packing/pack", "Harga Packing", "Packing per pack". Angka Rupiah.
+- "harga_packing": ambil dari "Gaji/pack", "Gaji / pack", "Upah/pack", "Packing/pack", "Harga Packing", "Packing per pack". Angka Rupiah.
 
 ATURAN PARSING KOMPONEN (array "bahan"):
 Format umum yang user pakai:

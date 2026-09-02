@@ -51,7 +51,7 @@ const EXAMPLE_PLACEHOLDER = `Contoh:
 Nama Varian: Kaos Polos Hitam
 Qty/Batch (pcs): 12
 Harga Jual/pcs: 85000
-Packing/pack: 3000
+Gaji/pack: 3000
 
 1. Material Utama
 Kain Cotton: 2 meter × Harga 25000 = Rp 50.000
@@ -229,7 +229,7 @@ export default function PasteHppDialog({
                 Tip: Sertakan baris seperti <span className="font-bold">"Nama Varian:"</span>,{' '}
                 <span className="font-bold">"Qty/Batch:"</span>,{' '}
                 <span className="font-bold">"Harga Jual/pcs:"</span>, dan{' '}
-                <span className="font-bold">"Packing/pack:"</span> di atas, lalu daftar komponen
+                <span className="font-bold">"Gaji/pack:"</span> di atas, lalu daftar komponen
                 dipisah per kelompok bernomor.
               </p>
             </div>
@@ -310,7 +310,7 @@ export default function PasteHppDialog({
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Packing / pack
+                  Gaji / pack
                 </Label>
                 <Input
                   type="number"

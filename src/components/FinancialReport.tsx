@@ -124,12 +124,16 @@ export default function FinancialReport({ transactions, products, dompets = [] }
       totalGross: number;
       totalNet: number;
       totalHPP: number;
+      totalBahanHPP: number;
+      totalGajiHPP: number;
       variants: Record<string, {
         variantName: string;
         totalQty: number;
         totalGross: number;
         totalNet: number;
         totalHPP: number;
+        totalBahanHPP: number;
+        totalGajiHPP: number;
       }>
     }> = {};
 
@@ -140,7 +144,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
         let txGrossTotal = 0;
         t.penjualan_detail?.forEach(pd => {
           pd.varian.forEach(v => {
-            let itemPrice = (v as any).harga; // Cast to any because of transition period
+            let itemPrice = (v as any).harga;
             if (itemPrice === undefined) {
               const product = products.find(p => p.id === pd.produk_id);
               const variant = product?.varian.find(varnt => varnt.id === v.varian_id);
@@ -156,6 +160,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             stats[pd.produk_id] = { 
               productName: pd.produk_nama || 'Unknown', 
               totalQty: 0, totalGross: 0, totalNet: 0, totalHPP: 0,
+              totalBahanHPP: 0, totalGajiHPP: 0,
               variants: {} 
             };
           }
@@ -164,7 +169,8 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             if (!stats[pd.produk_id].variants[v.varian_id]) {
               stats[pd.produk_id].variants[v.varian_id] = {
                 variantName: v.varian_nama || 'Unknown',
-                totalQty: 0, totalGross: 0, totalNet: 0, totalHPP: 0
+                totalQty: 0, totalGross: 0, totalNet: 0, totalHPP: 0,
+                totalBahanHPP: 0, totalGajiHPP: 0
               };
             }
 
@@ -172,19 +178,23 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             let itemPrice = (v as any).harga;
             let itemHpp = (v as any).hpp;
             
-            if (itemPrice === undefined || itemHpp === undefined) {
-              const product = products.find(p => p.id === pd.produk_id);
-              const variant = product?.varian.find(varnt => varnt.id === v.varian_id);
-              if (itemPrice === undefined) itemPrice = variant?.harga_jual || 0;
-              if (itemHpp === undefined && variant) {
-                itemHpp = calculateHppPcs(variant.bahan, variant.qty_batch, variant.harga_packing);
-              }
+            const product = products.find(p => p.id === pd.produk_id);
+            const variant = product?.varian.find(varnt => varnt.id === v.varian_id);
+
+            if (itemPrice === undefined) itemPrice = variant?.harga_jual || 0;
+            if (itemHpp === undefined && variant) {
+              itemHpp = calculateHppPcs(variant.bahan, variant.qty_batch, variant.harga_packing);
             }
+
+            const qBatch = Math.max(1, variant?.qty_batch || 1);
+            const gajiPerPcs = (Number(variant?.harga_packing) || 0) / qBatch;
 
             const itemGross = Number(v.qty) * (Number(itemPrice) || 0);
             const feeShare = txGrossTotal > 0 ? (itemGross / txGrossTotal) * (t.total_biaya || 0) : 0;
             const itemNet = itemGross - feeShare;
             const itemTotalHPP = Number(v.qty) * (Number(itemHpp) || 0);
+            const itemTotalGaji = Number(v.qty) * gajiPerPcs;
+            const itemTotalBahan = Math.max(0, itemTotalHPP - itemTotalGaji);
 
             // Update Variant Stats
             const vStats = stats[pd.produk_id].variants[v.varian_id];
@@ -192,6 +202,8 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             vStats.totalGross += itemGross;
             vStats.totalNet += itemNet;
             vStats.totalHPP += itemTotalHPP;
+            vStats.totalBahanHPP += itemTotalBahan;
+            vStats.totalGajiHPP += itemTotalGaji;
 
             // Update Product Stats
             const pStats = stats[pd.produk_id];
@@ -199,6 +211,8 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             pStats.totalGross += itemGross;
             pStats.totalNet += itemNet;
             pStats.totalHPP += itemTotalHPP;
+            pStats.totalBahanHPP += itemTotalBahan;
+            pStats.totalGajiHPP += itemTotalGaji;
           });
         });
       });
@@ -432,6 +446,8 @@ export default function FinancialReport({ transactions, products, dompets = [] }
         const totalGross = productPerformance.reduce((s, p) => s + p.totalGross, 0);
         const totalNet = productPerformance.reduce((s, p) => s + p.totalNet, 0);
         const totalHPP = productPerformance.reduce((s, p) => s + p.totalHPP, 0);
+        const totalBahanHPP = productPerformance.reduce((s, p) => s + p.totalBahanHPP, 0);
+        const totalGajiHPP = productPerformance.reduce((s, p) => s + p.totalGajiHPP, 0);
         const totalProfit = totalNet - totalHPP;
         const profitMargin = totalNet > 0 ? (totalProfit / totalNet) * 100 : 0;
         const isPositive = totalProfit >= 0;
@@ -455,7 +471,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                 </Badge>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <div className="bg-gray-50 rounded-2xl p-4">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Gross Penjualan</p>
                   <p className="text-lg font-black text-[#1A1A2E]">{formatCurrency(totalGross, true)}</p>
@@ -467,12 +483,17 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                   <p className="text-[10px] font-bold text-gray-400 mt-0.5">Setelah biaya platform</p>
                 </div>
                 <div className="bg-gray-50 rounded-2xl p-4">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total HPP</p>
-                  <p className="text-lg font-black text-gray-600">{formatCurrency(totalHPP, true)}</p>
-                  <p className="text-[10px] font-bold text-gray-400 mt-0.5">Biaya produksi</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total HPP (Bahan)</p>
+                  <p className="text-lg font-black text-gray-600">{formatCurrency(totalBahanHPP, true)}</p>
+                  <p className="text-[10px] font-bold text-gray-400 mt-0.5">Komponen bahan baku</p>
+                </div>
+                <div className="bg-purple-50/70 border border-purple-100 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">Gaji / Pack</p>
+                  <p className="text-lg font-black text-purple-700">{formatCurrency(totalGajiHPP, true)}</p>
+                  <p className="text-[10px] font-bold text-purple-500 mt-0.5">Alokasi upah ({totalQty} pcs)</p>
                 </div>
                 <div className={cn(
-                  "rounded-2xl p-4",
+                  "rounded-2xl p-4 col-span-2 lg:col-span-1",
                   isPositive ? "bg-green-50" : "bg-red-50"
                 )}>
                   <p className={cn("text-[10px] font-black uppercase tracking-widest mb-1", isPositive ? "text-green-600" : "text-red-500")}>
@@ -482,25 +503,33 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                     {formatCurrency(totalProfit, true)}
                   </p>
                   <p className={cn("text-[10px] font-bold mt-0.5", isPositive ? "text-green-500" : "text-red-400")}>
-                    Net Penjualan − HPP
+                    Net Penjualan − Total HPP
                   </p>
                 </div>
               </div>
 
-              {/* Progress bar HPP vs Profit */}
+              {/* Progress bar HPP vs Gaji vs Profit */}
               <div className="mt-4">
-                <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1.5">
-                  <span>HPP {totalNet > 0 ? ((totalHPP / totalNet) * 100).toFixed(1) : 0}%</span>
-                  <span>Profit {profitMargin.toFixed(1)}%</span>
+                <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1.5 flex-wrap gap-2">
+                  <span>Bahan Baku: {totalNet > 0 ? ((totalBahanHPP / totalNet) * 100).toFixed(1) : 0}%</span>
+                  <span className="text-purple-600 font-extrabold">Gaji / Pack: {totalNet > 0 ? ((totalGajiHPP / totalNet) * 100).toFixed(1) : 0}%</span>
+                  <span className={cn(isPositive ? "text-green-600" : "text-red-500", "font-extrabold")}>Profit: {profitMargin.toFixed(1)}%</span>
                 </div>
-                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden flex">
+                <div className="h-2.5 w-full bg-gray-100 rounded-full overflow-hidden flex">
                   <div
                     className="h-full bg-gray-300 rounded-l-full transition-all"
-                    style={{ width: `${Math.min(100, totalNet > 0 ? (totalHPP / totalNet) * 100 : 0)}%` }}
+                    style={{ width: `${Math.min(100, totalNet > 0 ? (totalBahanHPP / totalNet) * 100 : 0)}%` }}
+                    title={`Bahan Baku: ${formatCurrency(totalBahanHPP, true)}`}
+                  />
+                  <div
+                    className="h-full bg-purple-400 transition-all"
+                    style={{ width: `${Math.min(100, totalNet > 0 ? (totalGajiHPP / totalNet) * 100 : 0)}%` }}
+                    title={`Gaji / Pack: ${formatCurrency(totalGajiHPP, true)}`}
                   />
                   <div
                     className={cn("h-full rounded-r-full transition-all", isPositive ? "bg-green-400" : "bg-red-400")}
                     style={{ width: `${Math.min(100, Math.max(0, profitMargin))}%` }}
+                    title={`Profit Bersih: ${formatCurrency(totalProfit, true)}`}
                   />
                 </div>
               </div>
@@ -635,6 +664,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                       <div>
                         <span className="text-gray-400 block mb-1">TOTAL HPP</span>
                         <span className="text-gray-600 text-sm font-black">{formatCurrency(p.totalHPP, true)}</span>
+                        <span className="text-[9px] font-medium text-purple-600 block mt-0.5">Gaji: {formatCurrency(p.totalGajiHPP, true)}</span>
                       </div>
                       <div className="text-right">
                         <span className="text-gray-400 block mb-1">TOTAL LABA</span>
@@ -662,7 +692,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                             </Badge>
                           </div>
                           
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-[10px] font-bold text-gray-400">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-[10px] font-bold text-gray-400">
                             <div>
                               NET Pendapatan:
                               <p className="text-[#1A1A2E] text-xs font-black">{formatCurrency(v.totalNet, true)}</p>
@@ -670,6 +700,10 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                             <div>
                               Total HPP:
                               <p className="text-gray-600 text-xs font-black">{formatCurrency(v.totalHPP, true)}</p>
+                            </div>
+                            <div>
+                              Gaji / Pack:
+                              <p className="text-purple-600 text-xs font-black">{formatCurrency(v.totalGajiHPP, true)}</p>
                             </div>
                             <div>
                               Laba:
