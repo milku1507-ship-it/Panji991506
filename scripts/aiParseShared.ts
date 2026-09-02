@@ -1,32 +1,42 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
-export const SYSTEM_INSTRUCTION = `Anda adalah asisten input transaksi untuk aplikasi pembukuan UMKM dalam Bahasa Indonesia.
-Tugas Anda: dari kalimat natural user, hasilkan JSON yang berisi SATU ATAU LEBIH transaksi yang siap diisi ke form.
+export const SYSTEM_INSTRUCTION = `Anda adalah asisten cerdas pemrosesan input transaksi UMKM berbasis AI Gemini yang terhubung ke Database Toko.
+Tugas Anda: Memahami kalimat bebas/natural dari user, mencocokkan ke Database Toko (Produk & Bahan Baku), dan merapikan menjadi JSON terstruktur.
 
-PENTING — Multi-transaksi:
-- User SERING menyebutkan banyak item dalam satu kalimat, dipisah koma, "dan", titik koma, baris baru, atau penomoran (1., 2., dst).
-- Contoh: "tapioka 25kg 210000, terigu setengah ons 3000" = 2 transaksi terpisah.
-- Contoh: "jual cireng ayam ori 50 pcs, keju 30 pcs" = bisa 1 transaksi penjualan dengan 2 varian (digabung jadi 1 penjualan_detail), KECUALI tanggal/kategori berbeda.
-- Pisahkan tiap item belanja/pengeluaran berbeda menjadi entry "transactions" tersendiri.
-- Untuk PENJUALAN dari produk yang sama dengan tanggal yang sama, gabungkan ke 1 transaksi (multi varian).
+KEUNGGULAN & KECERDASAN DATABASE (PENTING):
+1. **Penanganan Typo & Sinonym**:
+   - Cocokkan kata singkatan, typo, atau sebutan lokal user ke nama asli di Database.
+   - Contoh: "baso" / "bso" -> cocokkan ke bahan baku "Bakso Sapi" atau produk "Bakso Granat".
+   - Contoh: "cabe" -> cocokkan ke bahan baku "Cabe Jablay" atau "Cabe Merah".
+   - Contoh: "terigu" -> cocokkan ke "Tepung Terigu".
+
+2. **Auto-Link Material ID (Bahan Baku)**:
+   - Jika transaksi adalah pengeluaran belanja bahan baku yang ada di "DAFTAR BAHAN BAKU (INGREDIENTS)", Anda WAJIB mengisi field "materialId" dengan ID asli bahan baku tersebut dari database.
+   - Set "kategori" ke kategori bahan baku tersebut (misal "Bumbu", "Bahan Utama", "Kemasan") atau kategori HPP terdekat.
+
+3. **Kalkulasi Cerdas Otomatis (Auto Qty / Auto Nominal dari Database)**:
+   - Jika user HANYA menginput nominal/harga (misal "cabe jablay 20000") dan di DB harga "Cabe Jablay" adalah Rp 80 per gram:
+     -> Hitung qty_beli otomatis = Math.round(20000 / 80) = 250 gram.
+   - Jika user HANYA menginput qty (misal "cabe jablay 250gr") dan di DB harga "Cabe Jablay" adalah Rp 80 per gram:
+     -> Hitung nominal otomatis = Math.round(250 * 80) = 20000 rupiah.
+   - Jika user sebut nominal & qty (misal "cabe jablay 250gr 25000"), gunakan nominal 25000 dan qty_beli 250.
+
+4. **Multi-Transaksi**:
+   - Jika user sebut banyak item (mis: "beli tapioka 25kg 210000, cabe jablay 20rb, dan es teh 3 porsi"):
+     pisahkan menjadi transaksi tersendiri!
+   - Untuk PENJUALAN produk multi varian dari produk yang sama, gabungkan ke "penjualan_detail".
 
 Aturan field per transaksi:
-- "jenis" hanya boleh "Pemasukan" atau "Pengeluaran".
-- "kategori" harus diambil dari daftar kategori yang diberikan. Jika user menyebut menjual produk, gunakan "Penjualan" (Pemasukan).
-- "tanggal" format YYYY-MM-DD. "hari ini"/"today" gunakan tanggal yang diberikan sebagai TODAY.
-- "nominal" angka rupiah (tanpa titik/koma). "500rb"=500000, "1.5jt"=1500000, "2juta"=2000000, "210000"=210000, "3000"=3000.
-- Jika kategori "Penjualan" + ada produk: isi "penjualan_detail" dengan ID asli (produk_id, varian_id) dari katalog.
-- "keterangan" ringkas (mis: "Beli Tapioka 25kg", "Beli Terigu 0.5 ons").
-- "qty_beli" jumlah pembelian bahan (untuk pengeluaran bahan baku).
+- "jenis": "Pemasukan" atau "Pengeluaran".
+- "kategori": nama kategori resmi dari daftar kategori.
+- "tanggal": YYYY-MM-DD.
+- "nominal": angka rupiah bulat.
+- "qty_beli": jumlah kuantitas fisik yang dibeli.
+- "materialId": ID bahan baku dari DAFTAR BAHAN BAKU jika cocok.
+- "keterangan": nama ringkas transaksi (mis: "Beli Cabe Jablay 250 gram").
+- "penjualan_detail": array produk & varian jika jenis Pemasukan Penjualan.
 
-Aturan needs_clarification:
-- Set TRUE hanya jika ada item yang TIDAK BISA Anda parse sama sekali atau ambigu serius.
-- Jika sebagian besar item jelas, parse semua yang jelas dan TANYA hanya untuk yang ambigu.
-
-Output:
-- "transactions": array dari objek { summary, fields }. summary = ringkasan singkat dalam Bahasa Indonesia.
-- "summary": ringkasan keseluruhan (mis: "2 transaksi siap dicatat").
-- JANGAN PERNAH meringkas semua item menjadi 1 transaksi jika item-item itu beda kategori/produk/jenis.`;
+Output: JSON sesuai schema.`;
 
 export const responseSchema = {
   type: Type.OBJECT,
@@ -49,6 +59,7 @@ export const responseSchema = {
               keterangan: { type: Type.STRING },
               nominal: { type: Type.NUMBER },
               qty_beli: { type: Type.NUMBER },
+              materialId: { type: Type.STRING },
               penjualan_detail: {
                 type: Type.ARRAY,
                 items: {
@@ -83,13 +94,14 @@ export const responseSchema = {
 };
 
 export async function runAIParse(body: any) {
-  const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  const { customApiKey, history = [], userMessage, products = [], ingredients = [], categories = [], hppCategories = [], currentForm = {}, today } = body || {};
+  
+  const apiKey = customApiKey || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+  
   if (!apiKey) {
-    throw new Error('AI integration belum dikonfigurasi.');
+    throw new Error('Gemini API Key belum dikonfigurasi. Masukkan API Key Anda di menu Pengaturan API Key AI.');
   }
-
-  const { history = [], userMessage, products = [], categories = [], currentForm = {}, today } = body || {};
 
   const ai = new GoogleGenAI({
     apiKey,
@@ -106,11 +118,25 @@ export async function runAIParse(body: any) {
     })),
   }));
 
+  const ingredientCatalog = ingredients.map((i: any) => ({
+    id: i.id,
+    nama: i.name,
+    kategori: i.category,
+    harga_per_unit: i.price,
+    satuan: i.unit,
+  }));
+
   const context = `TODAY: ${today}
 KATEGORI TERSEDIA (name|jenis):
 ${categories.map((c: any) => `- ${c.name} | ${c.type}`).join('\n')}
 
-DAFTAR PRODUK:
+KATEGORI HPP TAMBAHAN:
+${(hppCategories || []).map((h: string) => `- ${h}`).join('\n')}
+
+DAFTAR BAHAN BAKU (INGREDIENTS):
+${JSON.stringify(ingredientCatalog, null, 2)}
+
+DAFTAR PRODUK (PRODUCTS):
 ${JSON.stringify(productCatalog, null, 2)}
 
 CURRENT FORM STATE:
@@ -123,12 +149,12 @@ ${JSON.stringify(currentForm, null, 2)}`;
     })),
     {
       role: 'user',
-      parts: [{ text: `KONTEKS APLIKASI:\n${context}\n\nPESAN USER:\n${userMessage}` }],
+      parts: [{ text: `KONTEKS DATABASE APLIKASI:\n${context}\n\nPESAN USER:\n${userMessage}` }],
     },
   ];
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.7-flash',
     contents,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
@@ -143,7 +169,7 @@ ${JSON.stringify(currentForm, null, 2)}`;
   } catch {
     return {
       needs_clarification: true,
-      clarification_question: 'Maaf, saya tidak bisa memahami. Bisa diulang?',
+      clarification_question: 'Maaf, saya tidak bisa memahami format kalimat. Coba sebutkan nama barang dan nominalnya.',
       transactions: [],
     };
   }

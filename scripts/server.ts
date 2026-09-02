@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { runAIParse } from './aiParseShared';
 import { runParseHpp } from './aiParseHppShared';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,9 +28,38 @@ app.use(
 
 app.use(express.json({ limit: '2mb' }));
 
+app.post('/api/test-gemini-key', async (req, res) => {
+  try {
+    const headerKey = req.headers['x-gemini-api-key'] as string;
+    const customKey = headerKey || req.body?.apiKey;
+    const apiKey = customKey || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(400).json({ success: false, message: 'API Key belum diisi.' });
+    }
+
+    const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: baseUrl ? { apiVersion: '', baseUrl } : undefined,
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
+    });
+
+    res.json({ success: true, message: 'Koneksi ke Gemini AI berhasil!', text: response.text });
+  } catch (err: any) {
+    console.error('[test-gemini-key] error', err);
+    res.status(400).json({ success: false, message: err?.message || 'API Key tidak valid atau kuota habis.' });
+  }
+});
+
 app.post('/api/ai-parse', async (req, res) => {
   try {
-    const result = await runAIParse(req.body);
+    const customApiKey = (req.headers['x-gemini-api-key'] as string) || req.body?.customApiKey;
+    const result = await runAIParse({ ...req.body, customApiKey });
     res.json(result);
   } catch (err: any) {
     console.error('[ai-parse] error', err);
@@ -39,7 +69,8 @@ app.post('/api/ai-parse', async (req, res) => {
 
 app.post('/api/parse-hpp', async (req, res) => {
   try {
-    const result = await runParseHpp(req.body);
+    const customApiKey = (req.headers['x-gemini-api-key'] as string) || req.body?.customApiKey;
+    const result = await runParseHpp({ ...req.body, customApiKey });
     res.json(result);
   } catch (err: any) {
     console.error('[parse-hpp] error', err);

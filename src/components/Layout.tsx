@@ -1,11 +1,12 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet, Scan } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet, Scan, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
 import { User as FirebaseUser } from '../lib/firebase';
+import ApiKeyDialog from './ApiKeyDialog';
 
 type NavItem = {
   id: string;
@@ -42,6 +43,12 @@ const MENU_GROUPS = [
     ]
   },
   {
+    title: 'INTEGRASI AI',
+    items: [
+      { id: 'ai-settings', label: 'Pengaturan Gemini API Key', icon: Sparkles },
+    ]
+  },
+  {
     title: 'AKUN',
     items: [
       { id: 'logout', label: 'Keluar (Logout)', icon: LogOut, variant: 'danger' },
@@ -64,6 +71,7 @@ interface LayoutProps {
 
 export default function Layout({ children, activeTab, setActiveTab, onResetData, onLogout, onBack, showBack, storeSettings, user, fullBleed }: LayoutProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [isApiKeyOpen, setIsApiKeyOpen] = React.useState(false);
 
   const handleLogout = async () => {
     // Close the drawer first so the menu doesn't flash stale user data.
@@ -240,6 +248,9 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
                             onClick={() => {
                               if (item.id === 'logout') {
                                 handleLogout();
+                              } else if (item.id === 'ai-settings') {
+                                setIsApiKeyOpen(true);
+                                setIsMenuOpen(false);
                               } else {
                                 setActiveTab(item.id);
                                 setIsMenuOpen(false);
@@ -300,6 +311,8 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
             <TabButton key={item.id} item={item} activeTab={activeTab} setActiveTab={setActiveTab} />
           ))}
         </nav>
+
+        <ApiKeyDialog open={isApiKeyOpen} onOpenChange={setIsApiKeyOpen} user={user} />
       </div>
     </div>
   );

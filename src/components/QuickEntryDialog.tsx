@@ -1,11 +1,14 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank, AlertCircle, RefreshCw as UpdateIcon, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
+import { User } from 'firebase/auth';
+import { doc, updateDoc, db } from '../lib/firebase';
+import { toast } from 'sonner';
 
 export type QuickEntryFields = {
   tanggal: string;
@@ -34,6 +37,8 @@ interface Props {
   hppCategories: string[];
   dompets?: Dompet[];
   onSaveBatch: (list: QuickEntryFields[]) => Promise<{ saved: number; failed: number }>;
+  user?: User | null;
+  setIngredients?: React.Dispatch<React.SetStateAction<Ingredient[]>>;
 }
 
 // ─── Nominal Parser ───────────────────────────────────────────────────────────
@@ -325,9 +330,11 @@ function parseLine(
       if (kategori === 'Lainnya' && matchedIng.category) {
         kategori = matchedIng.category;
       }
-      // Auto-compute nominal from qty_beli × ingredient price (same as manual form)
+      // Auto-compute nominal or qty_beli if only one is provided
       if (nominal === 0 && qty_beli > 0) {
-        nominal = matchedIng.price * qty_beli;
+        nominal = Math.round(matchedIng.price * qty_beli);
+      } else if (nominal > 0 && qty_beli === 0 && matchedIng.price > 0) {
+        qty_beli = Math.round((nominal / matchedIng.price) * 100) / 100;
       }
       // Auto-set keterangan if not meaningful
       if (!keterangan || keterangan.toLowerCase() === matchedIng.name.toLowerCase()) {
@@ -347,7 +354,11 @@ function parseLine(
       });
       if (fallback) {
         materialId = fallback.id;
-        if (nominal === 0 && qty_beli > 0) nominal = fallback.price * qty_beli;
+        if (nominal === 0 && qty_beli > 0) {
+          nominal = Math.round(fallback.price * qty_beli);
+        } else if (nominal > 0 && qty_beli === 0 && fallback.price > 0) {
+          qty_beli = Math.round((nominal / fallback.price) * 100) / 100;
+        }
         keterangan = `Beli ${fallback.name}`;
       }
     }
@@ -428,13 +439,15 @@ interface EditCardProps {
   hppCategories: string[];
   onUpdate: (updated: QuickEntryFields) => void;
   onRemove: () => void;
+  onUpdateIngredientPrice?: (ingredientId: string, newPrice: number) => Promise<void> | void;
 }
 
-function EditCard({ fields, raw, products, ingredients, categories, hppCategories, onUpdate, onRemove }: EditCardProps) {
+function EditCard({ fields, raw, products, ingredients, categories, hppCategories, onUpdate, onRemove, onUpdateIngredientPrice }: EditCardProps) {
   const [editing, setEditing] = React.useState(false);
   const [focusField, setFocusField] = React.useState<FocusField>(null);
   const [draft, setDraft] = React.useState<QuickEntryFields>(fields);
   const [materialSearch, setMaterialSearch] = React.useState('');
+  const [lastEditedField, setLastEditedField] = React.useState<'qty' | 'nominal' | null>(null);
 
   const dateRef = React.useRef<HTMLInputElement>(null);
   const jenisRef = React.useRef<HTMLButtonElement>(null);
@@ -452,18 +465,34 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     setEditing(true);
   };
 
-  // ── Auto-nominal for HPP categories: qty_beli × material.price (same as manual form) ──
-  React.useEffect(() => {
-    const isHppCat = hppCategories.includes(draft.kategori);
-    if (!isHppCat || !draft.materialId) return;
-    const material = ingredients.find(i => i.id === draft.materialId);
-    if (!material) return;
-    setDraft(prev => ({
-      ...prev,
-      nominal: (prev.qty_beli || 0) * material.price,
-      keterangan: prev.keterangan || `Beli ${material.name}`,
-    }));
-  }, [draft.materialId, draft.qty_beli, draft.kategori, ingredients, hppCategories]);
+  const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
+
+  // Auto-fill calculation handlers
+  const handleQtyChange = (newQty: number) => {
+    setLastEditedField('qty');
+    setDraft(prev => {
+      let nextNominal = prev.nominal;
+      if (selectedMaterial && selectedMaterial.price > 0) {
+        if (prev.nominal === 0 || lastEditedField === 'qty' || lastEditedField === null) {
+          nextNominal = Math.round(newQty * selectedMaterial.price);
+        }
+      }
+      return { ...prev, qty_beli: newQty, nominal: nextNominal };
+    });
+  };
+
+  const handleNominalChange = (newNominal: number) => {
+    setLastEditedField('nominal');
+    setDraft(prev => {
+      let nextQty = prev.qty_beli;
+      if (selectedMaterial && selectedMaterial.price > 0) {
+        if (prev.qty_beli === 0 || lastEditedField === 'nominal' || lastEditedField === null) {
+          nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
+        }
+      }
+      return { ...prev, nominal: newNominal, qty_beli: nextQty };
+    });
+  };
 
   React.useEffect(() => {
     if (!editing) return;
@@ -568,7 +597,6 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     }));
   };
 
-  const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
   const isHppCategory = hppCategories.includes(draft.kategori);
   const filteredIngredients = ingredients.filter(i =>
     i.category?.toLowerCase().trim() === draft.kategori.toLowerCase().trim()
@@ -852,7 +880,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
             </div>
           )}
 
-          {/* Qty Beli (Pengeluaran) — placed BEFORE nominal so auto-compute useEffect can see it */}
+          {/* Qty Beli (Pengeluaran) */}
           {draft.jenis === 'Pengeluaran' && (
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">
@@ -862,13 +890,13 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 ref={qtyRef}
                 type="number" min="0" step="any"
                 value={draft.qty_beli || ''}
-                onChange={e => setDraft(prev => ({ ...prev, qty_beli: Number(e.target.value) || 0 }))}
+                onChange={e => handleQtyChange(Number(e.target.value) || 0)}
                 placeholder="0"
                 className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
               />
-              {selectedMaterial && draft.qty_beli > 0 && (
-                <p className="text-[10px] text-gray-400 pl-1">
-                  Auto: {draft.qty_beli} × Rp{selectedMaterial.price.toLocaleString('id-ID')} = {formatCurrency(draft.qty_beli * selectedMaterial.price, true)}
+              {selectedMaterial && selectedMaterial.price > 0 && (
+                <p className="text-[10px] text-gray-500 pl-1 font-medium">
+                  Acuan DB: Rp{selectedMaterial.price.toLocaleString('id-ID')}/{selectedMaterial.unit}
                 </p>
               )}
             </div>
@@ -889,23 +917,68 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
           {/* Nominal */}
           <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nominal (Rp)</label>
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Nominal Total (Rp)</label>
             <input
               ref={nominalRef}
               type="number"
               min="0"
               value={draft.nominal || ''}
-              onChange={e => setDraft(prev => ({ ...prev, nominal: Number(e.target.value) || 0 }))}
+              onChange={e => handleNominalChange(Number(e.target.value) || 0)}
               placeholder="0"
               className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
             />
             {draft.nominal > 0 && (
-              <p className="text-[10px] text-gray-400 pl-1">
+              <p className="text-[10px] text-gray-500 pl-1 font-medium">
                 {formatCurrency(draft.nominal, true)}
-                {isHppCategory && selectedMaterial && ' · terhitung otomatis, bisa diubah manual'}
+                {selectedMaterial && draft.qty_beli > 0 && ` (${draft.qty_beli} ${selectedMaterial.unit} × Rp${(draft.nominal / draft.qty_beli).toLocaleString('id-ID')}/${selectedMaterial.unit})`}
               </p>
             )}
           </div>
+
+          {/* ── Persetujuan Perbarui Harga Database jika ada perbedaan ── */}
+          {(() => {
+            const calcUnitPrice = (selectedMaterial && draft.qty_beli > 0 && draft.nominal > 0)
+              ? Math.round(draft.nominal / draft.qty_beli)
+              : 0;
+            const hasDiscrepancy = selectedMaterial && draft.qty_beli > 0 && draft.nominal > 0 && selectedMaterial.price > 0
+              ? Math.abs(calcUnitPrice - selectedMaterial.price) > 0.01
+              : false;
+
+            if (!hasDiscrepancy || !selectedMaterial) return null;
+
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2 text-xs">
+                <div className="flex items-start gap-2 text-amber-900">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold">Harga per unit transaksi berbeda dari Database</p>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                      Harga transaksi ini: <span className="font-bold text-amber-950">Rp {formatCurrency(calcUnitPrice, true)}/{selectedMaterial.unit}</span> ({formatCurrency(draft.nominal, true)} ÷ {draft.qty_beli} {selectedMaterial.unit})
+                      <br />
+                      Harga acuan DB saat ini: <span className="font-bold text-amber-950">Rp {formatCurrency(selectedMaterial.price, true)}/{selectedMaterial.unit}</span>
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200/60">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      if (onUpdateIngredientPrice) {
+                        onUpdateIngredientPrice(selectedMaterial.id, calcUnitPrice);
+                      }
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] h-7 px-3 rounded-lg flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Perbarui Harga Database ke Rp {formatCurrency(calcUnitPrice, true)}
+                  </Button>
+                  <span className="text-[10px] text-amber-700 font-medium">
+                    (atau biarkan harga DB tetap untuk transaksi ini saja)
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Qty Jual (Pemasukan non-Penjualan) */}
           {draft.jenis === 'Pemasukan' && draft.kategori !== 'Penjualan' && (
@@ -929,13 +1002,16 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, dompets = [], onSaveBatch }: Props) {
+export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, dompets = [], onSaveBatch, user, setIngredients }: Props) {
   const [input, setInput] = React.useState('');
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [step, setStep] = React.useState<'input' | 'preview'>('input');
   const [showSumberDana, setShowSumberDana] = React.useState(false);
   const [selectedSumberDana, setSelectedSumberDana] = React.useState('saldo_utama');
+  const [discrepancies, setDiscrepancies] = React.useState<{ ingredient: Ingredient; calcPrice: number }[]>([]);
+  const [showDiscrepancyModal, setShowDiscrepancyModal] = React.useState(false);
+  const [isAiParsing, setIsAiParsing] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -945,14 +1021,130 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       setStep('input');
       setShowSumberDana(false);
       setSelectedSumberDana('saldo_utama');
+      setShowDiscrepancyModal(false);
+      setDiscrepancies([]);
+      setIsAiParsing(false);
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [open]);
 
+  const handleUpdateIngredientPrice = async (ingredientId: string, newPrice: number) => {
+    if (setIngredients) {
+      setIngredients(prev => prev.map(ing => ing.id === ingredientId ? { ...ing, price: newPrice } : ing));
+    }
+    if (user) {
+      try {
+        const ingRef = doc(db, `users/${user.uid}/ingredients/${ingredientId}`);
+        await updateDoc(ingRef, { price: newPrice });
+        toast.success(`Harga acuan di database berhasil diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
+      } catch (err) {
+        console.error("Gagal update harga ingredient:", err);
+        toast.error("Gagal memperbarui harga di database");
+      }
+    } else {
+      toast.success(`Harga acuan diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
+    }
+  };
+
+  const handleAiParse = async () => {
+    if (!input.trim()) return;
+    setIsAiParsing(true);
+    try {
+      const customApiKey = localStorage.getItem('gemini_api_key') || undefined;
+      const res = await fetch('/api/ai-parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(customApiKey ? { 'x-gemini-api-key': customApiKey } : {}),
+        },
+        body: JSON.stringify({
+          userMessage: input,
+          products,
+          ingredients,
+          categories,
+          hppCategories,
+          today: todayStr(),
+          customApiKey,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.transactions && data.transactions.length > 0) {
+        const parsedResults: { raw: string; parsed: QuickEntryFields }[] = [];
+
+        for (const item of data.transactions) {
+          const f = item.fields || {};
+          const isPengeluaran = f.jenis === 'Pengeluaran';
+          
+          let cat = f.kategori || (isPengeluaran ? 'Lain-Lain' : 'Penjualan');
+          let matId = f.materialId;
+
+          // If f.materialId wasn't returned by AI, check if description matches any ingredient in DB
+          if (!matId && isPengeluaran && ingredients.length > 0) {
+            const ketLower = (f.keterangan || '').toLowerCase();
+            const matchedIng = ingredients.find(ing => ketLower.includes(ing.name.toLowerCase()));
+            if (matchedIng) matId = matchedIng.id;
+          }
+
+          let nominal = Number(f.nominal) || 0;
+          let qtyBeli = Number(f.qty_beli) || 0;
+
+          // Auto-calculate missing qty or nominal using Database ingredient price
+          if (matId) {
+            const ing = ingredients.find(i => i.id === matId);
+            if (ing && ing.price > 0) {
+              if (nominal > 0 && qtyBeli === 0) {
+                qtyBeli = Math.round((nominal / ing.price) * 100) / 100;
+              } else if (qtyBeli > 0 && nominal === 0) {
+                nominal = Math.round(qtyBeli * ing.price);
+              }
+            }
+          }
+
+          const entryField: QuickEntryFields = {
+            tanggal: f.tanggal || todayStr(),
+            tanggal_akhir: null,
+            jenis: isPengeluaran ? 'Pengeluaran' : 'Pemasukan',
+            kategori: cat,
+            keterangan: f.keterangan || 'Transaksi AI',
+            nominal: nominal,
+            qty_beli: qtyBeli,
+            qty_total: qtyBeli,
+            materialId: matId,
+            penjualan_detail: f.penjualan_detail || undefined,
+          };
+
+          parsedResults.push({
+            raw: item.summary || f.keterangan || input,
+            parsed: entryField,
+          });
+        }
+
+        if (parsedResults.length > 0) {
+          setEntries(parsedResults);
+          setStep('preview');
+          toast.success(`${parsedResults.length} transaksi dipahami AI Gemini sesuai Database!`);
+          return;
+        }
+      }
+      toast.info("Pemrosesan AI beralih ke parser standar...");
+      handleParse();
+    } catch (err: any) {
+      console.error("AI parse error:", err);
+      toast.error(err?.message || "Gagal AI Parse, beralih ke parser lokal.");
+      handleParse();
+    } finally {
+      setIsAiParsing(false);
+    }
+  };
+
   const handleParse = () => {
     const results = parseAll(input, ingredients, products, categories, todayStr(), hppCategories);
     const valid = results.filter(r => r.parsed !== null) as { raw: string; parsed: QuickEntryFields }[];
-    if (valid.length === 0) return;
+    if (valid.length === 0) {
+      toast.error("Tidak dapat memahami format teks input.");
+      return;
+    }
     setEntries(valid);
     setStep('preview');
   };
@@ -967,9 +1159,46 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     setEntries(prev => prev.map((e, i) => i === idx ? { ...e, parsed: updated } : e));
   };
 
-  // Step 1 — intercept Simpan: show sumber dana picker, don't write yet
+  // Step 1 — intercept Simpan: check for DB price discrepancies, show modal or sumber dana picker
   const handleSave = () => {
     if (entries.length === 0) return;
+
+    const list: { ingredient: Ingredient; calcPrice: number }[] = [];
+    const seenIngIds = new Set<string>();
+
+    entries.forEach(e => {
+      if (e.parsed.jenis === 'Pengeluaran' && e.parsed.materialId && e.parsed.qty_beli > 0 && e.parsed.nominal > 0) {
+        const ing = ingredients.find(i => i.id === e.parsed.materialId);
+        if (ing && ing.price > 0) {
+          const calcPrice = Math.round(e.parsed.nominal / e.parsed.qty_beli);
+          if (Math.abs(calcPrice - ing.price) > 0.01 && !seenIngIds.has(ing.id)) {
+            seenIngIds.add(ing.id);
+            list.push({ ingredient: ing, calcPrice });
+          }
+        }
+      }
+    });
+
+    if (list.length > 0) {
+      setDiscrepancies(list);
+      setShowDiscrepancyModal(true);
+    } else {
+      setSelectedSumberDana('saldo_utama');
+      setShowSumberDana(true);
+    }
+  };
+
+  const handleConfirmDiscrepanciesAndUpdateDb = async () => {
+    for (const d of discrepancies) {
+      await handleUpdateIngredientPrice(d.ingredient.id, d.calcPrice);
+    }
+    setShowDiscrepancyModal(false);
+    setSelectedSumberDana('saldo_utama');
+    setShowSumberDana(true);
+  };
+
+  const handleSkipDiscrepanciesUpdateDb = () => {
+    setShowDiscrepancyModal(false);
     setSelectedSumberDana('saldo_utama');
     setShowSumberDana(true);
   };
@@ -1034,14 +1263,30 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
               />
               <p className="text-[10px] text-gray-400 text-center">Tekan <kbd className="px-1.5 py-0.5 bg-gray-100 rounded font-mono text-[9px]">Ctrl+Enter</kbd> atau klik tombol di bawah</p>
 
-              <Button
-                onClick={handleParse}
-                disabled={!input.trim()}
-                className="w-full rounded-2xl font-bold h-12 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none gap-2"
-              >
-                <Zap className="w-4 h-4" />
-                Parsing Otomatis
-              </Button>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={handleAiParse}
+                  disabled={!input.trim() || isAiParsing}
+                  className="w-full rounded-2xl font-bold h-12 bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white border-none gap-2 shadow-lg shadow-amber-100 hover:opacity-95"
+                >
+                  {isAiParsing ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Menganalisis Database Toko...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> Parsing Cerdas AI Gemini (Paham DB)</>
+                  )}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleParse}
+                  disabled={!input.trim() || isAiParsing}
+                  className="w-full rounded-2xl font-bold h-10 border-gray-200 text-gray-600 gap-2 text-xs"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  Parsing Lokal Cepat
+                </Button>
+              </div>
             </div>
           )}
 
@@ -1076,6 +1321,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
                     hppCategories={hppCategories}
                     onUpdate={(updated) => updateEntry(i, updated)}
                     onRemove={() => removeEntry(i)}
+                    onUpdateIngredientPrice={handleUpdateIngredientPrice}
                   />
                 ))}
               </div>
@@ -1194,6 +1440,58 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
             </div>
           </div>
         )}
+        {/* ── Modal Konfirmasi Perbarui Harga Database ── */}
+        <Dialog open={showDiscrepancyModal} onOpenChange={setShowDiscrepancyModal}>
+          <DialogContent className="sm:max-w-[440px] rounded-[2rem]">
+            <DialogHeader>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-black text-gray-900">Perbarui Harga Acuan Database?</DialogTitle>
+                  <DialogDescription className="text-xs">Terdapat {discrepancies.length} bahan baku dengan harga unit transaksi berbeda dari database</DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-2 py-2 max-h-48 overflow-y-auto">
+              {discrepancies.map(d => (
+                <div key={d.ingredient.id} className="bg-amber-50 border border-amber-200/70 rounded-2xl p-3 text-xs flex items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold text-gray-900">{d.ingredient.name}</p>
+                    <p className="text-[11px] text-amber-800 mt-0.5">
+                      Transaksi ini: <span className="font-bold text-amber-950">Rp {formatCurrency(d.calcPrice, true)}/{d.ingredient.unit}</span>
+                      <br />
+                      Acuan di DB: <span className="font-bold text-amber-950">Rp {formatCurrency(d.ingredient.price, true)}/{d.ingredient.unit}</span>
+                    </p>
+                  </div>
+                  <span className="bg-amber-200 text-amber-900 font-bold text-[10px] px-2 py-1 rounded-lg shrink-0">
+                    Berbeda
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSkipDiscrepanciesUpdateDb}
+                className="w-full sm:w-auto rounded-xl text-xs font-bold border-gray-200"
+              >
+                Hanya Simpan Transaksi (Tetapkan DB)
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConfirmDiscrepanciesAndUpdateDb}
+                className="w-full sm:w-auto rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+              >
+                <Check className="w-4 h-4" /> Perbarui DB & Simpan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

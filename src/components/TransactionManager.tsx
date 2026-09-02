@@ -2055,6 +2055,8 @@ export default function TransactionManager({ user, transactions, setTransactions
         hppCategories={settings?.kategori_hpp || []}
         dompets={dompets}
         onSaveBatch={saveQuickBatch}
+        user={user}
+        setIngredients={setIngredients}
       />
     </div>
   );
