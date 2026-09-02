@@ -1,0 +1,5 @@
+const express = require('express');
+const app = express();
+app.use(express.static('.'));
+app.get('*', (req, res) => res.sendFile(__dirname + '/package.json'));
+app.listen(3001, () => console.log('started'));
