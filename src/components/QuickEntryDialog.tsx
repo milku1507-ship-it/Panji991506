@@ -416,13 +416,13 @@ function parseLine(
       ambiguousKeyword = undefined;
       ambiguousCandidates = undefined;
     } else {
-      // 2. Filter ingredients matching input string or tokens
+      // 2. Candidate matching:
+      // An ingredient `i` is a candidate ONLY IF every word in `words` (user input) is present in `i.name`.
+      // If user input contains extra specific words not in `i.name` (e.g., "Cabe Kering" vs "Cabe"),
+      // "Cabe Kering" is a specific NEW ITEM (Rule 4) and must NOT force match "Cabe" or show wrong options.
       const matchedIngs = ingredients.filter(i => {
-        const n = i.name.toLowerCase().trim();
-        const nClean = stripActionWords(n);
-        if (nd.includes(n) || nd.includes(nClean) || ndExpanded.includes(n) || ndExpanded.includes(nClean)) return true;
-        if (n.includes(nd) || nClean.includes(nd) || n.includes(ndExpanded)) return true;
-        return words.some(w => w.length >= 2 && (n.includes(w) || nClean.includes(w)));
+        const ingWords = normWords(i.name);
+        return words.length > 0 && words.every(w => ingWords.some(iw => iw === w || iw.startsWith(w) || w.startsWith(iw)));
       });
 
       if (matchedIngs.length === 1) {
@@ -436,7 +436,7 @@ function parseLine(
         ambiguousKeyword = undefined;
         ambiguousCandidates = undefined;
       } else if (matchedIngs.length > 1) {
-        // Multiple matches & NO exact match -> Ambiguous keyword state
+        // Multiple matches & NO exact match -> Ambiguous generic keyword state (e.g. "Cabe" -> ["Cabe Jablay", "Cabe Keriting"])
         const primaryIng = matchedIngs[0];
         materialId = primaryIng.id;
         if (kategori === 'Lainnya' && primaryIng.category) kategori = primaryIng.category;
@@ -456,31 +456,19 @@ function parseLine(
           ingredientRef: ing,
         }));
         userConfirmedMatch = false;
+      } else {
+        // Rule 4: SPECIFIC NEW ITEM NOT IN DB ("Cabe Kering", "Bubble Wrap")
+        // DILARANG mencocokkan secara paksa atau menampilkan opsi lain.
+        materialId = undefined;
+        ambiguousKeyword = undefined;
+        ambiguousCandidates = undefined;
+        userConfirmedMatch = true;
       }
     }
 
     if (!materialId && kategori === 'Lainnya') {
       const matchedCat = categories.find(c => c.type === 'Pengeluaran' && (nd.includes(c.name.toLowerCase()) || ndExpanded.includes(c.name.toLowerCase())));
       if (matchedCat) kategori = matchedCat.name;
-    }
-    // If category is an HPP category and still no materialId, try matching by category-filtered ingredients
-    if (!materialId && hppCategories.includes(kategori)) {
-      const ingInCat = ingredients.filter(i => i.category?.toLowerCase().trim() === kategori.toLowerCase().trim());
-      const nd2 = stripActionWords(keterangan).toLowerCase().trim();
-      const nd2Expanded = expandAliases(nd2);
-      const fallback = ingInCat.find(i => {
-        const n = i.name.toLowerCase().trim();
-        return nd2.includes(n) || nd2Expanded.includes(n) || n.includes(nd2.split(' ')[0]) || n.includes(nd2Expanded.split(' ')[0]);
-      });
-      if (fallback) {
-        materialId = fallback.id;
-        if (nominal === 0 && qty_beli > 0) {
-          nominal = Math.round(fallback.price * qty_beli);
-        } else if (nominal > 0 && qty_beli === 0 && fallback.price > 0) {
-          qty_beli = Math.round((nominal / fallback.price) * 100) / 100;
-        }
-        keterangan = `Beli ${fallback.name}`;
-      }
     }
   }
 
@@ -498,19 +486,26 @@ function parseLine(
       return pName === descClean || pClean === descClean || pName === keterangan.toLowerCase().trim();
     });
 
+    let matchedProduct: Product | undefined = undefined;
+
     if (exactProd) {
+      matchedProduct = exactProd;
       userConfirmedMatch = true;
       ambiguousKeyword = undefined;
       ambiguousCandidates = undefined;
     } else {
       const matchedProds = products.filter(p => {
-        const pName = p.nama.toLowerCase().trim();
-        const pClean = stripActionWords(pName);
-        if (pName.includes(descClean) || descClean.includes(pName) || pClean.includes(descClean)) return true;
-        return descWords.some(w => w.length >= 2 && (pName.includes(w) || pClean.includes(w)));
+        const prodWords = normWords(p.nama);
+        return descWords.length > 0 && descWords.every(w => prodWords.some(pw => pw === w || pw.startsWith(w) || w.startsWith(pw)));
       });
 
-      if (matchedProds.length > 1) {
+      if (matchedProds.length === 1) {
+        matchedProduct = matchedProds[0];
+        userConfirmedMatch = true;
+        ambiguousKeyword = undefined;
+        ambiguousCandidates = undefined;
+      } else if (matchedProds.length > 1) {
+        matchedProduct = matchedProds[0];
         const matchedKw = descWords.find(w => matchedProds.filter(p => p.nama.toLowerCase().includes(w)).length > 1) || descWords[0] || descClean;
         ambiguousKeyword = matchedKw;
         ambiguousCandidates = matchedProds.map(prod => ({
@@ -523,13 +518,17 @@ function parseLine(
           productRef: prod,
         }));
         userConfirmedMatch = false;
+      } else {
+        // Specific product not in DB -> New Item / Custom sale (Rule 4)
+        matchedProduct = undefined;
+        userConfirmedMatch = true;
+        ambiguousKeyword = undefined;
+        ambiguousCandidates = undefined;
       }
     }
 
-    const bestMatch = exactProd ? { product: exactProd, score: 99 } : fuzzyMatchProduct(descWords, products);
-
-    if (bestMatch) {
-      const prod = bestMatch.product;
+    if (matchedProduct) {
+      const prod = matchedProduct;
 
       // Match variants by word overlap; fall back to first variant if none identified
       const varianMatches: { varian_id: string; varian_nama: string; qty: number }[] = [];
