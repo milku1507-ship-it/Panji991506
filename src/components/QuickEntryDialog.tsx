@@ -908,63 +908,6 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
           </div>
         )}
 
-        {/* Opsi Item Custom / Non-Database */}
-        {(!fields.materialId && (!fields.penjualan_detail || fields.penjualan_detail.length === 0)) && (
-          <div className="mt-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <Database className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-                <span>Opsi Data Custom:</span>
-              </div>
-              <span className={cn(
-                "text-[9px] font-black px-2 py-0.5 rounded-full",
-                fields.saveToDatabase
-                  ? "bg-orange-100 text-orange-700 border border-orange-200"
-                  : "bg-slate-200 text-slate-600"
-              )}>
-                {fields.saveToDatabase ? "Simpan ke DB" : "Transaksi Biasa"}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate({ ...fields, saveToDatabase: true });
-                  toast.success("Set ke: Simpan item baru ke Database Stok");
-                }}
-                className={cn(
-                  "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
-                  fields.saveToDatabase
-                    ? "bg-orange-500 text-white border-orange-600 shadow-xs ring-1 ring-orange-300"
-                    : "bg-white text-gray-700 border-gray-200 hover:bg-orange-50 hover:border-orange-300"
-                )}
-              >
-                <div className="text-[11px] font-black">1. Simpan ke Database</div>
-                <div className={cn("text-[9px]", fields.saveToDatabase ? "text-orange-100" : "text-gray-400")}>
-                  Buat item/bahan baru di DB
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate({ ...fields, saveToDatabase: false });
-                  toast.info("Set ke: Transaksi biasa tanpa merubah Database");
-                }}
-                className={cn(
-                  "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
-                  !fields.saveToDatabase
-                    ? "bg-slate-800 text-white border-slate-900 shadow-xs ring-1 ring-slate-700"
-                    : "bg-white text-gray-700 border-gray-200 hover:bg-slate-100"
-                )}
-              >
-                <div className="text-[11px] font-black">2. Jangan Simpan</div>
-                <div className={cn("text-[9px]", !fields.saveToDatabase ? "text-slate-300" : "text-gray-400")}>
-                  Hanya transaksi biasa (no DB)
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1026,57 +969,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
         </div>
       )}
 
-      {/* Opsi Item Custom / Non-Database in Edit Mode */}
-      {(!draft.materialId && (!draft.penjualan_detail || draft.penjualan_detail.length === 0)) && (
-        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-              <Database className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-              <span>Opsi Penyimpanan Database:</span>
-            </div>
-            <span className={cn(
-              "text-[9px] font-black px-2 py-0.5 rounded-full",
-              draft.saveToDatabase
-                ? "bg-orange-100 text-orange-700 border border-orange-200"
-                : "bg-slate-200 text-slate-600"
-            )}>
-              {draft.saveToDatabase ? "Simpan ke DB" : "Transaksi Biasa"}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-            <button
-              type="button"
-              onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: true }))}
-              className={cn(
-                "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
-                draft.saveToDatabase
-                  ? "bg-orange-500 text-white border-orange-600 shadow-xs ring-1 ring-orange-300"
-                  : "bg-white text-gray-700 border-gray-200 hover:bg-orange-50 hover:border-orange-300"
-              )}
-            >
-              <div className="text-[11px] font-black">1. Simpan ke Database</div>
-              <div className={cn("text-[9px]", draft.saveToDatabase ? "text-orange-100" : "text-gray-400")}>
-                Tambah bahan/item baru ke DB
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: false }))}
-              className={cn(
-                "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
-                !draft.saveToDatabase
-                  ? "bg-slate-800 text-white border-slate-900 shadow-xs ring-1 ring-slate-700"
-                  : "bg-white text-gray-700 border-gray-200 hover:bg-slate-100"
-              )}
-            >
-              <div className="text-[11px] font-black">2. Jangan Simpan</div>
-              <div className={cn("text-[9px]", !draft.saveToDatabase ? "text-slate-300" : "text-gray-400")}>
-                Hanya catat transaksi biasa
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Ambiguous DB Keyword Candidates Selector in Edit Mode */}
 
       {/* Tanggal */}
       <div className="space-y-1">
@@ -1415,6 +1308,57 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
               </div>
             );
           })()}
+
+          {/* ── Opsi Simpan ke Database untuk Item Custom ── */}
+          {(!draft.materialId && (!draft.penjualan_detail || draft.penjualan_detail.length === 0)) && (
+            <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-3 space-y-2 text-xs">
+              <div className="flex items-start gap-2 text-amber-900">
+                <Database className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-amber-950">Status Penyimpanan Database (Item Custom)</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                    Pilih opsi penyimpanan untuk item: <span className="font-bold text-amber-950">"{draft.keterangan || 'Item Custom'}"</span>
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-amber-200/80">
+                <button
+                  type="button"
+                  onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: true }))}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
+                    draft.saveToDatabase
+                      ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-300 font-bold"
+                      : "bg-white text-gray-700 border-amber-200 hover:bg-amber-100"
+                  )}
+                >
+                  <div className="text-[11px] font-black flex items-center gap-1">
+                    {draft.saveToDatabase && <Check className="w-3 h-3" />} 1. Simpan ke Database
+                  </div>
+                  <div className={cn("text-[9px]", draft.saveToDatabase ? "text-amber-100" : "text-gray-400")}>
+                    Buat item/bahan baru di DB
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: false }))}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
+                    !draft.saveToDatabase
+                      ? "bg-slate-800 text-white border-slate-900 ring-2 ring-slate-400 font-bold"
+                      : "bg-white text-gray-700 border-amber-200 hover:bg-slate-100"
+                  )}
+                >
+                  <div className="text-[11px] font-black flex items-center gap-1">
+                    {!draft.saveToDatabase && <Check className="w-3 h-3" />} 2. Jangan Simpan
+                  </div>
+                  <div className={cn("text-[9px]", !draft.saveToDatabase ? "text-slate-300" : "text-gray-400")}>
+                    Hanya transaksi biasa (no DB)
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Qty Jual (Pemasukan non-Penjualan) */}
           {draft.jenis === 'Pemasukan' && draft.kategori !== 'Penjualan' && (
