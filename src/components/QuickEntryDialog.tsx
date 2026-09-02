@@ -513,29 +513,37 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
   const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
 
-  // Auto-fill calculation handlers (prioritizes user custom inputs while auto-recalculating seamlessly)
+  // Auto-fill calculation handlers (activates automatic scaling between Qty & Nominal, supporting both DB price and custom price)
   const handleQtyChange = (newQty: number) => {
     setDraft(prev => {
       let nextNominal = prev.nominal;
-      // If user hasn't explicitly customized nominal, scale nominal with DB price or keep custom
-      if (selectedMaterial && selectedMaterial.price > 0 && lastEditedField !== 'nominal') {
-        nextNominal = Math.round(newQty * selectedMaterial.price);
+      // Get unit price from custom ratio (if both were set) or material DB price
+      let unitPrice = 0;
+      if (prev.nominal > 0 && prev.qty_beli > 0) {
+        unitPrice = prev.nominal / prev.qty_beli;
+      } else if (selectedMaterial && selectedMaterial.price > 0) {
+        unitPrice = selectedMaterial.price;
+      }
+
+      if (unitPrice > 0 && newQty > 0) {
+        nextNominal = Math.round(newQty * unitPrice);
       }
       return { ...prev, qty_beli: newQty, nominal: nextNominal };
     });
-    setLastEditedField('qty');
   };
 
   const handleNominalChange = (newNominal: number) => {
     setDraft(prev => {
       let nextQty = prev.qty_beli;
-      // If user hasn't explicitly customized qty, scale qty with DB price or keep custom
-      if (selectedMaterial && selectedMaterial.price > 0 && lastEditedField !== 'qty') {
-        nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
+      // If Qty is 0 and we have a unit price, calculate Qty automatically from Nominal
+      if (prev.qty_beli === 0) {
+        let unitPrice = selectedMaterial && selectedMaterial.price > 0 ? selectedMaterial.price : 0;
+        if (unitPrice > 0 && newNominal > 0) {
+          nextQty = Math.round((newNominal / unitPrice) * 100) / 100;
+        }
       }
       return { ...prev, nominal: newNominal, qty_beli: nextQty };
     });
-    setLastEditedField('nominal');
   };
 
   React.useEffect(() => {
