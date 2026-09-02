@@ -51,32 +51,15 @@ export default function ApiKeyDialog({ open, onOpenChange, user }: Props) {
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/test-gemini-key', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-gemini-api-key': apiKey.trim(),
-        },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
+      const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
+      await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
       });
-      
-      let data: any = null;
-      try {
-        const text = await res.text();
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = null;
-      }
-
-      if (res.ok && data?.success) {
-        setTestResult({ success: true, message: 'Koneksi AI Gemini Berhasil! API Key valid dan siap digunakan.' });
-        toast.success('API Key valid!');
-      } else {
-        setTestResult({ success: false, message: data?.message || `Gagal terhubung (${res.status}). Periksa kembali API Key Anda.` });
-      }
+      setTestResult({ success: true, message: 'Koneksi AI Gemini Berhasil! API Key valid dan siap digunakan.' });
+      toast.success('API Key valid!');
     } catch (err: any) {
-      setTestResult({ success: false, message: err?.message || 'Gagal menghubungi server.' });
+      setTestResult({ success: false, message: err?.message || 'API Key tidak valid atau kuota habis.' });
     } finally {
       setTesting(false);
     }

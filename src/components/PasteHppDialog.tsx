@@ -94,25 +94,18 @@ export default function PasteHppDialog({
     }
     setIsParsing(true);
     try {
-      const res = await fetch('/api/parse-hpp', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawText,
-          kategoriHpp,
-          existingIngredients: ingredients.slice(0, 200).map(i => ({
-            name: i.name,
-            unit: i.unit,
-            price: i.price,
-          })),
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const data = (await res.json()) as ParsedHppResult;
+      const customApiKey = localStorage.getItem('gemini_api_key');
+      const data = await runParseHpp({
+        customApiKey,
+        rawText,
+        kategoriHpp,
+        existingIngredients: ingredients.slice(0, 200).map(i => ({
+          name: i.name,
+          unit: i.unit,
+          price: i.price,
+        })),
+      }) as ParsedHppResult;
+      
       if (!data.variant || !Array.isArray(data.bahan)) {
         throw new Error('Format hasil AI tidak valid.');
       }
