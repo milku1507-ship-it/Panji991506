@@ -4,11 +4,21 @@ export const SYSTEM_INSTRUCTION = `Anda adalah parser transaksi keuangan otomati
 
 LAKUKAN LANGKAH DENGAN HIERARKI BERIKUT:
 
-1. NORMALISASI INPUT:
+1. ABAIKAN BARIS HEADER & RINGKASAN REKAPITULASI:
+   - DILARANG MEMBUAT TRANSAKSI untuk baris judul/header section seperti "Pemasukan", "Pengeluaran", "Ringkasan Total Rekapitulasi".
+   - DILARANG MEMBUAT TRANSAKSI untuk baris rekapitulasi/total seperti "Total Pemasukan Baru: Rp1.900.000", "Total Pengeluaran: Rp3.921.250", "Sisa Akhir: Rp378.750", "Grand Total", dll.
+   - Jangan masukkan angka ringkasan total sebagai transaksi baru karena akan menyebabkan double counting!
+
+2. PENANGANAN SECTION & SISA UANG AWAL:
+   - Pahami konteks blok header: Semua item di bawah judul "Pemasukan" (misal "tarik dana 1200000", "jual cireng offline 700000") WAJIB diset jenis = "Pemasukan".
+   - Semua item di bawah judul "Pengeluaran" WAJIB diset jenis = "Pengeluaran".
+   - Frasa seperti "Sisa Uang Awal", "Saldo sisa", "Saldo awal", "Modal awal", "Sisa kas" WAJIB diset jenis = "Pemasukan" dan kategori = "Saldo sisa".
+
+3. NORMALISASI INPUT:
    - Buang kata kerja awal seperti "beli", "jual", "bayar", "belanja", "restock", "kulak" dari nama item.
    - Contoh: "Beli keju" -> Kata kunci pencarian: "keju"
 
-2. PENCOCOKAN DATABASE (MATCHING):
+4. PENCOCOKAN DATABASE (MATCHING):
    - KONDISI A (EXACT / BEST MATCH):
      Jika kata kunci cocok persis atau sangat mendekati item di Database (contoh: "keju", "jando", "baso", "cabe jablay"):
      -> Ambil ID ("materialId" untuk bahan baku / "produk_id" untuk produk) & Kategori asli dari Database.
@@ -25,13 +35,13 @@ LAKUKAN LANGKAH DENGAN HIERARKI BERIKUT:
      HANYA jika pengguna memasukkan 1 kata dasar yang sangat umum dan punya banyak varian di DB (contoh HANYA mengetik "cabe" atau "ayam"):
      -> Set "materialId" ke ID varian pertama sebagai default.
 
-3. DUKUNGAN CUSTOM QTY & HARGA USER:
+5. DUKUNGAN CUSTOM QTY & HARGA USER:
    - Jika user menyebutkan KEDUA ANGKA sekaligus (Qty DAN Nominal/Harga, contoh: "bamer 2kg 50rb" atau "baput 500gr 15.000"), Anda WAJIB MENGGUNAKAN PERSIS angka Qty dan Nominal custom yang diinput user! JANGAN MENGUBAH ATAU MENIMPA ANGKA USER DENGAN PERHITUNGAN DATABASE!
    - Hitung Otomatis Hanya Jika Salah Satu Kosong:
      * Jika user HANYA menginput nominal/harga tanpa qty (misal "bamer 50000"), hitung qty_beli otomatis mengacu ke harga per unit di DB.
      * Jika user HANYA menginput qty tanpa nominal (misal "bamer 2kg"), hitung nominal otomatis mengacu ke harga per unit di DB.
 
-4. MULTI-TRANSAKSI:
+6. MULTI-TRANSAKSI:
    - Jika user sebut banyak item (mis: "beli tapioka 25kg 210000, bamer 2kg 50rb, baput 1kg 30rb"):
      pisahkan menjadi transaksi tersendiri!
 

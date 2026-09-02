@@ -198,6 +198,10 @@ const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; ka
   ads: { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
   saldo: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
   modal: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  sisa: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'sisa uang': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'saldo sisa': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'saldo awal': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
   packing: { jenis: 'Pengeluaran', kategori: 'Packing' },
   kemasan: { jenis: 'Pengeluaran', kategori: 'Packing' },
 };
@@ -306,6 +310,7 @@ function parseLine(
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
   defaultDate: string,
   hppCategories: string[] = [],
+  forcedJenis?: 'Pemasukan' | 'Pengeluaran' | null,
 ): QuickEntryFields | null {
   const line = raw.trim();
   if (!line) return null;
@@ -321,7 +326,7 @@ function parseLine(
     if (tokens.length === 0) return null;
   }
 
-  let jenis: 'Pemasukan' | 'Pengeluaran' = 'Pengeluaran';
+  let jenis: 'Pemasukan' | 'Pengeluaran' = forcedJenis || 'Pengeluaran';
   let kategori = 'Lainnya';
   let actionIdx = -1;
 
@@ -593,7 +598,45 @@ function parseAll(
   hppCategories: string[] = [],
 ): { raw: string; parsed: QuickEntryFields | null }[] {
   const lines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
-  return lines.map(raw => ({ raw, parsed: parseLine(raw, ingredients, products, categories, today, hppCategories) }));
+  const results: { raw: string; parsed: QuickEntryFields | null }[] = [];
+  let currentSectionJenis: 'Pemasukan' | 'Pengeluaran' | null = null;
+
+  for (const raw of lines) {
+    const rawLower = raw.toLowerCase().replace(/[:\-_]/g, ' ').trim();
+
+    // 1. Abaikan baris ringkasan total / rekapitulasi agar tidak double-count
+    if (
+      rawLower.startsWith('ringkasan') ||
+      rawLower.startsWith('rekapitulasi') ||
+      rawLower.startsWith('total pemasukan') ||
+      rawLower.startsWith('total pengeluaran') ||
+      rawLower.startsWith('sisa akhir') ||
+      rawLower.startsWith('grand total')
+    ) {
+      continue;
+    }
+
+    // 2. Deteksi baris header section untuk konteks jenis transaksi
+    if (rawLower === 'pemasukan' || rawLower === 'pemasukan baru' || rawLower === 'pemasukan/omset' || rawLower === 'pemasukan:') {
+      currentSectionJenis = 'Pemasukan';
+      continue;
+    }
+    if (rawLower === 'pengeluaran' || rawLower === 'pengeluaran/operasional' || rawLower === 'biaya' || rawLower === 'pengeluaran:') {
+      currentSectionJenis = 'Pengeluaran';
+      continue;
+    }
+
+    const parsed = parseLine(raw, ingredients, products, categories, today, hppCategories, currentSectionJenis);
+    if (parsed) {
+      // 3. Abaikan entri tanpa nominal dan tanpa qty/detail
+      if (parsed.nominal === 0 && parsed.qty_beli === 0 && (!parsed.penjualan_detail || parsed.penjualan_detail.length === 0)) {
+        continue;
+      }
+      results.push({ raw, parsed });
+    }
+  }
+
+  return results;
 }
 
 // ─── Inline Edit Card ─────────────────────────────────────────────────────────
