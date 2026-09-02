@@ -493,29 +493,29 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
   const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
 
-  // Auto-fill calculation handlers (only auto-fill if the other field is 0/empty, preserving custom user entries)
+  // Auto-fill calculation handlers (prioritizes user custom inputs while auto-recalculating seamlessly)
   const handleQtyChange = (newQty: number) => {
-    setLastEditedField('qty');
     setDraft(prev => {
       let nextNominal = prev.nominal;
-      // Only auto-fill nominal if prev.nominal is 0 (user hasn't typed a custom nominal)
-      if (selectedMaterial && selectedMaterial.price > 0 && prev.nominal === 0) {
+      // If user hasn't explicitly customized nominal, scale nominal with DB price or keep custom
+      if (selectedMaterial && selectedMaterial.price > 0 && lastEditedField !== 'nominal') {
         nextNominal = Math.round(newQty * selectedMaterial.price);
       }
       return { ...prev, qty_beli: newQty, nominal: nextNominal };
     });
+    setLastEditedField('qty');
   };
 
   const handleNominalChange = (newNominal: number) => {
-    setLastEditedField('nominal');
     setDraft(prev => {
       let nextQty = prev.qty_beli;
-      // Only auto-fill qty if prev.qty_beli is 0 (user hasn't typed a custom qty)
-      if (selectedMaterial && selectedMaterial.price > 0 && prev.qty_beli === 0) {
+      // If user hasn't explicitly customized qty, scale qty with DB price or keep custom
+      if (selectedMaterial && selectedMaterial.price > 0 && lastEditedField !== 'qty') {
         nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
       }
       return { ...prev, nominal: newNominal, qty_beli: nextQty };
     });
+    setLastEditedField('nominal');
   };
 
   React.useEffect(() => {
@@ -1009,11 +1009,15 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 <div className="flex items-start gap-2 text-amber-900">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="font-bold">Harga per unit transaksi berbeda dari Database</p>
+                    <p className="font-bold">Harga Kustom Dideteksi (Auto-Update DB)</p>
                     <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                      Harga transaksi ini: <span className="font-bold text-amber-950">Rp {formatCurrency(calcUnitPrice, true)}/{selectedMaterial.unit}</span> ({formatCurrency(draft.nominal, true)} ÷ {draft.qty_beli} {selectedMaterial.unit})
+                      Harga transaksi kustom: <span className="font-bold text-amber-950">Rp {formatCurrency(calcUnitPrice, true)}/{selectedMaterial.unit}</span> ({formatCurrency(draft.nominal, true)} ÷ {draft.qty_beli} {selectedMaterial.unit})
                       <br />
-                      Harga acuan DB saat ini: <span className="font-bold text-amber-950">Rp {formatCurrency(selectedMaterial.price, true)}/{selectedMaterial.unit}</span>
+                      Acuan DB saat ini: <span className="font-bold text-amber-950">Rp {formatCurrency(selectedMaterial.price, true)}/{selectedMaterial.unit}</span>
+                      <br />
+                      <span className="text-[10px] text-emerald-700 font-bold mt-1 block">
+                        ✓ Harga acuan di database akan otomatis diperbarui ke Rp {formatCurrency(calcUnitPrice, true)} saat disimpan.
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -1028,11 +1032,8 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     }}
                     className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] h-7 px-3 rounded-lg flex items-center gap-1.5 shadow-sm"
                   >
-                    <Check className="w-3.5 h-3.5" /> Perbarui Harga Database ke Rp {formatCurrency(calcUnitPrice, true)}
+                    <Check className="w-3.5 h-3.5" /> Update DB Sekarang
                   </Button>
-                  <span className="text-[10px] text-amber-700 font-medium">
-                    (atau biarkan harga DB tetap untuk transaksi ini saja)
-                  </span>
                 </div>
               </div>
             );
@@ -1228,8 +1229,8 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     setEntries(prev => prev.map((e, i) => i === idx ? { ...e, parsed: updated } : e));
   };
 
-  // Step 1 — intercept Simpan: check for DB price discrepancies, show modal or sumber dana picker
-  const handleSave = () => {
+  // Step 1 — intercept Simpan: auto-update DB for custom ingredient prices, then open sumber dana picker
+  const handleSave = async () => {
     if (entries.length === 0) return;
 
     const list: { ingredient: Ingredient; calcPrice: number }[] = [];
@@ -1238,9 +1239,9 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     entries.forEach(e => {
       if (e.parsed.jenis === 'Pengeluaran' && e.parsed.materialId && e.parsed.qty_beli > 0 && e.parsed.nominal > 0) {
         const ing = ingredients.find(i => i.id === e.parsed.materialId);
-        if (ing && ing.price > 0) {
+        if (ing) {
           const calcPrice = Math.round(e.parsed.nominal / e.parsed.qty_beli);
-          if (Math.abs(calcPrice - ing.price) > 0.01 && !seenIngIds.has(ing.id)) {
+          if (calcPrice > 0 && Math.abs(calcPrice - (ing.price || 0)) > 0.01 && !seenIngIds.has(ing.id)) {
             seenIngIds.add(ing.id);
             list.push({ ingredient: ing, calcPrice });
           }
@@ -1249,12 +1250,13 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     });
 
     if (list.length > 0) {
-      setDiscrepancies(list);
-      setShowDiscrepancyModal(true);
-    } else {
-      setSelectedSumberDana('saldo_utama');
-      setShowSumberDana(true);
+      for (const d of list) {
+        await handleUpdateIngredientPrice(d.ingredient.id, d.calcPrice);
+      }
     }
+
+    setSelectedSumberDana('saldo_utama');
+    setShowSumberDana(true);
   };
 
   const handleConfirmDiscrepanciesAndUpdateDb = async () => {

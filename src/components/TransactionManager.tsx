@@ -309,6 +309,20 @@ export default function TransactionManager({ user, transactions, setTransactions
         const material = ingredientIdMap.get(matId);
         if (material) {
           const delta = Number(txData.qty_beli || 0) || 0;
+          const nominal = Number(txData.nominal || 0) || 0;
+          if (delta > 0 && nominal > 0) {
+            const calcPrice = Math.round(nominal / delta);
+            if (calcPrice > 0 && Math.abs(calcPrice - (material.price || 0)) > 0.01) {
+              try {
+                const ingRef = doc(db, `users/${user.uid}/ingredients/${material.id}`);
+                await updateDoc(ingRef, { price: calcPrice });
+                setIngredients(prev => prev.map(i => i.id === material.id ? { ...i, price: calcPrice } : i));
+                toast.info(`Harga acuan "${material.name}" di database otomatis diperbarui ke Rp ${formatCurrency(calcPrice, true)}/${material.unit}`);
+              } catch (err) {
+                console.error("Gagal auto-update harga bahan baku di DB:", err);
+              }
+            }
+          }
           snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
           stockUpdates.push({ id: material.id, delta });
         }
