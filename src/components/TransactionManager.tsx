@@ -1128,22 +1128,29 @@ export default function TransactionManager({ user, transactions, setTransactions
       try {
         const batch = writeBatch(db);
         batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
-        // Reverse dompet balance jika transaksi dompet
-        if (tx?.kategori_arus_kas === 'mutasi_ke_dompet' && tx.sumber_dana) {
-          batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-            saldo_terkumpul: increment(-tx.nominal)
-          });
-        } else if (tx?.kategori_arus_kas === 'pengeluaran_dompet' && tx.sumber_dana) {
-          batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-            saldo_terkumpul: increment(tx.nominal)
-          });
+
+        // Reverse dompet balance hanya jika sumber_dana valid dan dompet terdaftar
+        if (tx && tx.sumber_dana && tx.sumber_dana !== 'saldo_utama') {
+          const dompetExists = dompets.some(d => d.id === tx.sumber_dana);
+          if (dompetExists) {
+            if (tx.kategori_arus_kas === 'mutasi_ke_dompet') {
+              batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+                saldo_terkumpul: increment(-tx.nominal)
+              });
+            } else if (tx.kategori_arus_kas === 'pengeluaran_dompet') {
+              batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+                saldo_terkumpul: increment(tx.nominal)
+              });
+            }
+          }
         }
+
         await batch.commit();
         setTransactions(prev => prev.filter(t => t.id !== id));
         setSelectedTxIds(prev => prev.filter(selectedId => selectedId !== id));
         toast.success('Transaksi dihapus');
       } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${id}`);
+        console.error('[deleteTransaction] Error:', error);
         toast.error('Gagal menghapus transaksi. Coba lagi.');
       }
     }
@@ -1162,21 +1169,30 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       if (rollback && txSnapshot.stockSnapshot) {
         txSnapshot.stockSnapshot.forEach(snap => {
-          batch.update(doc(db, `users/${user.uid}/stok/${snap.ingredientId}`), {
-            currentStock: snap.stockBefore
-          });
+          const ingExists = ingredients.some(ing => ing.id === snap.ingredientId);
+          if (ingExists) {
+            batch.update(doc(db, `users/${user.uid}/stok/${snap.ingredientId}`), {
+              currentStock: snap.stockBefore
+            });
+          }
         });
       }
 
-      // Reverse dompet balance jika transaksi dompet
-      if ((txSnapshot as any).kategori_arus_kas === 'mutasi_ke_dompet' && (txSnapshot as any).sumber_dana) {
-        batch.update(doc(db, `users/${user.uid}/dompet/${(txSnapshot as any).sumber_dana}`), {
-          saldo_terkumpul: increment(-txSnapshot.nominal)
-        });
-      } else if ((txSnapshot as any).kategori_arus_kas === 'pengeluaran_dompet' && (txSnapshot as any).sumber_dana) {
-        batch.update(doc(db, `users/${user.uid}/dompet/${(txSnapshot as any).sumber_dana}`), {
-          saldo_terkumpul: increment(txSnapshot.nominal)
-        });
+      // Reverse dompet balance hanya jika sumber_dana valid dan dompet terdaftar
+      const sumberDana = (txSnapshot as any).sumber_dana;
+      if (sumberDana && sumberDana !== 'saldo_utama') {
+        const dompetExists = dompets.some(d => d.id === sumberDana);
+        if (dompetExists) {
+          if ((txSnapshot as any).kategori_arus_kas === 'mutasi_ke_dompet') {
+            batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
+              saldo_terkumpul: increment(-txSnapshot.nominal)
+            });
+          } else if ((txSnapshot as any).kategori_arus_kas === 'pengeluaran_dompet') {
+            batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
+              saldo_terkumpul: increment(txSnapshot.nominal)
+            });
+          }
+        }
       }
 
       await batch.commit();
@@ -1195,7 +1211,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         toast.success('Transaksi dihapus ✓');
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txId}`);
+      console.error('[confirmDelete] Error:', error);
       toast.error('Gagal menghapus transaksi. Data tidak berubah.');
     } finally {
       setIsDeleting(false);
@@ -1234,25 +1250,32 @@ export default function TransactionManager({ user, transactions, setTransactions
         idsToDelete.forEach(id => {
           batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
         });
+
         // Reverse dompet balances untuk setiap transaksi dompet dalam batch
         selectedTxs.forEach(tx => {
-          if (tx.kategori_arus_kas === 'mutasi_ke_dompet' && tx.sumber_dana) {
-            batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-              saldo_terkumpul: increment(-tx.nominal)
-            });
-          } else if (tx.kategori_arus_kas === 'pengeluaran_dompet' && tx.sumber_dana) {
-            batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-              saldo_terkumpul: increment(tx.nominal)
-            });
+          if (tx.sumber_dana && tx.sumber_dana !== 'saldo_utama') {
+            const dompetExists = dompets.some(d => d.id === tx.sumber_dana);
+            if (dompetExists) {
+              if (tx.kategori_arus_kas === 'mutasi_ke_dompet') {
+                batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+                  saldo_terkumpul: increment(-tx.nominal)
+                });
+              } else if (tx.kategori_arus_kas === 'pengeluaran_dompet') {
+                batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
+                  saldo_terkumpul: increment(tx.nominal)
+                });
+              }
+            }
           }
         });
+
         await batch.commit();
         setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
         setSelectedTxIds([]);
         toast.success(`${idsToDelete.length} transaksi berhasil dihapus`, { id: toastId });
       } catch (error) {
         toast.dismiss(toastId);
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
+        console.error('[handleBulkDelete] Error:', error);
         toast.error('Gagal menghapus transaksi. Data tidak berubah.');
       }
     }
@@ -1288,14 +1311,20 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       // Reverse dompet balances untuk setiap transaksi dompet dalam batch
       selectedTxs.forEach(tx => {
-        if ((tx as any).kategori_arus_kas === 'mutasi_ke_dompet' && (tx as any).sumber_dana) {
-          batch.update(doc(db, `users/${user.uid}/dompet/${(tx as any).sumber_dana}`), {
-            saldo_terkumpul: increment(-tx.nominal)
-          });
-        } else if ((tx as any).kategori_arus_kas === 'pengeluaran_dompet' && (tx as any).sumber_dana) {
-          batch.update(doc(db, `users/${user.uid}/dompet/${(tx as any).sumber_dana}`), {
-            saldo_terkumpul: increment(tx.nominal)
-          });
+        const sumberDana = (tx as any).sumber_dana;
+        if (sumberDana && sumberDana !== 'saldo_utama') {
+          const dompetExists = dompets.some(d => d.id === sumberDana);
+          if (dompetExists) {
+            if ((tx as any).kategori_arus_kas === 'mutasi_ke_dompet') {
+              batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
+                saldo_terkumpul: increment(-tx.nominal)
+              });
+            } else if ((tx as any).kategori_arus_kas === 'pengeluaran_dompet') {
+              batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
+                saldo_terkumpul: increment(tx.nominal)
+              });
+            }
+          }
         }
       });
 
@@ -1318,7 +1347,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         toast.success(`${idsToDelete.length} transaksi dihapus ✓`, { id: toastId });
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
+      console.error('[confirmBulkDelete] Error:', error);
       toast.error('Gagal menghapus transaksi massal. Data tidak berubah.', { id: toastId });
     } finally {
       setIsBulkDeleteConfirmOpen(false);
