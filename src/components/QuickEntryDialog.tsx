@@ -201,6 +201,30 @@ function resolveCategory(
   return 'Lainnya';
 }
 
+// ─── Common UMKM Aliases ───────────────────────────────────────────────────────
+
+const COMMON_ALIASES: Record<string, string> = {
+  bamer: 'bawang merah',
+  baput: 'bawang putih',
+  baso: 'bakso',
+  bso: 'bakso',
+  terigu: 'tepung terigu',
+  cabe: 'cabe',
+  cabai: 'cabe',
+  minyak: 'minyak goreng',
+  telor: 'telur',
+  telur: 'telur',
+};
+
+function expandAliases(str: string): string {
+  let result = str.toLowerCase();
+  for (const [alias, full] of Object.entries(COMMON_ALIASES)) {
+    const regex = new RegExp(`\\b${alias}\\b`, 'gi');
+    result = result.replace(regex, full);
+  }
+  return result;
+}
+
 // ─── Fuzzy Product Matching ───────────────────────────────────────────────────
 
 function normWords(s: string): string[] {
@@ -319,10 +343,11 @@ function parseLine(
   let materialId: string | undefined = undefined;
   if (jenis === 'Pengeluaran') {
     const nd = keterangan.toLowerCase().trim();
-    // Try matching an ingredient by name
+    const ndExpanded = expandAliases(nd);
+    // Try matching an ingredient by name or alias
     const matchedIng = ingredients.find(i => {
       const n = i.name.toLowerCase().trim();
-      return nd.includes(n) || n.includes(nd.split(' ')[0]);
+      return nd.includes(n) || ndExpanded.includes(n) || n.includes(nd.split(' ')[0]) || n.includes(ndExpanded.split(' ')[0]);
     });
     if (matchedIng) {
       materialId = matchedIng.id;
@@ -337,20 +362,21 @@ function parseLine(
         qty_beli = Math.round((nominal / matchedIng.price) * 100) / 100;
       }
       // Auto-set keterangan if not meaningful
-      if (!keterangan || keterangan.toLowerCase() === matchedIng.name.toLowerCase()) {
+      if (!keterangan || keterangan.toLowerCase() === matchedIng.name.toLowerCase() || nd === 'bamer' || nd === 'baput') {
         keterangan = `Beli ${matchedIng.name}`;
       }
     } else if (kategori === 'Lainnya') {
-      const matchedCat = categories.find(c => c.type === 'Pengeluaran' && nd.includes(c.name.toLowerCase()));
+      const matchedCat = categories.find(c => c.type === 'Pengeluaran' && (nd.includes(c.name.toLowerCase()) || ndExpanded.includes(c.name.toLowerCase())));
       if (matchedCat) kategori = matchedCat.name;
     }
     // If category is an HPP category and still no materialId, try matching by category-filtered ingredients
     if (!materialId && hppCategories.includes(kategori)) {
       const ingInCat = ingredients.filter(i => i.category?.toLowerCase().trim() === kategori.toLowerCase().trim());
       const nd2 = keterangan.toLowerCase().trim();
+      const nd2Expanded = expandAliases(nd2);
       const fallback = ingInCat.find(i => {
         const n = i.name.toLowerCase().trim();
-        return nd2.includes(n) || n.includes(nd2.split(' ')[0]);
+        return nd2.includes(n) || nd2Expanded.includes(n) || n.includes(nd2.split(' ')[0]) || n.includes(nd2Expanded.split(' ')[0]);
       });
       if (fallback) {
         materialId = fallback.id;
@@ -467,15 +493,14 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
   const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
 
-  // Auto-fill calculation handlers
+  // Auto-fill calculation handlers (only auto-fill if the other field is 0/empty, preserving custom user entries)
   const handleQtyChange = (newQty: number) => {
     setLastEditedField('qty');
     setDraft(prev => {
       let nextNominal = prev.nominal;
-      if (selectedMaterial && selectedMaterial.price > 0) {
-        if (prev.nominal === 0 || lastEditedField === 'qty' || lastEditedField === null) {
-          nextNominal = Math.round(newQty * selectedMaterial.price);
-        }
+      // Only auto-fill nominal if prev.nominal is 0 (user hasn't typed a custom nominal)
+      if (selectedMaterial && selectedMaterial.price > 0 && prev.nominal === 0) {
+        nextNominal = Math.round(newQty * selectedMaterial.price);
       }
       return { ...prev, qty_beli: newQty, nominal: nextNominal };
     });
@@ -485,10 +510,9 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     setLastEditedField('nominal');
     setDraft(prev => {
       let nextQty = prev.qty_beli;
-      if (selectedMaterial && selectedMaterial.price > 0) {
-        if (prev.qty_beli === 0 || lastEditedField === 'nominal' || lastEditedField === null) {
-          nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
-        }
+      // Only auto-fill qty if prev.qty_beli is 0 (user hasn't typed a custom qty)
+      if (selectedMaterial && selectedMaterial.price > 0 && prev.qty_beli === 0) {
+        nextQty = Math.round((newNominal / selectedMaterial.price) * 100) / 100;
       }
       return { ...prev, nominal: newNominal, qty_beli: nextQty };
     });
@@ -895,9 +919,22 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
               />
               {selectedMaterial && selectedMaterial.price > 0 && (
-                <p className="text-[10px] text-gray-500 pl-1 font-medium">
-                  Acuan DB: Rp{selectedMaterial.price.toLocaleString('id-ID')}/{selectedMaterial.unit}
-                </p>
+                <div className="flex items-center justify-between text-[10px] text-gray-500 pl-1 font-medium">
+                  <span>Acuan DB: Rp{selectedMaterial.price.toLocaleString('id-ID')}/{selectedMaterial.unit}</span>
+                  {draft.nominal > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const autoQty = Math.round((draft.nominal / selectedMaterial.price) * 100) / 100;
+                        setDraft(prev => ({ ...prev, qty_beli: autoQty }));
+                        toast.info(`Qty disesuaikan ke ${autoQty} ${selectedMaterial.unit}`);
+                      }}
+                      className="text-orange-600 hover:text-orange-800 font-bold underline cursor-pointer"
+                    >
+                      Hitung Qty dari DB
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -927,11 +964,32 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
               placeholder="0"
               className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
             />
-            {draft.nominal > 0 && (
-              <p className="text-[10px] text-gray-500 pl-1 font-medium">
-                {formatCurrency(draft.nominal, true)}
-                {selectedMaterial && draft.qty_beli > 0 && ` (${draft.qty_beli} ${selectedMaterial.unit} × Rp${(draft.nominal / draft.qty_beli).toLocaleString('id-ID')}/${selectedMaterial.unit})`}
-              </p>
+            {selectedMaterial && selectedMaterial.price > 0 ? (
+              <div className="flex items-center justify-between text-[10px] text-gray-500 pl-1 font-medium">
+                <span>
+                  {draft.nominal > 0 ? formatCurrency(draft.nominal, true) : '—'}
+                  {draft.qty_beli > 0 && draft.nominal > 0 && ` (${draft.qty_beli} ${selectedMaterial.unit} × Rp${Math.round(draft.nominal / draft.qty_beli).toLocaleString('id-ID')}/${selectedMaterial.unit})`}
+                </span>
+                {draft.qty_beli > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const autoNominal = Math.round(draft.qty_beli * selectedMaterial.price);
+                      setDraft(prev => ({ ...prev, nominal: autoNominal }));
+                      toast.info(`Nominal disesuaikan ke ${formatCurrency(autoNominal, true)}`);
+                    }}
+                    className="text-orange-600 hover:text-orange-800 font-bold underline cursor-pointer"
+                  >
+                    Hitung Nominal dari DB
+                  </button>
+                )}
+              </div>
+            ) : (
+              draft.nominal > 0 && (
+                <p className="text-[10px] text-gray-500 pl-1 font-medium">
+                  {formatCurrency(draft.nominal, true)}
+                </p>
+              )
             )}
           </div>
 
@@ -1089,7 +1147,11 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
           // If f.materialId wasn't returned by AI, check if description matches any ingredient in DB
           if (!matId && isPengeluaran && ingredients.length > 0) {
             const ketLower = (f.keterangan || '').toLowerCase();
-            const matchedIng = ingredients.find(ing => ketLower.includes(ing.name.toLowerCase()));
+            const ketExpanded = expandAliases(ketLower);
+            const matchedIng = ingredients.find(ing => {
+              const ingName = ing.name.toLowerCase();
+              return ketLower.includes(ingName) || ketExpanded.includes(ingName);
+            });
             if (matchedIng) matId = matchedIng.id;
           }
 
