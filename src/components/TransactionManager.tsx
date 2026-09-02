@@ -314,8 +314,8 @@ export default function TransactionManager({ user, transactions, setTransactions
             const calcPrice = Math.round(nominal / delta);
             if (calcPrice > 0 && Math.abs(calcPrice - (material.price || 0)) > 0.01) {
               try {
-                const ingRef = doc(db, `users/${user.uid}/ingredients/${material.id}`);
-                await updateDoc(ingRef, { price: calcPrice });
+                const ingRef = doc(db, `users/${user.uid}/stok/${material.id}`);
+                await setDoc(ingRef, { price: calcPrice }, { merge: true });
                 setIngredients(prev => prev.map(i => i.id === material.id ? { ...i, price: calcPrice } : i));
                 toast.info(`Harga acuan "${material.name}" di database otomatis diperbarui ke Rp ${formatCurrency(calcPrice, true)}/${material.unit}`);
               } catch (err) {

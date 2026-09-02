@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 import { User } from 'firebase/auth';
-import { doc, updateDoc, db } from '../lib/firebase';
+import { doc, updateDoc, setDoc, db } from '../lib/firebase';
 import { toast } from 'sonner';
 
 export type QuickEntryFields = {
@@ -1147,8 +1147,8 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     }
     if (user) {
       try {
-        const ingRef = doc(db, `users/${user.uid}/ingredients/${ingredientId}`);
-        await updateDoc(ingRef, { price: newPrice });
+        const ingRef = doc(db, `users/${user.uid}/stok/${ingredientId}`);
+        await setDoc(ingRef, { price: newPrice }, { merge: true });
         toast.success(`Harga acuan di database berhasil diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
       } catch (err) {
         console.error("Gagal update harga ingredient:", err);
