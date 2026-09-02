@@ -1274,36 +1274,70 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
             if (!hasDiscrepancy || !selectedMaterial) return null;
 
+            const isUpdateDb = draft.saveToDatabase !== false; // Default true unless user chose "Jangan Update"
+
             return (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2 text-xs">
                 <div className="flex items-start gap-2 text-amber-900">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="font-bold">Harga Kustom Dideteksi (Auto-Update DB)</p>
+                    <p className="font-bold">Harga Kustom Dideteksi</p>
                     <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
                       Harga transaksi kustom: <span className="font-bold text-amber-950">Rp {formatCurrency(calcUnitPrice, true)}/{selectedMaterial.unit}</span> ({formatCurrency(draft.nominal, true)} ÷ {draft.qty_beli} {selectedMaterial.unit})
                       <br />
                       Acuan DB saat ini: <span className="font-bold text-amber-950">Rp {formatCurrency(selectedMaterial.price, true)}/{selectedMaterial.unit}</span>
-                      <br />
-                      <span className="text-[10px] text-emerald-700 font-bold mt-1 block">
-                        ✓ Harga acuan di database akan otomatis diperbarui ke Rp {formatCurrency(calcUnitPrice, true)} saat disimpan.
-                      </span>
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200/60">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      if (onUpdateIngredientPrice) {
-                        onUpdateIngredientPrice(selectedMaterial.id, calcUnitPrice);
-                      }
-                    }}
-                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] h-7 px-3 rounded-lg flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Update DB Sekarang
-                  </Button>
+
+                <div className="space-y-1.5 pt-1.5 border-t border-amber-200/80">
+                  <p className="text-[10px] font-bold text-amber-900 uppercase tracking-wider">Opsi Perubahan Database:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(prev => ({ ...prev, saveToDatabase: true }));
+                        if (onUpdateIngredientPrice) {
+                          onUpdateIngredientPrice(selectedMaterial.id, calcUnitPrice);
+                        }
+                        toast.success("Set ke: Update harga acuan di Database");
+                      }}
+                      className={cn(
+                        "px-2.5 py-2 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
+                        isUpdateDb
+                          ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-300 font-bold"
+                          : "bg-white text-gray-700 border-amber-200 hover:bg-amber-100"
+                      )}
+                    >
+                      <div className="text-[11px] font-black flex items-center gap-1">
+                        {isUpdateDb && <Check className="w-3 h-3" />} 1. Update ke DB
+                      </div>
+                      <div className={cn("text-[9px]", isUpdateDb ? "text-amber-100" : "text-gray-400")}>
+                        Perbarui acuan DB ke Rp {formatCurrency(calcUnitPrice, true)}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(prev => ({ ...prev, saveToDatabase: false }));
+                        toast.info("Set ke: Jangan update acuan Database");
+                      }}
+                      className={cn(
+                        "px-2.5 py-2 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
+                        !isUpdateDb
+                          ? "bg-slate-800 text-white border-slate-900 ring-2 ring-slate-400 font-bold"
+                          : "bg-white text-gray-700 border-amber-200 hover:bg-slate-100"
+                      )}
+                    >
+                      <div className="text-[11px] font-black flex items-center gap-1">
+                        {!isUpdateDb && <Check className="w-3 h-3" />} 2. Jangan Update
+                      </div>
+                      <div className={cn("text-[9px]", !isUpdateDb ? "text-slate-300" : "text-gray-400")}>
+                        Hanya transaksi biasa (DB tak berubah)
+                      </div>
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -1577,6 +1611,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
 
     entries.forEach(e => {
       if (e.parsed.jenis === 'Pengeluaran' && e.parsed.materialId && e.parsed.qty_beli > 0 && e.parsed.nominal > 0) {
+        if (e.parsed.saveToDatabase === false) return; // User explicitly selected "Jangan Update"
         const ing = ingredients.find(i => i.id === e.parsed.materialId);
         if (ing) {
           const calcPrice = Math.round(e.parsed.nominal / e.parsed.qty_beli);
