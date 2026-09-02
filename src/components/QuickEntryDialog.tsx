@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank, AlertCircle, RefreshCw as UpdateIcon, Sparkles } from 'lucide-react';
+import { Loader2, CheckCircle2, RefreshCw, Zap, X, Calendar, Check, Pencil, Package, Wallet, PiggyBank, AlertCircle, RefreshCw as UpdateIcon, Sparkles, PlusCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
@@ -164,8 +164,8 @@ function formatDateDisplay(dateStr: string): string {
 
 // ─── Keyword Maps ─────────────────────────────────────────────────────────────
 
-const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold'];
-const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin'];
+const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold', 'laku', 'omset', 'dapat', 'pesanan', 'catering', 'terjual', 'pendapatan', 'pemasukan'];
+const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin', 'kulak', 'kulakan', 'restock', 'belanja', 'nota', 'ongkir', 'transport', 'gaji', 'listrik', 'sewa', 'pengeluaran'];
 
 const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; kategori: string }> = {
   gaji: { jenis: 'Pengeluaran', kategori: 'Gaji' },
@@ -195,10 +195,29 @@ function resolveCategory(
   categories: { name: string; type: 'Pemasukan' | 'Pengeluaran' }[],
 ): string {
   const valid = categories.filter(c => c.type === jenis).map(c => c.name);
+  if (valid.length === 0) return kandidat || 'Lainnya';
   if (valid.includes(kandidat)) return kandidat;
   const ci = valid.find(v => v.toLowerCase() === kandidat.toLowerCase());
   if (ci) return ci;
-  return 'Lainnya';
+
+  const partial = valid.find(v =>
+    v.toLowerCase().includes(kandidat.toLowerCase()) ||
+    kandidat.toLowerCase().includes(v.toLowerCase())
+  );
+  if (partial) return partial;
+
+  if (jenis === 'Pemasukan') {
+    const salesCat = valid.find(v =>
+      v.toLowerCase().includes('jual') ||
+      v.toLowerCase().includes('masuk') ||
+      v.toLowerCase().includes('omset')
+    );
+    if (salesCat) return salesCat;
+    return valid[0] || 'Penjualan';
+  }
+
+  if (valid.includes('Lainnya')) return 'Lainnya';
+  return valid[0] || 'Lainnya';
 }
 
 // ─── Common UMKM Aliases ───────────────────────────────────────────────────────
@@ -428,8 +447,8 @@ function parseLine(
         keterangan = prod.nama + varLabel;
       }
     } else {
-      // No matching product → fallback, keep keterangan as typed
-      kategori = 'Lainnya';
+      // No matching product in DB → keep Pemasukan category resolved
+      kategori = resolveCategory('Penjualan', 'Pemasukan', categories);
     }
   }
 
@@ -474,6 +493,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   const [draft, setDraft] = React.useState<QuickEntryFields>(fields);
   const [materialSearch, setMaterialSearch] = React.useState('');
   const [lastEditedField, setLastEditedField] = React.useState<'qty' | 'nominal' | null>(null);
+  const [isCustomCategory, setIsCustomCategory] = React.useState(false);
 
   const dateRef = React.useRef<HTMLInputElement>(null);
   const jenisRef = React.useRef<HTMLButtonElement>(null);
@@ -630,7 +650,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     : filteredIngredients;
 
   const validCategories = categories.filter(c => c.type === draft.jenis);
-  const isPenjualan = draft.kategori === 'Penjualan';
+  const isPenjualan = draft.jenis === 'Pemasukan' || draft.kategori === 'Penjualan' || draft.kategori.toLowerCase().includes('penjualan') || draft.kategori.toLowerCase().includes('jual');
 
   // ── View mode ──────────────────────────────────────────────────────────────
   if (!editing) {
@@ -761,21 +781,47 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
           </div>
         </div>
         <div className="space-y-1">
-          <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Kategori</label>
-          <select
-            ref={kategoriRef}
-            value={draft.kategori}
-            onChange={e => setDraft(prev => ({
-              ...prev,
-              kategori: e.target.value,
-              penjualan_detail: e.target.value !== 'Penjualan' ? [] : prev.penjualan_detail,
-              materialId: undefined,
-            }))}
-            className="w-full h-8 rounded-xl border border-gray-200 px-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
-          >
-            {validCategories.map(cat => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
-            {!validCategories.some(c => c.name === 'Lainnya') && <option value="Lainnya">Lainnya</option>}
-          </select>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Kategori</label>
+            <button
+              type="button"
+              onClick={() => setIsCustomCategory(!isCustomCategory)}
+              className="text-[9px] font-bold text-orange-600 hover:text-orange-800 bg-orange-50 hover:bg-orange-100 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+            >
+              {isCustomCategory ? '← List Preset' : '+ Custom'}
+            </button>
+          </div>
+          {isCustomCategory ? (
+            <input
+              type="text"
+              value={draft.kategori}
+              onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value }))}
+              placeholder="Nama kategori custom..."
+              className="w-full h-8 rounded-xl border border-orange-300 px-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-300 bg-orange-50/60"
+            />
+          ) : (
+            <select
+              ref={kategoriRef}
+              value={validCategories.some(c => c.name === draft.kategori) || draft.kategori === 'Lainnya' ? draft.kategori : '__custom__'}
+              onChange={e => {
+                if (e.target.value === '__custom__') {
+                  setIsCustomCategory(true);
+                } else {
+                  setDraft(prev => ({
+                    ...prev,
+                    kategori: e.target.value,
+                    penjualan_detail: e.target.value !== 'Penjualan' && !e.target.value.toLowerCase().includes('jual') ? [] : prev.penjualan_detail,
+                    materialId: undefined,
+                  }));
+                }
+              }}
+              className="w-full h-8 rounded-xl border border-gray-200 px-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50 appearance-none cursor-pointer"
+            >
+              {validCategories.map(cat => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
+              {!validCategories.some(c => c.name === 'Lainnya') && <option value="Lainnya">Lainnya</option>}
+              <option value="__custom__">✏️ + Custom (Input Nama Kategori)...</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -1217,6 +1263,24 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     }
     setEntries(valid);
     setStep('preview');
+  };
+
+  const handleAddCustomEntry = () => {
+    const defaultCat = categories.find(c => c.type === 'Pengeluaran')?.name || 'Belanja Bahan Baku';
+    const newEntry: QuickEntryFields = {
+      tanggal: todayStr(),
+      tanggal_akhir: null,
+      jenis: 'Pengeluaran',
+      kategori: defaultCat,
+      keterangan: 'Transaksi Custom Baru',
+      nominal: 0,
+      qty_beli: 1,
+      qty_total: 1,
+      materialId: undefined,
+    };
+    setEntries(prev => [...prev, { raw: 'Input Custom Manual', parsed: newEntry }]);
+    setStep('preview');
+    toast.success('Draf transaksi custom ditambahkan! Anda dapat mengedit harga, qty, dan kategori langsung.');
   };
 
   const removeEntry = (idx: number) => {
