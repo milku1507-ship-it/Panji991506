@@ -613,23 +613,38 @@ function AppContent() {
   const handleResetData = async () => {
     if (user) {
       try {
-        const batch = writeBatch(db);
-        
-        // Delete all data for user
-        ingredients.forEach(ing => batch.delete(doc(db, `users/${user.uid}/stok/${ing.id}`)));
-        products.forEach(p => batch.delete(doc(db, `users/${user.uid}/hpp/${p.id}`)));
-        transactions.forEach(t => batch.delete(doc(db, `users/${user.uid}/transaksi/${t.id}`)));
-        
+        const uid = user.uid;
+        // Delete all data in batches of max 400 operations
+        const docsToDelete: Array<{ path: string }> = [
+          ...ingredients.map(ing => ({ path: `users/${uid}/stok/${ing.id}` })),
+          ...products.map(p => ({ path: `users/${uid}/hpp/${p.id}` })),
+          ...transactions.map(t => ({ path: `users/${uid}/transaksi/${t.id}` })),
+          ...dompets.map(d => ({ path: `users/${uid}/dompet/${d.id}` }))
+        ];
+
+        // Process in chunks of 450
+        for (let i = 0; i < docsToDelete.length; i += 450) {
+          const chunk = docsToDelete.slice(i, i + 450);
+          const batch = writeBatch(db);
+          chunk.forEach(item => batch.delete(doc(db, item.path)));
+          await batch.commit();
+        }
+
         // Keep settings but mark as onboarding completed to prevent re-seeding
-        batch.set(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData({
+        await setDoc(doc(db, `users/${uid}/profil_toko/settings`), sanitizeData({
           ...storeSettings,
           onboardingCompleted: true
         }));
 
-        await batch.commit();
-        toast.success('Semua data cloud berhasil dikosongkan.');
+        setIngredients([]);
+        setProducts([]);
+        setTransactions([]);
+        setDompets([]);
+
+        toast.success('Semua data cloud berhasil dikosongkan secara permanen.');
       } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/reset`);
+        console.error('Reset error:', error);
+        toast.error('Gagal mengosongkan data cloud.');
       }
       return;
     }
@@ -639,6 +654,7 @@ function AppContent() {
     setIngredients([]);
     setProducts([]);
     setTransactions([]);
+    setDompets([]);
     toast.success('Data berhasil dikosongkan.');
   };
 
