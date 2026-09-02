@@ -59,12 +59,20 @@ export default function ApiKeyDialog({ open, onOpenChange, user }: Props) {
         },
         body: JSON.stringify({ apiKey: apiKey.trim() }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = null;
+      }
+
+      if (res.ok && data?.success) {
         setTestResult({ success: true, message: 'Koneksi AI Gemini Berhasil! API Key valid dan siap digunakan.' });
         toast.success('API Key valid!');
       } else {
-        setTestResult({ success: false, message: data.message || 'API Key tidak terhubung. Periksa kembali kunci Anda.' });
+        setTestResult({ success: false, message: data?.message || `Gagal terhubung (${res.status}). Periksa kembali API Key Anda.` });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err?.message || 'Gagal menghubungi server.' });

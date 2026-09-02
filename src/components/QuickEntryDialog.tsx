@@ -1068,8 +1068,15 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.transactions && data.transactions.length > 0) {
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = null;
+      }
+
+      if (res.ok && data?.transactions && data.transactions.length > 0) {
         const parsedResults: { raw: string; parsed: QuickEntryFields }[] = [];
 
         for (const item of data.transactions) {
