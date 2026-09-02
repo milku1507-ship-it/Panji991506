@@ -1,3 +1,4 @@
+import { runAIParse } from '../lib/aiParseShared';
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -1547,33 +1548,17 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
     setIsAiParsing(true);
     try {
       const customApiKey = localStorage.getItem('gemini_api_key') || undefined;
-      const res = await fetch('/api/ai-parse', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(customApiKey ? { 'x-gemini-api-key': customApiKey } : {}),
-        },
-        body: JSON.stringify({
-          userMessage: input,
-          products,
-          ingredients,
-          categories,
-          hppCategories,
-          today: todayStr(),
-          customApiKey,
-        }),
+      const data = await runAIParse({
+        customApiKey,
+        userMessage: input,
+        products,
+        ingredients,
+        categories,
+        hppCategories,
+        today: todayStr(),
       });
 
-      let data: any = null;
-      try {
-        const text = await res.text();
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = null;
-      }
-
-      if (res.ok && data?.transactions && data.transactions.length > 0) {
+      if (data?.transactions && data.transactions.length > 0) {
         const parsedResults: { raw: string; parsed: QuickEntryFields }[] = [];
 
         for (const item of data.transactions) {

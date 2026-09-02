@@ -1,3 +1,4 @@
+import { runAIParse } from '../lib/aiParseShared';
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -110,20 +111,17 @@ export default function TransactionAIChat({ open, onOpenChange, products, catego
     setPending(null);
 
     try {
-      const res = await fetch('/api/ai-parse', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          history: messages,
-          userMessage: text,
-          products,
-          categories,
-          currentForm,
-          today: new Date().toISOString().split('T')[0],
-        }),
-      });
-      const data: ParseResult & { error?: string } = await res.json();
+      const customApiKey = localStorage.getItem('gemini_api_key') || undefined;
+      const data = (await runAIParse({
+        customApiKey,
+        history: messages,
+        userMessage: text,
+        products,
+        categories,
+        currentForm,
+        today: new Date().toISOString().split('T')[0],
+      })) as ParseResult & { error?: string };
+      const res = { ok: true }; // mock res for compatibility
 
       if (!res.ok || data.error) {
         setMessages((m) => [...m, { role: 'assistant', content: `Maaf, terjadi kendala: ${data.error || 'gagal memproses'}.` }]);
