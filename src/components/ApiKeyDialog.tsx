@@ -53,10 +53,31 @@ export default function ApiKeyDialog({ open, onOpenChange, user }: Props) {
 
     try {
       const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
-      await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
-      });
+      const testModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      let lastErr: any = null;
+      let success = false;
+
+      for (const model of testModels) {
+        try {
+          await ai.models.generateContent({
+            model,
+            contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
+          });
+          success = true;
+          break;
+        } catch (mErr: any) {
+          lastErr = mErr;
+          const msg = mErr?.message || String(mErr);
+          if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+            throw new Error('API Key tidak valid. Pastikan Anda menyalin API Key dari Google AI Studio dengan benar.');
+          }
+        }
+      }
+
+      if (!success) {
+        throw lastErr || new Error('Gagal menghubungi server Gemini AI.');
+      }
+
       setTestResult({ success: true, message: 'Koneksi AI Gemini Berhasil! API Key valid dan siap digunakan.' });
       toast.success('API Key valid!');
     } catch (err: any) {

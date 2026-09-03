@@ -55,10 +55,29 @@ async function startServer() {
         httpOptions: baseUrl ? { apiVersion: '', baseUrl } : undefined,
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
-      });
+      const testModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      let response: any = null;
+      let lastErr: any = null;
+
+      for (const model of testModels) {
+        try {
+          response = await ai.models.generateContent({
+            model,
+            contents: 'Tolong konfirmasi koneksi API key dengan membalas "OK".',
+          });
+          if (response) break;
+        } catch (mErr: any) {
+          lastErr = mErr;
+          const msg = mErr?.message || String(mErr);
+          if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+            throw new Error('API Key tidak valid.');
+          }
+        }
+      }
+
+      if (!response) {
+        throw lastErr || new Error('Gagal menghubungi server Gemini AI.');
+      }
 
       res.json({ success: true, message: 'Koneksi ke Gemini AI berhasil!', text: response.text });
     } catch (err: any) {

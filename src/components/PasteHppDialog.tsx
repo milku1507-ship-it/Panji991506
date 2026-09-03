@@ -114,7 +114,25 @@ export default function PasteHppDialog({
       setStep('preview');
     } catch (e: any) {
       console.error('[PasteHppDialog] parse error:', e);
-      toast.error(e?.message || 'Gagal mem-parse teks HPP');
+      let errMsg = e?.message || 'Gagal mem-parse teks HPP';
+      try {
+        if (typeof errMsg === 'string' && errMsg.includes('{') && errMsg.includes('}')) {
+          const jsonMatch = errMsg.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsedErr = JSON.parse(jsonMatch[0]);
+            if (parsedErr?.error?.message) {
+              if (parsedErr.error.code === 503 || parsedErr.error.status === 'UNAVAILABLE') {
+                errMsg = 'Server Google AI sedang padat (503). Silakan tekan tombol "Parse dengan AI" sekali lagi.';
+              } else {
+                errMsg = parsedErr.error.message;
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+      toast.error(errMsg);
     } finally {
       setIsParsing(false);
     }

@@ -80,14 +80,20 @@ export const hppResponseSchema = {
   required: ['variant', 'bahan'],
 };
 
+const FALLBACK_MODELS = [
+  'gemini-3.7-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+];
+
 export async function runParseHpp(body: any) {
-  const { customApiKey, rawText, kategoriHpp = [], existingIngredients = [] } = body || {}; const apiKey = customApiKey || (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_GEMINI_API_KEY : undefined);
+  const { customApiKey, rawText, kategoriHpp = [], existingIngredients = [] } = body || {};
+  const apiKey = customApiKey || (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_GEMINI_API_KEY : undefined);
   const baseUrl = undefined;
   if (!apiKey) {
     throw new Error('Gemini API Key belum dikonfigurasi. Masukkan API Key Anda di menu Pengaturan API Key AI.');
   }
-
-  
 
   if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
     throw new Error('Teks HPP tidak boleh kosong.');
@@ -128,15 +134,49 @@ Tolong parse menjadi JSON sesuai schema.`,
     },
   ];
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.7-flash',
-    contents,
-    config: {
-      systemInstruction: HPP_SYSTEM_INSTRUCTION,
-      responseMimeType: 'application/json',
-      responseSchema: hppResponseSchema as any,
-    },
-  });
+  let lastError: any = null;
+  let response: any = null;
+
+  for (const model of FALLBACK_MODELS) {
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction: HPP_SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseSchema: hppResponseSchema as any,
+        },
+      });
+      if (response && response.text) {
+        break;
+      }
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      console.warn(`[runParseHpp] Model ${model} returned error: ${errMsg}. Trying fallback model...`);
+      if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
+        throw new Error('API Key tidak valid. Silakan periksa kembali API Key Google Gemini Anda.');
+      }
+    }
+  }
+
+  if (!response || !response.text) {
+    const rawMsg = lastError?.message || 'Server AI tidak merespons.';
+    let cleanMsg = rawMsg;
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error?.message) {
+        cleanMsg = parsed.error.message;
+      }
+    } catch {
+      // not JSON
+    }
+    if (cleanMsg.includes('high demand') || cleanMsg.includes('503') || cleanMsg.includes('UNAVAILABLE')) {
+      throw new Error('Server Google AI sedang mengalami antrean padat sementara (503 High Demand). Silakan tekan tombol "Parse dengan AI" kembali.');
+    }
+    throw new Error(cleanMsg);
+  }
 
   const text = response.text || '{}';
   try {
