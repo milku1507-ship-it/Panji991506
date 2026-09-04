@@ -379,13 +379,6 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
         }));
       }
 
-      const batch = writeBatch(db);
-      batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
-      stockUpdates.forEach(upd => {
-        batch.update(doc(db, `users/${user.uid}/stok/${upd.id}`), { currentStock: increment(upd.delta) });
-      });
-      await batch.commit();
-
       const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
       setReceipt({ txId, queueNumber, tanggal: today, jam, items: [...cart], subtotal, discountAmount, discountMode, discountValue, taxAmount, taxPct, nominal: total, paymentMethod, cashPaid, kembalian, customerName, customerPhone, catatan });
       setCart([]);
@@ -402,6 +395,20 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
       if (paymentMethod === 'tunai') {
         triggerCashDrawer();
       }
+
+      // Async Firestore persistence
+      (async () => {
+        try {
+          const batch = writeBatch(db);
+          batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
+          stockUpdates.forEach(upd => {
+            batch.update(doc(db, `users/${user.uid}/stok/${upd.id}`), { currentStock: increment(upd.delta) });
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error('[Kasir] Background save error:', err);
+        }
+      })();
     } catch (err) {
       console.error('[Kasir] save error:', err);
       toast.error('Gagal menyimpan transaksi');

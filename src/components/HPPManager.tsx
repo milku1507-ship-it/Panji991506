@@ -895,7 +895,11 @@ function VariantPricingInputs({
     const updatedVariant = { ...activeHppVariant, bahan: newBahan };
     setActiveHppVariant(updatedVariant);
     
-    // Save HPP immediately to fulfill "hapus sekaligus"
+    // Close modal & notify immediately
+    setIsDeleteMaterialConfirmOpen(false);
+    setMaterialToDelete(null);
+    toast.success(`Bahan "${material.nama}" berhasil dihapus dari HPP dan Stok`);
+
     const product = products.find(p => p.id === selectedProductId);
     if (product) {
       const updatedProduct = {
@@ -903,23 +907,20 @@ function VariantPricingInputs({
         varian: product.varian.map(v => v.id === activeHppVariant.id ? updatedVariant : v)
       };
       
-      try {
-        if (user) {
+      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+
+      if (user) {
+        try {
           await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
         }
-        setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
-      } catch (error) {
-        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       }
     }
     
     if (material.nama) {
       await onDeleteFromStock(material.nama);
     }
-    
-    toast.success(`Bahan "${material.nama}" berhasil dihapus dari HPP dan Stok`);
-    setIsDeleteMaterialConfirmOpen(false);
-    setMaterialToDelete(null);
   };
 
   const handleRemoveCategory = (catName: string) => {
@@ -1028,7 +1029,11 @@ function VariantPricingInputs({
     const updatedVariant = { ...activeHppVariant, bahan: newBahan };
     setActiveHppVariant(updatedVariant);
 
-    // Save HPP immediately
+    // Close modal & notify immediately
+    setIsDeleteCategoryConfirmOpen(false);
+    setCategoryToDelete(null);
+    toast.success(`Kelompok ${catName} dan semua bahannya berhasil dihapus dari HPP dan Stok`);
+
     const product = products.find(p => p.id === selectedProductId);
     if (product) {
       const updatedProduct = {
@@ -1036,13 +1041,14 @@ function VariantPricingInputs({
         varian: product.varian.map(v => v.id === activeHppVariant.id ? updatedVariant : v)
       };
       
-      try {
-        if (user) {
+      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+
+      if (user) {
+        try {
           await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
         }
-        setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
-      } catch (error) {
-        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       }
     }
 
@@ -1050,10 +1056,6 @@ function VariantPricingInputs({
     for (const m of materialsToDelete) {
       if (m.nama) await onDeleteFromStock(m.nama);
     }
-    
-    toast.success(`Kelompok ${catName} dan semua bahannya berhasil dihapus dari HPP dan Stok`);
-    setIsDeleteCategoryConfirmOpen(false);
-    setCategoryToDelete(null);
   };
 
   const handleSaveMaterial = async (e: React.FormEvent) => {
@@ -1092,6 +1094,7 @@ function VariantPricingInputs({
 
       // Update global ingredients list (Single Source of Truth)
       const existingIng = ingredients.find(i => i.id === ingredientId);
+      let updatedIngredientsLocal: Ingredient[];
       if (existingIng) {
         const updatedIng = {
           ...existingIng,
@@ -1103,35 +1106,13 @@ function VariantPricingInputs({
         };
         
         // Find all ingredients with same name (case insensitive) and sync price
-        const sameNameIngredients = ingredients.filter(
-          i => i.name.toLowerCase().trim() === nama.toLowerCase().trim() && i.id !== ingredientId
-        );
-        
-        // Update locally — main ingredient + all same-name ones
-        setIngredients(prev => prev.map(i => {
+        updatedIngredientsLocal = ingredients.map(i => {
           if (i.id === ingredientId) return updatedIng;
           if (i.name.toLowerCase().trim() === nama.toLowerCase().trim()) {
             return { ...i, price: harga, unit: satuan };
           }
           return i;
-        }));
-        
-        // Batch update Firestore
-        if (user) {
-          console.log("[HPPManager] Syncing ingredient to Firestore stock...");
-          const batch = writeBatch(db);
-          batch.set(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
-          for (const ing of sameNameIngredients) {
-            batch.set(
-              doc(db, `users/${user.uid}/stok/${ing.id}`),
-              sanitizeData({ ...ing, price: harga, unit: satuan })
-            );
-          }
-          await batch.commit();
-          if (sameNameIngredients.length > 0) {
-            console.log(`[HPPManager] Synced price to ${sameNameIngredients.length} ingredient(s) with same name.`);
-          }
-        }
+        });
       } else {
         // Create new ingredient
         const newIng: Ingredient = {
@@ -1145,13 +1126,7 @@ function VariantPricingInputs({
           minStock: 0,
           fromHpp: true
         };
-        
-        setIngredients(prev => [...prev, newIng]);
-        
-         if (user) {
-          console.log("[HPPManager] Creating new ingredient in Firestore stock...");
-          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(newIng));
-        }
+        updatedIngredientsLocal = [...ingredients, newIng];
       }
 
       const newBahan = [...activeHppVariant.bahan];
@@ -1166,18 +1141,15 @@ function VariantPricingInputs({
       };
 
       // Propagate changes to ALL other variants across ALL products that share the same bahan
-      // IMPORTANT: match by OLD name so variants that haven't been renamed yet are found correctly.
       const updatedActiveVariant = { ...activeHppVariant, bahan: newBahan };
       const oldNama = editingMaterial.material.nama.toLowerCase().trim();
       const modifiedProductIds = new Set<string>();
 
       const syncedProducts = products.map(p => {
         const updatedVarian = p.varian.map(v => {
-          // Skip the variant currently being edited (already handled above)
           if (p.id === selectedProductId && v.id === activeHppVariant.id) {
             return { ...v, bahan: newBahan };
           }
-          // Match by OLD name OR by ingredientId to catch all related entries
           const hasSameIngredient = v.bahan.some(
             b => (oldNama && b.nama.toLowerCase().trim() === oldNama) ||
                  (ingredientId && b.ingredientId === ingredientId)
@@ -1198,34 +1170,72 @@ function VariantPricingInputs({
         return { ...p, varian: updatedVarian };
       });
 
+      // Optimistic React state updates — responsive UI immediately!
+      setIngredients(updatedIngredientsLocal);
       setProducts(syncedProducts);
       setActiveHppVariant(updatedActiveVariant);
 
-      // Batch write: always save current product + all other affected products.
-      // selectedProductId was intentionally excluded from modifiedProductIds so we
-      // add it here unconditionally — without this, the edited bahan would never
-      // be persisted to Firestore when the edited variant is the only one that
-      // uses this ingredient.
-      if (user) {
-        const hppBatch = writeBatch(db);
-        const allAffectedIds = new Set([selectedProductId, ...modifiedProductIds]);
-        for (const pid of allAffectedIds) {
-          const updatedProd = syncedProducts.find(p => p.id === pid);
-          if (updatedProd) {
-            hppBatch.set(doc(db, `users/${user.uid}/hpp/${pid}`), sanitizeData(updatedProd));
-          }
-        }
-        await hppBatch.commit();
-        console.log(`[HPPManager] Saved HPP for ${allAffectedIds.size} product(s) (current + ${modifiedProductIds.size} others).`);
-      }
-
+      // Close modal immediately so UI doesn't hang on slow network connections
       setIsMaterialModalOpen(false);
       setEditingMaterial(null);
+
       const syncCount = modifiedProductIds.size;
       toast.success(syncCount > 0
         ? `Bahan diperbarui & disinkronkan ke ${syncCount} produk lain ✓`
         : 'Bahan diperbarui & Stok disinkronkan ✓'
       );
+
+      // Async Firestore persistence using a single write batch
+      if (user) {
+        (async () => {
+          try {
+            const batch = writeBatch(db);
+
+            // Stock collection updates
+            if (existingIng) {
+              const updatedIng = { ...existingIng, name: nama, category: kelompok, price: harga, unit: satuan, fromHpp: true };
+              batch.set(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
+              const sameNameIngredients = ingredients.filter(
+                i => i.name.toLowerCase().trim() === nama.toLowerCase().trim() && i.id !== ingredientId
+              );
+              for (const ing of sameNameIngredients) {
+                batch.set(
+                  doc(db, `users/${user.uid}/stok/${ing.id}`),
+                  sanitizeData({ ...ing, price: harga, unit: satuan })
+                );
+              }
+            } else {
+              const newIng: Ingredient = {
+                id: ingredientId,
+                name: nama,
+                category: kelompok,
+                unit: satuan,
+                price: harga,
+                initialStock: 0,
+                currentStock: 0,
+                minStock: 0,
+                fromHpp: true
+              };
+              batch.set(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(newIng));
+            }
+
+            // HPP products collection updates
+            const allAffectedIds = new Set([selectedProductId, ...modifiedProductIds]);
+            for (const pid of allAffectedIds) {
+              const updatedProd = syncedProducts.find(p => p.id === pid);
+              if (updatedProd) {
+                batch.set(doc(db, `users/${user.uid}/hpp/${pid}`), sanitizeData(updatedProd));
+              }
+            }
+
+            await batch.commit();
+            console.log(`[HPPManager] Saved HPP & Stock in single batch for ${allAffectedIds.size} product(s).`);
+          } catch (err) {
+            console.error('[HPPManager] Background batch write error:', err);
+            handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/hpp`);
+          }
+        })();
+      }
       console.log("[HPPManager] handleSaveMaterial finished successfully.");
     } catch (error) {
       console.error("[HPPManager] Error in handleSaveMaterial:", error);
