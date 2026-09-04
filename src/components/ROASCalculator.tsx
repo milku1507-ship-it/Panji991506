@@ -2286,9 +2286,9 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
               {/* Single Varian Mode */}
               {adMode === 'variant' && v1Variant && (() => {
                 const feeConf = extractFeeRates(v1Product!, v1Variant);
-                const feePct = usePromoEvent ? v1TotalFeePct : feeConf.percentRate;
+                const feePct = feeConf.percentRate;
                 const feeNominalUnit = feeConf.nominalPerUnit;
-                const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                const feeNominalOrder = feeConf.nominalPerOrder;
                 const prices = calcReversePrice(v1HppPcs, v1MinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
 
                 return (
@@ -2403,9 +2403,9 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                 const vMinOrder = Math.max(1, Number(v.min_order) || 1);
                 const hppPcs = calcHppPerPcs(v, ingredients);
                 const feeConf = extractFeeRates(v2Product, v);
-                const feePct = usePromoEvent ? (feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen) : feeConf.percentRate;
+                const feePct = feeConf.percentRate;
                 const feeNominalUnit = feeConf.nominalPerUnit;
-                const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                const feeNominalOrder = feeConf.nominalPerOrder;
                 const prices = calcReversePrice(hppPcs, vMinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
 
                 return (
@@ -2521,9 +2521,9 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                   const pMinOrder = Math.max(1, Number(v.min_order) || 1);
                   const hppPcs = calcHppPerPcs(v, ingredients);
                   const feeConf = extractFeeRates(p, v);
-                  const feePct = usePromoEvent ? (feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen) : feeConf.percentRate;
+                  const feePct = feeConf.percentRate;
                   const feeNominalUnit = feeConf.nominalPerUnit;
-                  const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                  const feeNominalOrder = feeConf.nominalPerOrder;
                   const prices = calcReversePrice(hppPcs, pMinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
 
                   return (
