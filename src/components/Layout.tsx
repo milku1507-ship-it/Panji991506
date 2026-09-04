@@ -284,8 +284,8 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
           )}
         </AnimatePresence>
 
-        <main className={cn("flex-1", fullBleed ? "overflow-hidden" : "p-4 md:p-8 pb-32 md:pb-8")}>
-          <div className={cn(fullBleed ? "h-full" : "max-w-4xl mx-auto")}>
+        <main className={cn("flex-1", fullBleed ? "overflow-hidden" : "p-2 sm:p-4 md:p-8 pb-32 md:pb-8")}>
+          <div className={cn(fullBleed ? "h-full" : activeTab === 'roas' ? "max-w-6xl mx-auto w-full" : "max-w-4xl mx-auto")}>
             {children}
           </div>
         </main>

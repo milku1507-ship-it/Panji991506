@@ -1783,9 +1783,9 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-6 pb-36">
+    <div className="w-full max-w-6xl mx-auto px-2 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6 pb-36">
       {/* HEADER & TABS MODE */}
-      <div className="flex flex-col gap-5 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+      <div className="flex flex-col gap-4 sm:gap-5 bg-white p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xs border border-gray-100">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">Kalkulator ROAS & Harga</h1>
           <p className="text-gray-500 text-sm mt-1">Hitung target ROAS iklan dan rekomendasi harga jual berdasarkan unit economics.</p>
@@ -2255,299 +2255,360 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
           </div>
         </div>
       ) : (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 border-b border-gray-100 pb-5">
-              <h3 className="font-black text-gray-900 text-lg flex items-center gap-2">
-                <Tag className="w-5 h-5 text-emerald-600" /> Hitung Rekomendasi Harga Jual
-              </h3>
-              <div className="flex items-center gap-3 bg-emerald-50 p-2 pl-4 rounded-2xl border border-emerald-100">
-                <Label className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Target ROAS Iklan (x)</Label>
-                <div className="flex items-center gap-1">
-                  <Input 
-                    type="number" 
-                    step="0.1" 
-                    min="1"
-                    value={targetRoasInput} 
-                    onChange={e => setTargetRoasInput(Math.max(1, Number(e.target.value) || 1))} 
-                    className="w-24 h-10 rounded-xl font-black text-emerald-900 border-emerald-200 text-center text-lg bg-white" 
-                  />
-                </div>
+        <div className="space-y-4 sm:space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-white p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 space-y-4 sm:space-y-5">
+            
+            {/* TARGET ROAS INPUT HEADER - MATCHES ATTACHED DESIGN */}
+            <div className="bg-emerald-950/90 border border-emerald-900/80 p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-3 shadow-sm">
+              <div className="space-y-0.5">
+                <Label className="text-emerald-400 font-bold text-sm sm:text-base tracking-wide block">
+                  Target roas iklan (x)
+                </Label>
+                <p className="text-[11px] text-emerald-500/80 hidden sm:block">
+                  Masukkan target ROAS untuk menghitung rekomendasi harga jual
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Input 
+                  type="number" 
+                  step="0.1" 
+                  min="1"
+                  value={targetRoasInput} 
+                  onChange={e => setTargetRoasInput(Math.max(1, Number(e.target.value) || 1))} 
+                  className="w-20 sm:w-24 h-11 rounded-xl font-black text-white text-center text-lg sm:text-xl bg-neutral-900 border-neutral-700 focus:border-emerald-500 focus:ring-emerald-500/20" 
+                />
               </div>
             </div>
 
-            <div className="overflow-hidden border border-gray-200 rounded-2xl shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap md:whitespace-normal">
-                  <thead className="bg-gray-50 text-gray-600 font-black border-b border-gray-200 uppercase text-[10px] tracking-wider">
-                    <tr>
-                      <th className="p-4">SKU / Varian</th>
-                      <th className="p-4 hidden md:table-cell">Struktur Biaya Dasar</th>
-                      <th className="p-4">Harga BEP (1.0x)</th>
-                      <th className="p-4 text-amber-700">Harga Min (1.5x)</th>
-                      <th className="p-4 text-emerald-700">Harga Ideal (2.0x)</th>
-                      <th className="p-4 text-indigo-700">Harga Set ROAS (2.5x)</th>
-                      <th className="p-4 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
-                    
-                    {adMode === 'variant' && v1Variant && (() => {
-                      const feeConf = extractFeeRates(v1Product!, v1Variant);
-                      const prices = calcReversePrice(v1HppPcs, v1MinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
-                      return (
-                        <tr className="hover:bg-gray-50 transition-colors">
-                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
-                            {v1Variant.nama}
-                            {v1MinOrder > 1 && (
-                              <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
-                                Min. Order: {v1MinOrder} pcs
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4 hidden md:table-cell">
-                            <div className="text-xs">
-                              <span className="text-gray-500">HPP:</span>{' '}
-                              <span className="font-bold">
-                                {formatCurrency(prices.hppOrder)}
-                                {v1MinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({v1MinOrder} pcs @ {formatCurrency(v1HppPcs)})</span>}
-                              </span>
-                              <br/>
-                              <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
-                              <span className="font-bold">
-                                {usePromoEvent ? `${v1TotalFeePct}% + ${formatCurrency(prices.feeNominalOrder + (usePromoEvent ? promoDiskonNominal : 0))}` : `${v1FeePct}% + ${formatCurrency(prices.feeNominalOrder)}`}
-                              </span>
-                              {usePromoEvent && (
-                                <div className="text-[10px] text-amber-700 font-semibold">(MP: {v1FeePct}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-4 font-bold text-gray-600">
-                            {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
-                            {v1MinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
-                            )}
-                          </td>
-                          <td className="p-4 font-black text-amber-600 text-base">
-                            {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
-                            {v1MinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
-                            )}
-                          </td>
-                          <td className="p-4 font-black text-emerald-600 text-base">
-                            {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
-                            {v1MinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
-                            )}
-                            <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
-                              Margin Order: {formatCurrency(prices.marginIdealOrder)}
-                              {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
-                            </div>
-                          </td>
-                          <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
-                            {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
-                            {v1MinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
-                            )}
-                            <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
-                              Margin Order: {formatCurrency(prices.marginSetOrder)}
-                              {v1MinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
-                            </div>
-                          </td>
-                          <td className="p-4 text-center">
-                            <div className="flex flex-col gap-1.5">
-                              <Button 
-                                onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                              >
-                                Terapkan 2.0x
-                              </Button>
-                              <Button 
-                                onClick={() => setConfirmModalData({product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsSet)})} 
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                              >
-                                Terapkan 2.5x
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })()}
+            {/* LIST CARDS PER SKU / VARIAN (ZERO HORIZONTAL SCROLL) */}
+            <div className="space-y-4">
+              {/* Single Varian Mode */}
+              {adMode === 'variant' && v1Variant && (() => {
+                const feeConf = extractFeeRates(v1Product!, v1Variant);
+                const feePct = usePromoEvent ? v1TotalFeePct : feeConf.percentRate;
+                const feeNominalUnit = feeConf.nominalPerUnit;
+                const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                const prices = calcReversePrice(v1HppPcs, v1MinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
 
-                    {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
-                      const vMinOrder = Math.max(1, Number(v.min_order) || 1);
-                      const hppPcs = calcHppPerPcs(v, ingredients);
-                      const feeConf = extractFeeRates(v2Product, v);
-                      const prices = calcReversePrice(hppPcs, vMinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
-                      return (
-                        <tr key={v.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
+                return (
+                  <div key={v1Variant.id} className="bg-[#18181b] border border-neutral-800 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md w-full text-white">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        {v1Product && (
+                          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-0.5">
+                            {v1Product.nama}
+                          </span>
+                        )}
+                        <h4 className="text-base sm:text-lg font-black text-white tracking-tight">
+                          {v1Variant.nama}
+                        </h4>
+                      </div>
+                      <span className="bg-blue-950/90 text-blue-400 border border-blue-800/60 px-3 py-1 rounded-full text-xs font-bold shrink-0">
+                        Min. order {v1MinOrder} pcs
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                          <div className="text-right">
+                            <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
+                            <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        {v1MinOrder > 1 && (
+                          <p className="text-[11px] font-medium text-neutral-400">Order: {formatCurrency(prices.hargaOrderBep)}</p>
+                        )}
+                      </div>
+
+                      <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                          <div className="text-right">
+                            <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
+                            <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        {v1MinOrder > 1 && (
+                          <p className="text-[11px] font-medium text-amber-500/90">Order: {formatCurrency(prices.hargaOrderMin)}</p>
+                        )}
+                      </div>
+
+                      <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                          <div className="text-right">
+                            <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
+                            <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        <div className="text-[11px] font-medium text-emerald-500/90">
+                          {v1MinOrder > 1 ? (
+                            <span>Order: {formatCurrency(prices.hargaOrderIdeal)} · Margin: {formatCurrency(prices.marginIdealOrder)} (@{formatCurrency(prices.marginIdealPcs)}/pcs)</span>
+                          ) : (
+                            <span>Margin: {formatCurrency(prices.marginIdealPcs)} /pcs</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                          <div className="text-right">
+                            <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
+                            <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        <div className="text-[11px] font-medium text-blue-400/90">
+                          {v1MinOrder > 1 ? (
+                            <span>Order: {formatCurrency(prices.hargaOrderSet)} · Margin: {formatCurrency(prices.marginSetOrder)} (@{formatCurrency(prices.marginSetPcs)}/pcs)</span>
+                          ) : (
+                            <span>Margin: {formatCurrency(prices.marginSetPcs)} /pcs</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal) })}
+                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                      >
+                        Terapkan 2.0x
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsSet) })}
+                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                      >
+                        Terapkan 2.5x
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Multi-Varian Mode */}
+              {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
+                const vMinOrder = Math.max(1, Number(v.min_order) || 1);
+                const hppPcs = calcHppPerPcs(v, ingredients);
+                const feeConf = extractFeeRates(v2Product, v);
+                const feePct = usePromoEvent ? (feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen) : feeConf.percentRate;
+                const feeNominalUnit = feeConf.nominalPerUnit;
+                const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                const prices = calcReversePrice(hppPcs, vMinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
+
+                return (
+                  <div key={v.id} className="bg-[#18181b] border border-neutral-800 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md w-full text-white">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        {v2Product && (
+                          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-0.5">
+                            {v2Product.nama}
+                          </span>
+                        )}
+                        <h4 className="text-base sm:text-lg font-black text-white tracking-tight">
+                          {v.nama}
+                        </h4>
+                      </div>
+                      <span className="bg-blue-950/90 text-blue-400 border border-blue-800/60 px-3 py-1 rounded-full text-xs font-bold shrink-0">
+                        Min. order {vMinOrder} pcs
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                          <div className="text-right">
+                            <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
+                            <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        {vMinOrder > 1 && (
+                          <p className="text-[11px] font-medium text-neutral-400">Order: {formatCurrency(prices.hargaOrderBep)}</p>
+                        )}
+                      </div>
+
+                      <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                          <div className="text-right">
+                            <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
+                            <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        {vMinOrder > 1 && (
+                          <p className="text-[11px] font-medium text-amber-500/90">Order: {formatCurrency(prices.hargaOrderMin)}</p>
+                        )}
+                      </div>
+
+                      <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                          <div className="text-right">
+                            <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
+                            <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        <div className="text-[11px] font-medium text-emerald-500/90">
+                          {vMinOrder > 1 ? (
+                            <span>Order: {formatCurrency(prices.hargaOrderIdeal)} · Margin: {formatCurrency(prices.marginIdealOrder)} (@{formatCurrency(prices.marginIdealPcs)}/pcs)</span>
+                          ) : (
+                            <span>Margin: {formatCurrency(prices.marginIdealPcs)} /pcs</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                          <div className="text-right">
+                            <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
+                            <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
+                          </div>
+                        </div>
+                        <div className="text-[11px] font-medium text-blue-400/90">
+                          {vMinOrder > 1 ? (
+                            <span>Order: {formatCurrency(prices.hargaOrderSet)} · Margin: {formatCurrency(prices.marginSetOrder)} (@{formatCurrency(prices.marginSetPcs)}/pcs)</span>
+                          ) : (
+                            <span>Margin: {formatCurrency(prices.marginSetPcs)} /pcs</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal) })}
+                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                      >
+                        Terapkan 2.0x
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsSet) })}
+                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                      >
+                        Terapkan 2.5x
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Grup Iklan Mode */}
+              {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
+                return p.varian?.map(v => {
+                  const pMinOrder = Math.max(1, Number(v.min_order) || 1);
+                  const hppPcs = calcHppPerPcs(v, ingredients);
+                  const feeConf = extractFeeRates(p, v);
+                  const feePct = usePromoEvent ? (feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen) : feeConf.percentRate;
+                  const feeNominalUnit = feeConf.nominalPerUnit;
+                  const feeNominalOrder = feeConf.nominalPerOrder + (usePromoEvent ? promoDiskonNominal : 0);
+                  const prices = calcReversePrice(hppPcs, pMinOrder, feePct, feeNominalUnit, feeNominalOrder, targetRoasInput);
+
+                  return (
+                    <div key={`${p.id}-${v.id}`} className="bg-[#18181b] border border-neutral-800 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md w-full text-white">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-0.5">
+                            {p.nama}
+                          </span>
+                          <h4 className="text-base sm:text-lg font-black text-white tracking-tight">
                             {v.nama}
-                            {vMinOrder > 1 && (
-                              <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
-                                Min. Order: {vMinOrder} pcs
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4 hidden md:table-cell">
-                            <div className="text-xs">
-                              <span className="text-gray-500">HPP:</span>{' '}
-                              <span className="font-bold">
-                                {formatCurrency(prices.hppOrder)}
-                                {vMinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({vMinOrder} pcs @ {formatCurrency(hppPcs)})</span>}
-                              </span>
-                              <br/>
-                              <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
-                              <span className="font-bold">
-                                {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(prices.feeNominalOrder + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(prices.feeNominalOrder)}`}
-                              </span>
-                              {usePromoEvent && (
-                                <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-4 font-bold text-gray-600">
-                            {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
-                            {vMinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
-                            )}
-                          </td>
-                          <td className="p-4 font-black text-amber-600 text-base">
-                            {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
-                            {vMinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
-                            )}
-                          </td>
-                          <td className="p-4 font-black text-emerald-600 text-base">
-                            {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
-                            {vMinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
-                            )}
-                            <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
-                              Margin Order: {formatCurrency(prices.marginIdealOrder)}
-                              {vMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
-                            </div>
-                          </td>
-                          <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
-                            {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
-                            {vMinOrder > 1 && (
-                              <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
-                            )}
-                            <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
-                              Margin Order: {formatCurrency(prices.marginSetOrder)}
-                              {vMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
-                            </div>
-                          </td>
-                          <td className="p-4 text-center">
-                            <div className="flex flex-col gap-1.5">
-                              <Button 
-                                onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                              >
-                                Terapkan 2.0x
-                              </Button>
-                              <Button 
-                                onClick={() => setConfirmModalData({product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsSet)})} 
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                              >
-                                Terapkan 2.5x
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          </h4>
+                        </div>
+                        <span className="bg-blue-950/90 text-blue-400 border border-blue-800/60 px-3 py-1 rounded-full text-xs font-bold shrink-0">
+                          Min. order {pMinOrder} pcs
+                        </span>
+                      </div>
 
-                    {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
-                      return p.varian?.map(v => {
-                        const pMinOrder = Math.max(1, Number(v.min_order) || 1);
-                        const hppPcs = calcHppPerPcs(v, ingredients);
-                        const feeConf = extractFeeRates(p, v);
-                        const prices = calcReversePrice(hppPcs, pMinOrder, feeConf.percentRate, feeConf.nominalPerUnit, feeConf.nominalPerOrder, targetRoasInput);
-                        return (
-                          <tr key={`${p.id}-${v.id}`} className="hover:bg-gray-50 transition-colors">
-                            <td className="p-4 font-bold text-gray-900 whitespace-normal min-w-[150px]">
-                              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{p.nama}</div>
-                              {v.nama}
-                              {pMinOrder > 1 && (
-                                <span className="block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100">
-                                  Min. Order: {pMinOrder} pcs
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-4 hidden md:table-cell">
-                              <div className="text-xs">
-                                <span className="text-gray-500">HPP:</span>{' '}
-                                <span className="font-bold">
-                                  {formatCurrency(prices.hppOrder)}
-                                  {pMinOrder > 1 && <span className="text-[10px] text-gray-500 font-normal"> ({pMinOrder} pcs @ {formatCurrency(hppPcs)})</span>}
-                                </span>
-                                <br/>
-                                <span className="text-gray-500">{usePromoEvent ? 'Fee + Event:' : 'Fee:'}</span>{' '}
-                                <span className="font-bold">
-                                  {usePromoEvent ? `${feeConf.percentRate + promoExtraFeePersen + promoDiskonPersen}% + ${formatCurrency(prices.feeNominalOrder + promoDiskonNominal)}` : `${feeConf.percentRate}% + ${formatCurrency(prices.feeNominalOrder)}`}
-                                </span>
-                                {usePromoEvent && (
-                                  <div className="text-[10px] text-amber-700 font-semibold">(MP: {feeConf.percentRate}% + Event: {promoExtraFeePersen + promoDiskonPersen}%)</div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-4 font-bold text-gray-600">
-                              {formatCurrency(prices.hargaPcsBep)} <span className="text-[10px] font-normal text-gray-400">/pcs</span>
-                              {pMinOrder > 1 && (
-                                <div className="text-[10px] font-bold text-gray-500">Order: {formatCurrency(prices.hargaOrderBep)}</div>
-                              )}
-                            </td>
-                            <td className="p-4 font-black text-amber-600 text-base">
-                              {formatCurrency(prices.hargaPcsMin)} <span className="text-[10px] font-normal text-amber-500/80">/pcs</span>
-                              {pMinOrder > 1 && (
-                                <div className="text-[10px] font-bold text-amber-700">Order: {formatCurrency(prices.hargaOrderMin)}</div>
-                              )}
-                            </td>
-                            <td className="p-4 font-black text-emerald-600 text-base">
-                              {formatCurrency(prices.hargaPcsIdeal)} <span className="text-[10px] font-normal text-emerald-500/80">/pcs</span>
-                              {pMinOrder > 1 && (
-                                <div className="text-[10px] font-bold text-emerald-700">Order: {formatCurrency(prices.hargaOrderIdeal)}</div>
-                              )}
-                              <div className="text-[10px] font-bold text-emerald-600/80 mt-1">
-                                Margin Order: {formatCurrency(prices.marginIdealOrder)}
-                                {pMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginIdealPcs)}/pcs)</span>}
-                              </div>
-                            </td>
-                            <td className="p-4 font-black text-indigo-600 text-base bg-indigo-50/30">
-                              {formatCurrency(prices.hargaPcsSet)} <span className="text-[10px] font-normal text-indigo-500/80">/pcs</span>
-                              {pMinOrder > 1 && (
-                                <div className="text-[10px] font-bold text-indigo-700">Order: {formatCurrency(prices.hargaOrderSet)}</div>
-                              )}
-                              <div className="text-[10px] font-bold text-indigo-600/80 mt-1">
-                                Margin Order: {formatCurrency(prices.marginSetOrder)}
-                                {pMinOrder > 1 && <span className="text-gray-500 font-normal"> (@ {formatCurrency(prices.marginSetPcs)}/pcs)</span>}
-                              </div>
-                            </td>
-                            <td className="p-4 text-center">
-                              <div className="flex flex-col gap-1.5">
-                                <Button 
-                                  onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal)})} 
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                                >
-                                  Terapkan 2.0x
-                                </Button>
-                                <Button 
-                                  onClick={() => setConfirmModalData({product: p, variant: v, newPrice: Math.round(prices.hargaPcsSet)})} 
-                                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold px-3 h-8 text-xs w-full"
-                                >
-                                  Terapkan 2.5x
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })}
+                      <div className="space-y-2">
+                        <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                            <div className="text-right">
+                              <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
+                              <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
+                            </div>
+                          </div>
+                          {pMinOrder > 1 && (
+                            <p className="text-[11px] font-medium text-neutral-400">Order: {formatCurrency(prices.hargaOrderBep)}</p>
+                          )}
+                        </div>
 
-                  </tbody>
-                </table>
-              </div>
+                        <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                            <div className="text-right">
+                              <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
+                              <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
+                            </div>
+                          </div>
+                          {pMinOrder > 1 && (
+                            <p className="text-[11px] font-medium text-amber-500/90">Order: {formatCurrency(prices.hargaOrderMin)}</p>
+                          )}
+                        </div>
+
+                        <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                            <div className="text-right">
+                              <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
+                              <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
+                            </div>
+                          </div>
+                          <div className="text-[11px] font-medium text-emerald-500/90">
+                            {pMinOrder > 1 ? (
+                              <span>Order: {formatCurrency(prices.hargaOrderIdeal)} · Margin: {formatCurrency(prices.marginIdealOrder)} (@{formatCurrency(prices.marginIdealPcs)}/pcs)</span>
+                            ) : (
+                              <span>Margin: {formatCurrency(prices.marginIdealPcs)} /pcs</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                            <div className="text-right">
+                              <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
+                              <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
+                            </div>
+                          </div>
+                          <div className="text-[11px] font-medium text-blue-400/90">
+                            {pMinOrder > 1 ? (
+                              <span>Order: {formatCurrency(prices.hargaOrderSet)} · Margin: {formatCurrency(prices.marginSetOrder)} (@{formatCurrency(prices.marginSetPcs)}/pcs)</span>
+                            ) : (
+                              <span>Margin: {formatCurrency(prices.marginSetPcs)} /pcs</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmModalData({ product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal) })}
+                          className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        >
+                          Terapkan 2.0x
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmModalData({ product: p, variant: v, newPrice: Math.round(prices.hargaPcsSet) })}
+                          className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        >
+                          Terapkan 2.5x
+                        </button>
+                      </div>
+                    </div>
+                  );
+                });
+              })}
             </div>
 
           </div>
