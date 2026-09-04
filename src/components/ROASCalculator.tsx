@@ -10,6 +10,9 @@ import {
   calculateAspHspAsmLsm,
   roundPrice,
   runUnitEconomicsSelfTests,
+  calculateRoasFromPrice,
+  calculatePriceFromRoas,
+  ExactInverseParams,
   UnitEconomicsResult,
   ReverseCalcResult,
   PromoTanggalCantikResult,
@@ -1719,60 +1722,58 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     feeNominalPerOrder: number,
     tRoas: number
   ) => {
-    const dNom = usePromoEvent ? promoDiskonNominal : 0;
-    const dPct = usePromoEvent ? (promoDiskonPersen / 100) : 0;
-    const ePct = usePromoEvent ? (promoExtraFeePersen / 100) : 0;
-    const pFact = usePpnIklan ? 1.11 : 1.0;
-    const mOrd = Math.max(1, minOrder || 1);
+    const params: ExactInverseParams = {
+      hppPcs,
+      minOrder,
+      feePct,
+      feeNominalPerUnit,
+      feeNominalPerOrder,
+      usePromoEvent,
+      promoExtraFeePersen,
+      promoDiskonPersen,
+      promoDiskonNominal,
+      usePpnIklan,
+    };
 
+    // 1.0x Target ROAS (Base Target)
+    const r1 = calculatePriceFromRoas(tRoas * 1.0, params);
+    // 1.5x Target ROAS
+    const r1_5 = calculatePriceFromRoas(tRoas * 1.5, params);
+    // 2.0x Target ROAS
+    const r2 = calculatePriceFromRoas(tRoas * 2.0, params);
+    // 2.5x Target ROAS
+    const r2_5 = calculatePriceFromRoas(tRoas * 2.5, params);
+
+    const mOrd = Math.max(1, minOrder || 1);
     const hppOrder = hppPcs * mOrd;
     const feeNominalOrder = (feeNominalPerUnit * mOrd) + feeNominalPerOrder;
 
-    const baseDenom = (1 - (feePct / 100) - dPct - ePct);
-    
-    // BEP (1.0x)
-    const denomBep = baseDenom - (pFact * 1.0 / tRoas);
-    const hargaOrderBep = denomBep > 0 ? (hppOrder + feeNominalOrder + dNom) / denomBep : 0;
-    const hargaPcsBep = mOrd > 0 ? hargaOrderBep / mOrd : 0;
+    const computeMargin = (hOrder: number) => {
+      const dNom = usePromoEvent ? promoDiskonNominal : 0;
+      const dPct = usePromoEvent ? (promoDiskonPersen / 100) : 0;
+      const ePct = usePromoEvent ? (promoExtraFeePersen / 100) : 0;
+      const fPct = (feePct / 100);
+      const extraDiscount = dNom + (hOrder * dPct);
+      const extraFee = hOrder * ePct;
+      const effectiveHOrder = hOrder - extraDiscount;
+      return effectiveHOrder - hppOrder - (hOrder * fPct) - feeNominalOrder - extraFee;
+    };
 
-    // Minimum (1.5x)
-    const denomMin = baseDenom - (pFact * 1.5 / tRoas);
-    const hargaOrderMin = denomMin > 0 ? (hppOrder + feeNominalOrder + dNom) / denomMin : 0;
-    const hargaPcsMin = mOrd > 0 ? hargaOrderMin / mOrd : 0;
-
-    // Ideal (2.0x)
-    const denomIdeal = baseDenom - (pFact * 2.0 / tRoas);
-    const hargaOrderIdeal = denomIdeal > 0 ? (hppOrder + feeNominalOrder + dNom) / denomIdeal : 0;
-    const hargaPcsIdeal = mOrd > 0 ? hargaOrderIdeal / mOrd : 0;
-
-    // Set ROAS Marketplace (2.5x)
-    const denomSet = baseDenom - (pFact * 2.5 / tRoas);
-    const hargaOrderSet = denomSet > 0 ? (hppOrder + feeNominalOrder + dNom) / denomSet : 0;
-    const hargaPcsSet = mOrd > 0 ? hargaOrderSet / mOrd : 0;
-    
-    const currentHOrder = hargaOrderIdeal;
-    const extraDiscount = dNom + (currentHOrder * dPct);
-    const extraFee = currentHOrder * ePct;
-    const effectiveHOrder = currentHOrder - extraDiscount;
-    const marginIdealOrder = effectiveHOrder - hppOrder - (currentHOrder * (feePct / 100)) - feeNominalOrder - extraFee;
+    const marginIdealOrder = computeMargin(r2.hargaOrder);
     const marginIdealPcs = mOrd > 0 ? marginIdealOrder / mOrd : 0;
 
-    const currentHOrderSet = hargaOrderSet;
-    const extraDiscountSet = dNom + (currentHOrderSet * dPct);
-    const extraFeeSet = currentHOrderSet * ePct;
-    const effectiveHOrderSet = currentHOrderSet - extraDiscountSet;
-    const marginSetOrder = effectiveHOrderSet - hppOrder - (currentHOrderSet * (feePct / 100)) - feeNominalOrder - extraFeeSet;
+    const marginSetOrder = computeMargin(r2_5.hargaOrder);
     const marginSetPcs = mOrd > 0 ? marginSetOrder / mOrd : 0;
 
     return { 
-      hargaOrderBep, 
-      hargaPcsBep, 
-      hargaOrderMin, 
-      hargaPcsMin, 
-      hargaOrderIdeal, 
-      hargaPcsIdeal, 
-      hargaOrderSet,
-      hargaPcsSet,
+      hargaOrderBep: r1.hargaOrder, 
+      hargaPcsBep: r1.hargaPcs, 
+      hargaOrderMin: r1_5.hargaOrder, 
+      hargaPcsMin: r1_5.hargaPcs, 
+      hargaOrderIdeal: r2.hargaOrder, 
+      hargaPcsIdeal: r2.hargaPcs, 
+      hargaOrderSet: r2_5.hargaOrder,
+      hargaPcsSet: r2_5.hargaPcs,
       marginIdealOrder, 
       marginIdealPcs,
       marginSetOrder,
@@ -2311,7 +2312,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <div className="space-y-2">
                       <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga target ({targetRoasInput.toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
                             <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
@@ -2324,7 +2325,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min ({(targetRoasInput * 1.5).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
                             <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
@@ -2337,7 +2338,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal ({(targetRoasInput * 2.0).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
                             <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
@@ -2354,7 +2355,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas ({(targetRoasInput * 2.5).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
                             <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
@@ -2370,20 +2371,27 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsBep) })}
+                        className="bg-neutral-700 hover:bg-neutral-600 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
+                      >
+                        Terapkan {targetRoasInput.toFixed(1)}x
+                      </button>
                       <button
                         type="button"
                         onClick={() => setConfirmModalData({ product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsIdeal) })}
-                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                       >
-                        Terapkan 2.0x
+                        Terapkan {(targetRoasInput * 2.0).toFixed(1)}x
                       </button>
                       <button
                         type="button"
                         onClick={() => setConfirmModalData({ product: v1Product!, variant: v1Variant, newPrice: Math.round(prices.hargaPcsSet) })}
-                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                       >
-                        Terapkan 2.5x
+                        Terapkan {(targetRoasInput * 2.5).toFixed(1)}x
                       </button>
                     </div>
                   </div>
@@ -2421,7 +2429,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                     <div className="space-y-2">
                       <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                          <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga target ({targetRoasInput.toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
                             <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
@@ -2434,7 +2442,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                          <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min ({(targetRoasInput * 1.5).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
                             <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
@@ -2447,7 +2455,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                          <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal ({(targetRoasInput * 2.0).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
                             <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
@@ -2464,7 +2472,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                       <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                          <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas ({(targetRoasInput * 2.5).toFixed(1)}x)</span>
                           <div className="text-right">
                             <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
                             <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
@@ -2480,20 +2488,27 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmModalData({ product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsBep) })}
+                        className="bg-neutral-700 hover:bg-neutral-600 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
+                      >
+                        Terapkan {targetRoasInput.toFixed(1)}x
+                      </button>
                       <button
                         type="button"
                         onClick={() => setConfirmModalData({ product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsIdeal) })}
-                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                       >
-                        Terapkan 2.0x
+                        Terapkan {(targetRoasInput * 2.0).toFixed(1)}x
                       </button>
                       <button
                         type="button"
                         onClick={() => setConfirmModalData({ product: v2Product!, variant: v, newPrice: Math.round(prices.hargaPcsSet) })}
-                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                        className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                       >
-                        Terapkan 2.5x
+                        Terapkan {(targetRoasInput * 2.5).toFixed(1)}x
                       </button>
                     </div>
                   </div>
@@ -2530,7 +2545,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                       <div className="space-y-2">
                         <div className="bg-neutral-800/90 border border-neutral-700/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga bep (1.0x)</span>
+                            <span className="text-neutral-400 text-xs sm:text-sm font-semibold">Harga target ({targetRoasInput.toFixed(1)}x)</span>
                             <div className="text-right">
                               <span className="text-white text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsBep)}</span>
                               <span className="text-xs font-normal text-neutral-400 ml-1">/pcs</span>
@@ -2543,7 +2558,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                         <div className="bg-amber-950/50 border border-amber-900/60 rounded-xl p-3 sm:p-3.5 space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min (1.5x)</span>
+                            <span className="text-amber-400 text-xs sm:text-sm font-semibold">Harga min ({(targetRoasInput * 1.5).toFixed(1)}x)</span>
                             <div className="text-right">
                               <span className="text-amber-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsMin)}</span>
                               <span className="text-xs font-normal text-amber-500/80 ml-1">/pcs</span>
@@ -2556,7 +2571,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                         <div className="bg-emerald-950/60 border border-emerald-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal (2.0x)</span>
+                            <span className="text-emerald-400 text-xs sm:text-sm font-semibold">Harga ideal ({(targetRoasInput * 2.0).toFixed(1)}x)</span>
                             <div className="text-right">
                               <span className="text-emerald-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsIdeal)}</span>
                               <span className="text-xs font-normal text-emerald-500/80 ml-1">/pcs</span>
@@ -2573,7 +2588,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
                         <div className="bg-blue-950/60 border border-blue-900/70 rounded-xl p-3 sm:p-3.5 space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas (2.5x)</span>
+                            <span className="text-blue-400 text-xs sm:text-sm font-semibold">Harga set roas ({(targetRoasInput * 2.5).toFixed(1)}x)</span>
                             <div className="text-right">
                               <span className="text-blue-400 text-base sm:text-lg font-black">{formatCurrency(prices.hargaPcsSet)}</span>
                               <span className="text-xs font-normal text-blue-400/80 ml-1">/pcs</span>
@@ -2589,20 +2604,27 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <div className="grid grid-cols-3 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmModalData({ product: p, variant: v, newPrice: Math.round(prices.hargaPcsBep) })}
+                          className="bg-neutral-700 hover:bg-neutral-600 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
+                        >
+                          Terapkan {targetRoasInput.toFixed(1)}x
+                        </button>
                         <button
                           type="button"
                           onClick={() => setConfirmModalData({ product: p, variant: v, newPrice: Math.round(prices.hargaPcsIdeal) })}
-                          className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                          className="bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                         >
-                          Terapkan 2.0x
+                          Terapkan {(targetRoasInput * 2.0).toFixed(1)}x
                         </button>
                         <button
                           type="button"
                           onClick={() => setConfirmModalData({ product: p, variant: v, newPrice: Math.round(prices.hargaPcsSet) })}
-                          className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl py-3 px-3 transition-all shadow-sm flex items-center justify-center gap-1"
+                          className="bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold text-[11px] sm:text-xs rounded-xl py-2.5 px-2 transition-all shadow-sm flex items-center justify-center text-center"
                         >
-                          Terapkan 2.5x
+                          Terapkan {(targetRoasInput * 2.5).toFixed(1)}x
                         </button>
                       </div>
                     </div>

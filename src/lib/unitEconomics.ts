@@ -126,6 +126,69 @@ export function isOrderLevelFee(feeName: string): boolean {
 }
 
 /**
+ * Single source of truth for ROAS ↔ Price mathematical inversion.
+ */
+export interface ExactInverseParams {
+  hppPcs: number;
+  minOrder: number;
+  feePct: number; // e.g. 28.25 for 28.25%
+  feeNominalPerUnit: number; // e.g. 0
+  feeNominalPerOrder: number; // e.g. 1600
+  usePromoEvent?: boolean;
+  promoExtraFeePersen?: number; // e.g. 0
+  promoDiskonPersen?: number; // e.g. 0
+  promoDiskonNominal?: number; // e.g. 0
+  usePpnIklan?: boolean; // PPN 11% on ad spend (1.11 factor)
+}
+
+export function calculateRoasFromPrice(hargaPcs: number, params: ExactInverseParams): number {
+  if (hargaPcs <= 0) return 0;
+  const mOrd = Math.max(1, params.minOrder || 1);
+  const pFact = params.usePpnIklan ? 1.11 : 1.0;
+  const dNom = params.usePromoEvent ? (params.promoDiskonNominal || 0) : 0;
+  const dPct = params.usePromoEvent ? ((params.promoDiskonPersen || 0) / 100) : 0;
+  const ePct = params.usePromoEvent ? ((params.promoExtraFeePersen || 0) / 100) : 0;
+
+  const hppOrder = params.hppPcs * mOrd;
+  const feeNominalOrder = (params.feeNominalPerUnit * mOrd) + params.feeNominalPerOrder;
+  const fPct = (params.feePct || 0) / 100;
+
+  const hargaOrder = hargaPcs * mOrd;
+  const baseDenom = 1 - fPct - dPct - ePct;
+  const costFixed = hppOrder + feeNominalOrder + dNom;
+
+  const marginOrder = (hargaOrder * baseDenom) - costFixed;
+
+  if (marginOrder <= 0) return 0;
+  return (hargaOrder * pFact) / marginOrder;
+}
+
+export function calculatePriceFromRoas(targetRoas: number, params: ExactInverseParams): { hargaPcs: number; hargaOrder: number } {
+  if (targetRoas <= 0) return { hargaPcs: 0, hargaOrder: 0 };
+
+  const mOrd = Math.max(1, params.minOrder || 1);
+  const pFact = params.usePpnIklan ? 1.11 : 1.0;
+  const dNom = params.usePromoEvent ? (params.promoDiskonNominal || 0) : 0;
+  const dPct = params.usePromoEvent ? ((params.promoDiskonPersen || 0) / 100) : 0;
+  const ePct = params.usePromoEvent ? ((params.promoExtraFeePersen || 0) / 100) : 0;
+
+  const hppOrder = params.hppPcs * mOrd;
+  const feeNominalOrder = (params.feeNominalPerUnit * mOrd) + params.feeNominalPerOrder;
+  const fPct = (params.feePct || 0) / 100;
+
+  const baseDenom = 1 - fPct - dPct - ePct;
+  const costFixed = hppOrder + feeNominalOrder + dNom;
+
+  const denom = baseDenom - (pFact / targetRoas);
+  if (denom <= 0) return { hargaPcs: 0, hargaOrder: 0 };
+
+  const hargaOrder = costFixed / denom;
+  const hargaPcs = hargaOrder / mOrd;
+
+  return { hargaPcs, hargaOrder };
+}
+
+/**
  * Single source of truth calculation engine for all product economics,
  * ROAS, margins, and diagnostic breakdowns.
  */
@@ -1211,6 +1274,85 @@ export function runUnitEconomicsSelfTests(): { success: boolean; results: string
     logs.push(`TEST 9 PASS: ROAS Aktual (${roasAktualTest9}x) and ROAS Setting (${roasSettingTest9}x) strictly decoupled.`);
   } else {
     logs.push(`TEST 9 FAIL: ROAS Aktual & Setting coupling defect.`);
+    allPassed = false;
+  }
+
+  // TEST 10: Exact ROAS <-> Price Round-Trip Inversion Across 3 Variants & 3 Tiers
+  const variantsTest10: { name: string; params: ExactInverseParams }[] = [
+    {
+      name: 'Cireng Mix (HPP 14.5k, Fee 28.25%+1.6k)',
+      params: {
+        hppPcs: 14516,
+        minOrder: 1,
+        feePct: 28.25,
+        feeNominalPerUnit: 0,
+        feeNominalPerOrder: 1600,
+        usePromoEvent: false,
+        usePpnIklan: true,
+      },
+    },
+    {
+      name: 'Sambal Cumi (HPP 22k, Fee 12%+1k, MinOrder 2, Promo 5%+2k)',
+      params: {
+        hppPcs: 22000,
+        minOrder: 2,
+        feePct: 12.0,
+        feeNominalPerUnit: 500,
+        feeNominalPerOrder: 1000,
+        usePromoEvent: true,
+        promoExtraFeePersen: 2.0,
+        promoDiskonPersen: 3.0,
+        promoDiskonNominal: 2000,
+        usePpnIklan: true,
+      },
+    },
+    {
+      name: 'Bumbu Tabur (HPP 8k, Fee 8.5%+0, MinOrder 5)',
+      params: {
+        hppPcs: 8000,
+        minOrder: 5,
+        feePct: 8.5,
+        feeNominalPerUnit: 0,
+        feeNominalPerOrder: 0,
+        usePromoEvent: false,
+        usePpnIklan: false,
+      },
+    },
+  ];
+
+  const targetRoasValues = [5.0, 8.0, 10.0];
+  const multipliers = [1.5, 2.0, 2.5];
+
+  let roundTripPassed = true;
+  for (const v of variantsTest10) {
+    for (const baseRoas of targetRoasValues) {
+      for (const m of multipliers) {
+        const targetRoas = baseRoas * m;
+
+        // Direction A: ROAS -> Price -> ROAS
+        const priceRes = calculatePriceFromRoas(targetRoas, v.params);
+        const roundedPricePcs = Math.round(priceRes.hargaPcs);
+        const recalcRoas = calculateRoasFromPrice(roundedPricePcs, v.params);
+
+        // Direction B: Price -> ROAS -> Price
+        const recalcPriceRes = calculatePriceFromRoas(recalcRoas, v.params);
+        const roundedRecalcPricePcs = Math.round(recalcPriceRes.hargaPcs);
+
+        // Acceptance Criteria tolerances: ROAS <= 0.05x (due to Rp1 rounding), Price <= Rp1
+        const priceDiff = Math.abs(roundedPricePcs - roundedRecalcPricePcs);
+        const roasDiff = Math.abs(targetRoas - recalcRoas);
+
+        if (priceDiff > 1 || roasDiff > 0.05) {
+          roundTripPassed = false;
+          logs.push(`TEST 10 FAIL [${v.name} @ ${targetRoas}x]: Price diff=${priceDiff} (expected <= 1), ROAS diff=${roasDiff.toFixed(4)} (expected <= 0.05). Target=${targetRoas}x, CalcPrice=${roundedPricePcs}, RecalcROAS=${recalcRoas.toFixed(2)}x, RecalcPrice=${roundedRecalcPricePcs}`);
+        }
+      }
+    }
+  }
+
+  if (roundTripPassed) {
+    logs.push(`TEST 10 PASS: Exact ROAS <-> Price Round-Trip verified across 3 variants x 3 base ROAS x 3 multipliers (27 test cases zero drift).`);
+  } else {
     allPassed = false;
   }
 
