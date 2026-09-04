@@ -1735,14 +1735,14 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
       usePpnIklan,
     };
 
-    // 1.0x Target ROAS (Base Target)
-    const r1 = calculatePriceFromRoas(tRoas * 1.0, params);
-    // 1.5x Target ROAS
-    const r1_5 = calculatePriceFromRoas(tRoas * 1.5, params);
-    // 2.0x Target ROAS
-    const r2 = calculatePriceFromRoas(tRoas * 2.0, params);
-    // 2.5x Target ROAS
-    const r2_5 = calculatePriceFromRoas(tRoas * 2.5, params);
+    // 1.0x Target ROAS (BEP Tier: ROAS BEP = tRoas / 1.0)
+    const r1 = calculatePriceFromRoas(tRoas / 1.0, params);
+    // 1.5x Target ROAS (Min Tier: ROAS Min = tRoas => ROAS BEP = tRoas / 1.5)
+    const r1_5 = calculatePriceFromRoas(tRoas / 1.5, params);
+    // 2.0x Target ROAS (Ideal Tier: ROAS Ideal = tRoas => ROAS BEP = tRoas / 2.0)
+    const r2 = calculatePriceFromRoas(tRoas / 2.0, params);
+    // 2.5x Target ROAS (Set Tier: ROAS Set = tRoas => ROAS BEP = tRoas / 2.5)
+    const r2_5 = calculatePriceFromRoas(tRoas / 2.5, params);
 
     const mOrd = Math.max(1, minOrder || 1);
     const hppOrder = hppPcs * mOrd;
