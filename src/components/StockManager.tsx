@@ -117,27 +117,34 @@ export default function StockManager({ user, ingredients, setIngredients, transa
       // Close modal immediately
       setIsEditDialogOpen(false);
       setEditingIngredient(null);
+      setIsSaving(false);
       toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
 
       if (user) {
-        console.log("[StockManager] Syncing ingredient to Firestore...");
-        const batch = writeBatch(db);
-        batch.set(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(updatedIng));
-        for (const ing of sameNameIngredients) {
-          batch.set(
-            doc(db, `users/${user.uid}/stok/${ing.id}`),
-            sanitizeData({ ...ing, price: updatedIng.price, unit: updatedIng.unit })
-          );
-        }
-        await batch.commit();
-        if (sameNameIngredients.length > 0) {
-          console.log(`[StockManager] Synced price to ${sameNameIngredients.length} ingredient(s) with same name.`);
-        }
+        (async () => {
+          try {
+            console.log("[StockManager] Syncing ingredient to Firestore...");
+            const batch = writeBatch(db);
+            batch.set(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(updatedIng));
+            for (const ing of sameNameIngredients) {
+              batch.set(
+                doc(db, `users/${user.uid}/stok/${ing.id}`),
+                sanitizeData({ ...ing, price: updatedIng.price, unit: updatedIng.unit })
+              );
+            }
+            await batch.commit();
+            if (sameNameIngredients.length > 0) {
+              console.log(`[StockManager] Synced price to ${sameNameIngredients.length} ingredient(s) with same name.`);
+            }
+          } catch (err) {
+            console.error("[StockManager] Background sync error:", err);
+            handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/stok/${editingIngredient.id}`);
+          }
+        })();
       }
       console.log("[StockManager] handleEditIngredient finished successfully.");
     } catch (error) {
       console.error("[StockManager] Error in handleEditIngredient:", error);
-      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${editingIngredient.id}`);
       toast.error("Gagal sinkron data");
     } finally {
       setIsSaving(false);

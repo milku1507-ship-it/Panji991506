@@ -183,9 +183,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     
     try {
       const formData = new FormData(e.target as HTMLFormElement);
-      const nama = formData.get('nama') as string;
-      const sku = (formData.get('sku') as string) || '';
-      const deskripsi = (formData.get('deskripsi') as string) || '';
+      const nama = (formData.get('nama') as string || '').trim();
+      const sku = (formData.get('sku') as string || '').trim();
+      const deskripsi = (formData.get('deskripsi') as string || '').trim();
+
+      if (!nama) {
+        toast.error('Nama produk wajib diisi');
+        setIsSaving(false);
+        return;
+      }
 
       if (editingProduct) {
         const updatedProduct = { 
@@ -206,8 +212,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         toast.success('Produk diperbarui ✓');
 
         if (user) {
-          console.log("[HPPManager] Syncing updated product to Firestore...");
-          await setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), sanitizeData(updatedProduct));
+          (async () => {
+            try {
+              console.log("[HPPManager] Syncing updated product to Firestore...");
+              await setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), sanitizeData(updatedProduct));
+            } catch (err) {
+              console.error("[HPPManager] Background sync product error:", err);
+            }
+          })();
         }
       } else {
         const id = 'prod_' + Math.random().toString(36).substr(2, 9);
@@ -230,8 +242,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         toast.success('Produk ditambahkan ✓');
 
         if (user) {
-          console.log("[HPPManager] Creating new product in Firestore...");
-          await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
+          (async () => {
+            try {
+              console.log("[HPPManager] Creating new product in Firestore...");
+              await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
+            } catch (err) {
+              console.error("[HPPManager] Background create product error:", err);
+            }
+          })();
         }
       }
       console.log("[HPPManager] handleSaveProduct finished successfully.");
@@ -689,8 +707,14 @@ function VariantPricingInputs({
       toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
 
       if (user) {
-        console.log("[HPPManager] Syncing variant to Firestore...");
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+        (async () => {
+          try {
+            console.log("[HPPManager] Syncing variant to Firestore...");
+            await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+          } catch (err) {
+            console.error("[HPPManager] Background sync variant error:", err);
+          }
+        })();
       }
       console.log("[HPPManager] handleSaveVariant finished successfully.");
     } catch (error) {
@@ -1067,10 +1091,18 @@ function VariantPricingInputs({
     
     try {
       const formData = new FormData(e.target as HTMLFormElement);
-      const nama = (formData.get('nama') as string).trim();
-      const kelompok = formData.get('kelompok') as string;
+      const rawNama = formData.get('nama');
+      const nama = typeof rawNama === 'string' ? rawNama.trim() : '';
+      
+      if (!nama) {
+        toast.error('Silakan pilih atau isi nama bahan terlebih dahulu');
+        setIsSaving(false);
+        return;
+      }
+
+      const kelompok = (formData.get('kelompok') as string) || 'Lainnya';
       const qtyInput = parseFloat(formData.get('qty') as string) || 0;
-      const satuanInput = formData.get('satuan') as string;
+      const satuanInput = (formData.get('satuan') as string) || 'gram';
       const hargaInput = parseFloat(formData.get('harga') as string) || 0;
 
       // Map to base unit and base value for storage
@@ -1083,7 +1115,7 @@ function VariantPricingInputs({
       
       // Find by name if ID is missing (legacy)
       if (!ingredientId) {
-         const existingByNama = ingredients.find(i => i.name.toLowerCase().trim() === nama.toLowerCase().trim());
+         const existingByNama = ingredients.find(i => (i.name || '').toLowerCase().trim() === nama.toLowerCase());
          if (existingByNama) ingredientId = existingByNama.id;
       }
 
@@ -1108,7 +1140,7 @@ function VariantPricingInputs({
         // Find all ingredients with same name (case insensitive) and sync price
         updatedIngredientsLocal = ingredients.map(i => {
           if (i.id === ingredientId) return updatedIng;
-          if (i.name.toLowerCase().trim() === nama.toLowerCase().trim()) {
+          if ((i.name || '').toLowerCase().trim() === nama.toLowerCase()) {
             return { ...i, price: harga, unit: satuan };
           }
           return i;
@@ -1142,7 +1174,7 @@ function VariantPricingInputs({
 
       // Propagate changes to ALL other variants across ALL products that share the same bahan
       const updatedActiveVariant = { ...activeHppVariant, bahan: newBahan };
-      const oldNama = editingMaterial.material.nama.toLowerCase().trim();
+      const oldNama = (editingMaterial.material.nama || '').toLowerCase().trim();
       const modifiedProductIds = new Set<string>();
 
       const syncedProducts = products.map(p => {
@@ -1151,7 +1183,7 @@ function VariantPricingInputs({
             return { ...v, bahan: newBahan };
           }
           const hasSameIngredient = v.bahan.some(
-            b => (oldNama && b.nama.toLowerCase().trim() === oldNama) ||
+            b => (oldNama && (b.nama || '').toLowerCase().trim() === oldNama) ||
                  (ingredientId && b.ingredientId === ingredientId)
           );
           if (!hasSameIngredient) return v;
@@ -1159,7 +1191,7 @@ function VariantPricingInputs({
           return {
             ...v,
             bahan: v.bahan.map(b => {
-              const matchByName = oldNama && b.nama.toLowerCase().trim() === oldNama;
+              const matchByName = oldNama && (b.nama || '').toLowerCase().trim() === oldNama;
               const matchById = ingredientId && b.ingredientId === ingredientId;
               return (matchByName || matchById)
                 ? { ...b, nama, kelompok, harga, satuan, ingredientId }
@@ -1178,6 +1210,7 @@ function VariantPricingInputs({
       // Close modal immediately so UI doesn't hang on slow network connections
       setIsMaterialModalOpen(false);
       setEditingMaterial(null);
+      setIsSaving(false);
 
       const syncCount = modifiedProductIds.size;
       toast.success(syncCount > 0
@@ -1196,7 +1229,7 @@ function VariantPricingInputs({
               const updatedIng = { ...existingIng, name: nama, category: kelompok, price: harga, unit: satuan, fromHpp: true };
               batch.set(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
               const sameNameIngredients = ingredients.filter(
-                i => i.name.toLowerCase().trim() === nama.toLowerCase().trim() && i.id !== ingredientId
+                i => (i.name || '').toLowerCase().trim() === nama.toLowerCase() && i.id !== ingredientId
               );
               for (const ing of sameNameIngredients) {
                 batch.set(
@@ -1427,8 +1460,14 @@ function VariantPricingInputs({
       setView('variants');
 
       if (user) {
-        console.log("[HPPManager] Syncing HPP data to Firestore...");
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+        (async () => {
+          try {
+            console.log("[HPPManager] Syncing HPP data to Firestore...");
+            await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
+          } catch (err) {
+            console.error("[HPPManager] Background sync HPP error:", err);
+          }
+        })();
       }
       console.log("[HPPManager] handleSaveHpp finished successfully.");
     } catch (error) {
