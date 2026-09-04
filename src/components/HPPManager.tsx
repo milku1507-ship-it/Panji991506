@@ -55,6 +55,36 @@ interface HPPManagerProps {
   onDeleteFromStock: (materialName: string) => Promise<void>;
 }
 
+export function resolveCategoryName(rawCat: string | undefined | null, configuredCats: string[] = []): string {
+  const clean = (rawCat || '').trim();
+  if (!clean) return 'Lainnya';
+  
+  // 1. Direct case-insensitive & trimmed match against configured categories
+  const matched = configuredCats.find(c => c.trim().toLowerCase() === clean.toLowerCase());
+  if (matched) return matched;
+
+  // 2. Standard aliases mapping
+  const lower = clean.toLowerCase();
+  if (['bahan baku', 'material utama', 'bahan utama'].includes(lower)) {
+    const existing = configuredCats.find(c => ['bahan baku', 'material utama', 'bahan utama'].includes(c.trim().toLowerCase()));
+    return existing || 'Bahan baku';
+  }
+  if (['bumbu', 'bahan bumbu'].includes(lower)) {
+    const existing = configuredCats.find(c => ['bumbu', 'bahan bumbu'].includes(c.trim().toLowerCase()));
+    return existing || 'Bumbu';
+  }
+  if (['packing', 'kemasan', 'packaging'].includes(lower)) {
+    const existing = configuredCats.find(c => ['packing', 'kemasan', 'packaging'].includes(c.trim().toLowerCase()));
+    return existing || 'Packing';
+  }
+  if (['overhead', 'operasional'].includes(lower)) {
+    const existing = configuredCats.find(c => ['overhead', 'operasional'].includes(c.trim().toLowerCase()));
+    return existing || 'Overhead';
+  }
+
+  return clean;
+}
+
 type ViewState = 'products' | 'variants' | 'detail' | 'category';
 
 export default function HPPManager({ user, products, setProducts, ingredients, setIngredients, onSetBack, onDeleteFromStock }: HPPManagerProps) {
@@ -1037,17 +1067,13 @@ function VariantPricingInputs({
     
     const catName = categoryToDelete;
     const materialsToDelete = activeHppVariant.bahan.filter(m => {
-      let mCat = m.kelompok;
-      if (mCat === 'Kulit') mCat = 'Kulit Cireng';
-      if (mCat === 'Isian') mCat = 'Bahan Isian';
-      return mCat === catName;
+      const res = resolveCategoryName(m.kelompok, settings?.kategori_hpp);
+      return res.toLowerCase() === catName.toLowerCase();
     });
 
     const newBahan = activeHppVariant.bahan.filter(m => {
-      let mCat = m.kelompok;
-      if (mCat === 'Kulit') mCat = 'Kulit Cireng';
-      if (mCat === 'Isian') mCat = 'Bahan Isian';
-      return mCat !== catName;
+      const res = resolveCategoryName(m.kelompok, settings?.kategori_hpp);
+      return res.toLowerCase() !== catName.toLowerCase();
     });
 
     const updatedVariant = { ...activeHppVariant, bahan: newBahan };
@@ -1100,7 +1126,16 @@ function VariantPricingInputs({
         return;
       }
 
-      const kelompok = (formData.get('kelompok') as string) || 'Lainnya';
+      let kelompok = (formData.get('kelompok') as string) || 'Lainnya';
+      kelompok = resolveCategoryName(kelompok, settings?.kategori_hpp);
+
+      if (user && settings && kelompok !== 'Lainnya') {
+        const inSettings = (settings.kategori_hpp || []).some(c => c.trim().toLowerCase() === kelompok.toLowerCase());
+        if (!inSettings) {
+          const updatedCats = [...(settings.kategori_hpp || []), kelompok];
+          updateDoc(doc(db, `users/${user.uid}/settings/kategori`), sanitizeData({ kategori_hpp: updatedCats })).catch(e => console.error("Auto add category error", e));
+        }
+      }
       const qtyInput = parseFloat(formData.get('qty') as string) || 0;
       const satuanInput = (formData.get('satuan') as string) || 'gram';
       const hargaInput = parseFloat(formData.get('harga') as string) || 0;
@@ -1315,8 +1350,7 @@ function VariantPricingInputs({
       const satuanInput = (b.satuan || 'pcs').trim();
       const qtyInput = Number(b.qty) || 0;
       const hargaInput = Number(b.harga_per_satuan) || 0;
-      let kelompok = (b.kelompok || 'Lainnya').trim();
-      if (!kelompok) kelompok = 'Lainnya';
+      let kelompok = resolveCategoryName(b.kelompok, settings?.kategori_hpp);
 
       const baseUnit = getBaseUnit(satuanInput);
       const qtyBase = toBaseValue(qtyInput, satuanInput);
@@ -1881,37 +1915,54 @@ function VariantPricingInputs({
               <CardContent className="p-4 sm:p-6">
                 <div className="space-y-2">
                   {(() => {
-                    const settingsCats = [...(settings?.kategori_hpp || []), 'Lainnya'];
-                    const legacyCats = activeHppVariant.bahan
-                      .map(m => m.kelompok)
-                      .filter((k): k is string => !!k && k.trim() !== '');
-                    return [...new Set([...settingsCats, ...legacyCats])];
-                  })().map((cat) => {
-                    const catMaterials = activeHppVariant.bahan
-                      .map((m, originalIdx) => ({ ...m, originalIdx }))
-                      .filter(m => m.kelompok === cat);
-                    if (catMaterials.length === 0) return null;
+                    const settingsCats = (settings?.kategori_hpp || []).map(c => c.trim()).filter(Boolean);
+                    
+                    const materialsWithResolvedCat = activeHppVariant.bahan.map((m, originalIdx) => {
+                      const resolvedCat = resolveCategoryName(m.kelompok, settingsCats);
+                      return { ...m, resolvedCat, originalIdx };
+                    });
 
-                    const catTotal = catMaterials.reduce((acc, m) => acc + getMaterialCost(m), 0);
+                    const presentCats: string[] = Array.from(new Set(materialsWithResolvedCat.map(m => m.resolvedCat)));
 
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3.5 hover:border-brand-200 hover:shadow-sm active:scale-[0.99] transition-all text-left"
-                        onClick={() => handleViewCategory(cat)}
-                      >
-                        <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
-                          <Package className="w-4 h-4 text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-black text-[#1A1A2E] uppercase text-sm tracking-wide truncate">{cat}</p>
-                          <p className="text-[11px] font-bold text-gray-400 mt-0.5">{catMaterials.length} item · {formatCurrency(catTotal, true)}</p>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
-                      </button>
-                    );
-                  })}
+                    const orderedCats = [
+                      ...settingsCats.filter(sc => presentCats.some(pc => pc.toLowerCase() === sc.toLowerCase())),
+                      ...presentCats.filter(pc => !settingsCats.some(sc => sc.toLowerCase() === pc.toLowerCase()))
+                    ];
+
+                    const categoriesToDisplay = orderedCats.reduce<string[]>((acc, cat) => {
+                      if (!acc.some(a => a.toLowerCase() === cat.toLowerCase())) {
+                        acc.push(cat);
+                      }
+                      return acc;
+                    }, []);
+
+                    return categoriesToDisplay.map((cat) => {
+                      const catMaterials = materialsWithResolvedCat.filter(
+                        m => m.resolvedCat.toLowerCase() === cat.toLowerCase()
+                      );
+                      if (catMaterials.length === 0) return null;
+
+                      const catTotal = catMaterials.reduce((acc, m) => acc + getMaterialCost(m), 0);
+
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl px-4 py-3.5 hover:border-brand-200 hover:shadow-sm active:scale-[0.99] transition-all text-left"
+                          onClick={() => handleViewCategory(cat)}
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
+                            <Package className="w-4 h-4 text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-[#1A1A2E] uppercase text-sm tracking-wide truncate">{cat}</p>
+                            <p className="text-[11px] font-bold text-gray-400 mt-0.5">{catMaterials.length} item · {formatCurrency(catTotal, true)}</p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                        </button>
+                      );
+                    });
+                  })()}
                   {activeHppVariant.bahan.length === 0 && (
                     <div className="text-center py-12 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-100">
                       <Calculator className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -2149,8 +2200,12 @@ function VariantPricingInputs({
       {/* VIEW: CATEGORY DETAIL */}
       {view === 'category' && activeHppVariant && selectedCategory && (() => {
         const catMaterials = activeHppVariant.bahan
-          .map((m, originalIdx) => ({ ...m, originalIdx }))
-          .filter(m => m.kelompok === selectedCategory);
+          .map((m, originalIdx) => ({
+            ...m,
+            originalIdx,
+            resolvedCat: resolveCategoryName(m.kelompok, settings?.kategori_hpp)
+          }))
+          .filter(m => m.resolvedCat.toLowerCase() === selectedCategory.toLowerCase());
         const catTotal = catMaterials.reduce((acc, m) => acc + getMaterialCost(m), 0);
 
         return (

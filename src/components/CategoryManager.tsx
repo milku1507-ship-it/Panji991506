@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, Edit2, Trash2, Check, X, Settings2, Package, Layers, Ruler, ArrowLeft, ChevronDown } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, Settings2, Package, Layers, Ruler, ArrowLeft, ChevronDown, RefreshCw, Sparkles } from 'lucide-react';
 import { useSettings } from '../SettingsContext';
-import { auth, db, doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
+import { resolveCategoryName } from './HPPManager';
 
 interface CategoryManagerProps {
   onBack: () => void;
@@ -30,8 +31,87 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
     satuan_unit: '',
   });
   const [savingField, setSavingField] = useState<string | null>(null);
+  const [isNormalizing, setIsNormalizing] = useState(false);
 
   if (!settings) return null;
+
+  const handleNormalizeAll = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setIsNormalizing(true);
+    try {
+      const configuredCats = settings.kategori_hpp || [];
+      const batch = writeBatch(db);
+
+      // 1. Normalize HPP materials
+      const hppSnap = await getDocs(collection(db, `users/${user.uid}/hpp`));
+      let hppUpdated = 0;
+
+      hppSnap.forEach((docSnap) => {
+        const pData = docSnap.data();
+        let pChanged = false;
+        if (Array.isArray(pData.varian)) {
+          const newVarian = pData.varian.map((v: any) => {
+            if (Array.isArray(v.bahan)) {
+              let vChanged = false;
+              const newBahan = v.bahan.map((b: any) => {
+                const normalized = resolveCategoryName(b.kelompok, configuredCats);
+                if (normalized !== b.kelompok) {
+                  vChanged = true;
+                  return { ...b, kelompok: normalized };
+                }
+                return b;
+              });
+              if (vChanged) {
+                pChanged = true;
+                return { ...v, bahan: newBahan };
+              }
+            }
+            return v;
+          });
+          if (pChanged) {
+            hppUpdated++;
+            batch.set(docSnap.ref, sanitizeData({ ...pData, varian: newVarian }));
+          }
+        }
+      });
+
+      // 2. Normalize Stok ingredients
+      const stokSnap = await getDocs(collection(db, `users/${user.uid}/stok`));
+      let stokUpdated = 0;
+
+      stokSnap.forEach((docSnap) => {
+        const iData = docSnap.data();
+        const normalized = resolveCategoryName(iData.category, configuredCats);
+        if (normalized !== iData.category) {
+          stokUpdated++;
+          batch.set(docSnap.ref, sanitizeData({ ...iData, category: normalized }));
+        }
+      });
+
+      // 3. Clean up case duplicates in settings.kategori_hpp
+      const seen = new Set<string>();
+      const cleanCats: string[] = [];
+      for (const c of configuredCats) {
+        const lower = c.trim().toLowerCase();
+        if (!seen.has(lower) && lower) {
+          seen.add(lower);
+          cleanCats.push(c.trim());
+        }
+      }
+
+      const ref = doc(db, `users/${user.uid}/settings/kategori`);
+      batch.set(ref, sanitizeData({ ...settings, kategori_hpp: cleanCats }));
+
+      await batch.commit();
+      toast.success(`Berhasil merapikan kategori: ${hppUpdated} produk HPP & ${stokUpdated} stok disinkronkan! ✓`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/settings/kategori`);
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
 
   const setNewValue = (field: string, val: string) =>
     setNewValues((prev) => ({ ...prev, [field]: val }));
@@ -63,33 +143,166 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
     const user = auth.currentUser;
     if (!user) return;
 
+    setSavingField(field);
     try {
       if (field === 'kategori_hpp') {
-        const hppSnap = await getDocs(query(collection(db, `users/${user.uid}/hpp`), where('kategori', '==', value)));
-        if (!hppSnap.empty) { toast.error('Kategori masih digunakan di HPP!'); return; }
-        const stokSnap = await getDocs(query(collection(db, `users/${user.uid}/stok`), where('category', '==', value)));
-        if (!stokSnap.empty) { toast.error('Kategori masih digunakan di Stok!'); return; }
+        const lowerVal = value.trim().toLowerCase();
+        
+        // 1. Reassign any materials in HPP products matching lowerVal to 'Lainnya'
+        const hppSnap = await getDocs(collection(db, `users/${user.uid}/hpp`));
+        const batch = writeBatch(db);
+        let updatedHppCount = 0;
+
+        hppSnap.forEach((docSnap) => {
+          const pData = docSnap.data();
+          let pChanged = false;
+          if (Array.isArray(pData.varian)) {
+            const newVarian = pData.varian.map((v: any) => {
+              if (Array.isArray(v.bahan)) {
+                let vChanged = false;
+                const newBahan = v.bahan.map((b: any) => {
+                  if ((b.kelompok || '').trim().toLowerCase() === lowerVal) {
+                    vChanged = true;
+                    return { ...b, kelompok: 'Lainnya' };
+                  }
+                  return b;
+                });
+                if (vChanged) {
+                  pChanged = true;
+                  return { ...v, bahan: newBahan };
+                }
+              }
+              return v;
+            });
+            if (pChanged) {
+              updatedHppCount++;
+              batch.set(docSnap.ref, sanitizeData({ ...pData, varian: newVarian }));
+            }
+          }
+        });
+
+        // 2. Reassign any ingredients in Stock matching lowerVal to 'Lainnya'
+        const stokSnap = await getDocs(collection(db, `users/${user.uid}/stok`));
+        let updatedStokCount = 0;
+        stokSnap.forEach((docSnap) => {
+          const iData = docSnap.data();
+          if ((iData.category || '').trim().toLowerCase() === lowerVal) {
+            updatedStokCount++;
+            batch.set(docSnap.ref, sanitizeData({ ...iData, category: 'Lainnya' }));
+          }
+        });
+
+        // 3. Remove category from settings doc
+        const ref = doc(db, `users/${user.uid}/settings/kategori`);
+        const currentCats: string[] = settings.kategori_hpp || [];
+        const newCats = currentCats.filter(c => c.trim().toLowerCase() !== lowerVal);
+        batch.set(ref, sanitizeData({ ...settings, kategori_hpp: newCats }));
+
+        await batch.commit();
+        toast.success(`Kategori "${value}" dihapus (di-reset ke "Lainnya" pada ${updatedHppCount} produk & ${updatedStokCount} stok) ✓`);
+      } else {
+        const ref = doc(db, `users/${user.uid}/settings/kategori`);
+        await updateDoc(ref, sanitizeData({ [field]: arrayRemove(value) }));
+        toast.success('Berhasil dihapus');
       }
-      const ref = doc(db, `users/${user.uid}/settings/kategori`);
-      await updateDoc(ref, sanitizeData({ [field]: arrayRemove(value) }));
-      toast.success('Berhasil dihapus');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/settings/kategori`);
+    } finally {
+      setSavingField(null);
     }
   };
 
   const handleUpdateItem = async (field: string, oldValue: string) => {
-    if (!editValue.trim() || editValue === oldValue) { setEditingItem(null); return; }
+    const newValue = editValue.trim();
+    if (!newValue || newValue === oldValue) { setEditingItem(null); return; }
     const user = auth.currentUser;
     if (!user) return;
 
     setSavingField(field);
     try {
-      const ref = doc(db, `users/${user.uid}/settings/kategori`);
-      await updateDoc(ref, sanitizeData({ [field]: arrayRemove(oldValue) }));
-      await updateDoc(ref, sanitizeData({ [field]: arrayUnion(editValue.trim()) }));
+      const lowerOld = oldValue.trim().toLowerCase();
+
+      if (field === 'kategori_hpp') {
+        const hppSnap = await getDocs(collection(db, `users/${user.uid}/hpp`));
+        const batch = writeBatch(db);
+        let updatedHppCount = 0;
+
+        hppSnap.forEach((docSnap) => {
+          const pData = docSnap.data();
+          let pChanged = false;
+          if (Array.isArray(pData.varian)) {
+            const newVarian = pData.varian.map((v: any) => {
+              if (Array.isArray(v.bahan)) {
+                let vChanged = false;
+                const newBahan = v.bahan.map((b: any) => {
+                  if ((b.kelompok || '').trim().toLowerCase() === lowerOld) {
+                    vChanged = true;
+                    return { ...b, kelompok: newValue };
+                  }
+                  return b;
+                });
+                if (vChanged) {
+                  pChanged = true;
+                  return { ...v, bahan: newBahan };
+                }
+              }
+              return v;
+            });
+            if (pChanged) {
+              updatedHppCount++;
+              batch.set(docSnap.ref, sanitizeData({ ...pData, varian: newVarian }));
+            }
+          }
+        });
+
+        // Also update Stock ingredients
+        const stokSnap = await getDocs(collection(db, `users/${user.uid}/stok`));
+        let updatedStokCount = 0;
+        stokSnap.forEach((docSnap) => {
+          const iData = docSnap.data();
+          if ((iData.category || '').trim().toLowerCase() === lowerOld) {
+            updatedStokCount++;
+            batch.set(docSnap.ref, sanitizeData({ ...iData, category: newValue }));
+          }
+        });
+
+        // Update settings doc array
+        const ref = doc(db, `users/${user.uid}/settings/kategori`);
+        const currentCats: string[] = settings.kategori_hpp || [];
+        const newCats = currentCats.map(c => c.trim().toLowerCase() === lowerOld ? newValue : c);
+        if (!newCats.includes(newValue)) newCats.push(newValue);
+        batch.set(ref, sanitizeData({ ...settings, kategori_hpp: newCats }));
+
+        await batch.commit();
+        toast.success(`Kategori diperbarui ke "${newValue}" (tersinkron ke ${updatedHppCount} produk HPP & ${updatedStokCount} bahan stok) ✓`);
+      } else if (field === 'kategori_produk') {
+        const hppSnap = await getDocs(collection(db, `users/${user.uid}/hpp`));
+        const batch = writeBatch(db);
+        let updatedCount = 0;
+
+        hppSnap.forEach((docSnap) => {
+          const pData = docSnap.data();
+          if ((pData.kategori || '').trim().toLowerCase() === lowerOld) {
+            updatedCount++;
+            batch.set(docSnap.ref, sanitizeData({ ...pData, kategori: newValue }));
+          }
+        });
+
+        const ref = doc(db, `users/${user.uid}/settings/kategori`);
+        const currentCats: string[] = settings.kategori_produk || [];
+        const newCats = currentCats.map(c => c.trim().toLowerCase() === lowerOld ? newValue : c);
+        if (!newCats.includes(newValue)) newCats.push(newValue);
+        batch.set(ref, sanitizeData({ ...settings, kategori_produk: newCats }));
+
+        await batch.commit();
+        toast.success(`Kategori Produk diperbarui ke "${newValue}" (tersinkron ke ${updatedCount} produk) ✓`);
+      } else {
+        const ref = doc(db, `users/${user.uid}/settings/kategori`);
+        await updateDoc(ref, sanitizeData({ [field]: arrayRemove(oldValue) }));
+        await updateDoc(ref, sanitizeData({ [field]: arrayUnion(newValue) }));
+        toast.success('Berhasil diperbarui ✓');
+      }
       setEditingItem(null);
-      toast.success('Berhasil diperbarui ✓');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/settings/kategori`);
     } finally {
@@ -105,7 +318,7 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
   return (
     <div className="flex flex-col pb-28">
       {/* Page header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full h-9 w-9 shrink-0 -ml-1">
           <ArrowLeft className="w-5 h-5" />
         </Button>
@@ -116,6 +329,37 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
           <h2 className="text-lg font-black text-[#1A1A2E] leading-tight">Kelola Kategori & Label</h2>
           <p className="text-xs font-medium text-gray-400">Kustomisasi label untuk HPP, Produk, dan Satuan.</p>
         </div>
+      </div>
+
+      {/* Quick sync & normalize banner */}
+      <div className="mb-5 bg-gradient-to-r from-brand-50 to-amber-50/50 p-4 rounded-2xl border border-brand-100/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-white rounded-xl text-primary shadow-xs shrink-0">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-[#1A1A2E] uppercase tracking-wide">Sinkronisasi Otomatis</h4>
+            <p className="text-[11px] text-gray-500 mt-0.5">Rapikan variasi nama kategori (huruf besar/kecil & sinonim) di seluruh data HPP dan Stok.</p>
+          </div>
+        </div>
+        <Button
+          onClick={handleNormalizeAll}
+          disabled={isNormalizing}
+          size="sm"
+          className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-white font-bold text-xs rounded-xl shadow-xs shrink-0"
+        >
+          {isNormalizing ? (
+            <>
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              Merapikan...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+              Rapikan All Kategori
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Accordion sections */}

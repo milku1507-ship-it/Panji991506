@@ -23,6 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
+import { resolveCategoryName } from './HPPManager';
 import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
 
@@ -52,7 +53,8 @@ export default function StockManager({ user, ingredients, setIngredients, transa
 
   const filteredIngredients = ingredients.filter(i => {
     const matchesSearch = i.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = filterCategory === 'Semua' || i.category === filterCategory;
+    const matchesCategory = filterCategory === 'Semua' || 
+      resolveCategoryName(i.category, settings?.kategori_hpp).toLowerCase() === filterCategory.toLowerCase();
     return matchesSearch && matchesCategory;
   });
 

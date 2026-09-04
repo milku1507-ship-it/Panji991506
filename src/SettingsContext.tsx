@@ -10,7 +10,7 @@ interface SettingsContextType {
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export const DEFAULT_KATEGORI: KategoriSettings = {
-  kategori_hpp: ["Material Utama", "Material Pendukung", "Kemasan", "Overhead"],
+  kategori_hpp: ["Bahan baku", "Bumbu", "Packing", "Overhead", "Material Utama", "Material Pendukung", "Kemasan"],
   kategori_produk: ["Makanan", "Fashion", "Digital", "Jasa", "Lainnya"],
   satuan_unit: ["Gram", "Pcs", "Box", "Liter", "Kg", "Lembar", "Meter", "Set"]
 };
