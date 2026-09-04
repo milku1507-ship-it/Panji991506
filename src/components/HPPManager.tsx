@@ -1407,26 +1407,28 @@ function VariantPricingInputs({
     setIngredients(updatedIngredientsLocal);
     setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
 
-    // Persist to Firestore in a batch
+    // Persist to Firestore in a batch (non-blocking background)
     if (user) {
-      try {
-        const batch = writeBatch(db);
-        batch.set(
-          doc(db, `users/${user.uid}/hpp/${selectedProductId}`),
-          sanitizeData(updatedProduct)
-        );
-        for (const plan of ingredientPlans) {
-          const ingDoc = updatedIngredientsLocal.find(i => i.id === plan.id);
-          if (ingDoc) {
-            batch.set(doc(db, `users/${user.uid}/stok/${plan.id}`), sanitizeData(ingDoc));
+      (async () => {
+        try {
+          const batch = writeBatch(db);
+          batch.set(
+            doc(db, `users/${user.uid}/hpp/${selectedProductId}`),
+            sanitizeData(updatedProduct)
+          );
+          for (const plan of ingredientPlans) {
+            const ingDoc = updatedIngredientsLocal.find(i => i.id === plan.id);
+            if (ingDoc) {
+              batch.set(doc(db, `users/${user.uid}/stok/${plan.id}`), sanitizeData(ingDoc));
+            }
           }
+          await batch.commit();
+          console.log('[HPPManager] paste-hpp saved successfully in background batch.');
+        } catch (error) {
+          console.error('[HPPManager] paste-hpp save error:', error);
+          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/hpp/${selectedProductId}`);
         }
-        await batch.commit();
-      } catch (error) {
-        console.error('[HPPManager] paste-hpp save error:', error);
-        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/hpp/${selectedProductId}`);
-        throw error;
-      }
+      })();
     }
 
     toast.success(

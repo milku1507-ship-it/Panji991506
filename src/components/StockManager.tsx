@@ -78,11 +78,13 @@ export default function StockManager({ user, ingredients, setIngredients, transa
     setIngredients(prev => prev.map(i => i.id === id ? updatedIngredient : i));
 
     if (user) {
-      try {
-        await setDoc(doc(db, `users/${user.uid}/stok/${id}`), sanitizeData(updatedIngredient));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${id}`);
-      }
+      (async () => {
+        try {
+          await setDoc(doc(db, `users/${user.uid}/stok/${id}`), sanitizeData(updatedIngredient));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${id}`);
+        }
+      })();
     }
   };
 

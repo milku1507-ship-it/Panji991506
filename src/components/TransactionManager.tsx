@@ -498,21 +498,28 @@ export default function TransactionManager({ user, transactions, setTransactions
     }
     setTransactions(prev => [txToSave, ...prev]);
 
-    const batch = writeBatch(db);
-    batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
-    stockUpdates.forEach(update => {
-      batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
-        currentStock: increment(update.delta)
-      });
-    });
-    // Dompet atomic update (mutasi masuk / pengeluaran keluar)
-    if (dompetOp) {
-      batch.update(doc(db, `users/${user.uid}/dompet/${dompetOp.id}`), {
-        saldo_terkumpul: increment(dompetOp.delta)
-      });
+    if (user) {
+      (async () => {
+        try {
+          const batch = writeBatch(db);
+          batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
+          stockUpdates.forEach(update => {
+            batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
+              currentStock: increment(update.delta)
+            });
+          });
+          // Dompet atomic update (mutasi masuk / pengeluaran keluar)
+          if (dompetOp) {
+            batch.update(doc(db, `users/${user.uid}/dompet/${dompetOp.id}`), {
+              saldo_terkumpul: increment(dompetOp.delta)
+            });
+          }
+          await batch.commit();
+        } catch (err) {
+          console.error('[TransactionManager] Background batch commit error:', err);
+        }
+      })();
     }
-
-    await batch.commit();
     return txToSave;
   };
 
