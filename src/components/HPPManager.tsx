@@ -398,7 +398,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             lines.push(`   Minimal Order: ${v.min_order} pcs`);
           }
           lines.push(`   Batch Qty: ${v.qty_batch || 1} pcs`);
-          lines.push(`   Gaji / pack: ${formatCurrency(v.harga_packing || 0, true)}`);
+          lines.push(`   Gaji Produksi (1 Batch): ${formatCurrency(v.harga_packing || 0, true)} (Gaji / pcs: ${formatCurrency((v.harga_packing || 0) / (v.qty_batch || 1), true)})`);
 
           // List of ingredients (Bahan Baku)
           if (v.bahan && v.bahan.length > 0) {
@@ -836,7 +836,7 @@ function VariantPricingInputs({
         lines.push(`Minimal Order: ${variant.min_order} pcs`);
       }
       lines.push(`Batch Qty: ${variant.qty_batch || 1} pcs`);
-      lines.push(`Gaji / pack: ${formatCurrency(variant.harga_packing || 0, true)}`);
+      lines.push(`Gaji Produksi (1 Batch): ${formatCurrency(variant.harga_packing || 0, true)} (Gaji / pcs: ${formatCurrency((variant.harga_packing || 0) / (variant.qty_batch || 1), true)})`);
 
       // List of ingredients (Bahan Baku)
       if (variant.bahan && variant.bahan.length > 0) {
@@ -2490,8 +2490,9 @@ function VariantPricingInputs({
             </div>
             <VariantPricingSection editingVariant={editingVariant} />
             <div className="space-y-2">
-              <Label htmlFor="harga_packing" className="font-bold">Gaji / pack</Label>
-              <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
+              <Label htmlFor="harga_packing" className="font-bold">Total Gaji Produksi 1 Batch (Rp)</Label>
+              <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing ?? 12000} required className="rounded-xl font-bold" />
+              <p className="text-[11px] text-gray-400 font-medium">Upah/gaji untuk 1 batch ({editingVariant?.qty_batch || 1} pcs). Nilai per pcs akan dihitung otomatis di Rincian HPP (Gaji / pcs) dan dipakai di Laporan Penjualan.</p>
             </div>
 
             <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">

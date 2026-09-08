@@ -488,7 +488,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                   <p className="text-[10px] font-bold text-gray-400 mt-0.5">Komponen bahan baku</p>
                 </div>
                 <div className="bg-purple-50/70 border border-purple-100 rounded-2xl p-4">
-                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">Gaji / Pack</p>
+                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">Gaji / pcs</p>
                   <p className="text-lg font-black text-purple-700">{formatCurrency(totalGajiHPP, true)}</p>
                   <p className="text-[10px] font-bold text-purple-500 mt-0.5">Alokasi upah ({totalQty} pcs)</p>
                 </div>
@@ -512,7 +512,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
               <div className="mt-4">
                 <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1.5 flex-wrap gap-2">
                   <span>Bahan Baku: {totalNet > 0 ? ((totalBahanHPP / totalNet) * 100).toFixed(1) : 0}%</span>
-                  <span className="text-purple-600 font-extrabold">Gaji / Pack: {totalNet > 0 ? ((totalGajiHPP / totalNet) * 100).toFixed(1) : 0}%</span>
+                  <span className="text-purple-600 font-extrabold">Gaji / pcs: {totalNet > 0 ? ((totalGajiHPP / totalNet) * 100).toFixed(1) : 0}%</span>
                   <span className={cn(isPositive ? "text-green-600" : "text-red-500", "font-extrabold")}>Profit: {profitMargin.toFixed(1)}%</span>
                 </div>
                 <div className="h-2.5 w-full bg-gray-100 rounded-full overflow-hidden flex">
@@ -524,7 +524,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                   <div
                     className="h-full bg-purple-400 transition-all"
                     style={{ width: `${Math.min(100, totalNet > 0 ? (totalGajiHPP / totalNet) * 100 : 0)}%` }}
-                    title={`Gaji / Pack: ${formatCurrency(totalGajiHPP, true)}`}
+                    title={`Gaji / pcs: ${formatCurrency(totalGajiHPP, true)}`}
                   />
                   <div
                     className={cn("h-full rounded-r-full transition-all", isPositive ? "bg-green-400" : "bg-red-400")}
@@ -702,7 +702,7 @@ export default function FinancialReport({ transactions, products, dompets = [] }
                               <p className="text-gray-600 text-xs font-black">{formatCurrency(v.totalHPP, true)}</p>
                             </div>
                             <div>
-                              Gaji / Pack:
+                              Gaji / pcs:
                               <p className="text-purple-600 text-xs font-black">{formatCurrency(v.totalGajiHPP, true)}</p>
                             </div>
                             <div>

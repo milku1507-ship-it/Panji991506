@@ -323,7 +323,7 @@ export default function PasteHppDialog({
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Gaji / pack
+                  Total Gaji 1 Batch (Rp)
                 </Label>
                 <Input
                   type="number"
