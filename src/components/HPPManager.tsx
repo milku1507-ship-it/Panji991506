@@ -2016,18 +2016,40 @@ function VariantPricingInputs({
                     </span>
                   </div>
                   <div className="pt-2 border-t border-dashed border-gray-100 mt-2 space-y-2">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500 font-bold">Komponen / pcs</span>
-                      <span className="font-black text-gray-900">
-                        {formatCurrency(calculateMaterialsPerPcs(activeHppVariant.bahan, activeHppVariant.qty_batch), true)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500 font-bold">Gaji / pcs</span>
-                      <span className="font-black text-gray-900">
-                        {formatCurrency((Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1), true)}
-                      </span>
-                    </div>
+                    {(() => {
+                      const totalHppPcs = calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch);
+                      const materialsPcs = calculateMaterialsPerPcs(activeHppVariant.bahan, activeHppVariant.qty_batch);
+                      const gajiPcs = (Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1);
+                      const matPct = totalHppPcs > 0 ? (materialsPcs / totalHppPcs) * 100 : 0;
+                      const gajiPct = totalHppPcs > 0 ? (gajiPcs / totalHppPcs) * 100 : 0;
+
+                      return (
+                        <>
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-gray-500 font-bold">Komponen / pcs</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-gray-900">
+                                {formatCurrency(materialsPcs, true)}
+                              </span>
+                              <span className="text-[11px] font-bold text-gray-400">
+                                ({matPct.toFixed(1)}%)
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-gray-500 font-bold">Gaji / pcs</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-purple-700">
+                                {formatCurrency(gajiPcs, true)}
+                              </span>
+                              <Badge variant="secondary" className="bg-purple-100 text-purple-700 border-none text-[11px] font-black px-1.5 py-0 h-5">
+                                {gajiPct.toFixed(1)}% HPP
+                              </Badge>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                     {(() => {
                       const allFees = [
                         ...(selectedProduct?.biaya_lain || []),
