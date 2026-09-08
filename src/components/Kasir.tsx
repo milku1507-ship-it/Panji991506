@@ -225,7 +225,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
     setCart(prev => {
       const existing = prev.find(i => i.variantId === variant.id);
       const vData = product.varian.find(v => v.id === variant.id);
-      const minOrder = vData ? Math.max(1, Number(vData.min_order) || 1) : 1;
+      const minOrder = Math.max(1, Number(vData?.min_order ?? product.min_order) || 1);
       if (existing) return prev.map(i => i.variantId === variant.id ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, {
         productId: product.id,
@@ -243,7 +243,7 @@ export default function Kasir({ user, products, ingredients, setIngredients, sto
       if (i.variantId === variantId) {
         const product = products.find(p => p.id === i.productId);
         const vData = product?.varian.find(v => v.id === variantId);
-        const minOrder = vData ? Math.max(1, Number(vData.min_order) || 1) : 1;
+        const minOrder = Math.max(1, Number(vData?.min_order ?? product?.min_order) || 1);
         const newQty = i.qty + delta;
         if (delta < 0 && newQty < minOrder) return { ...i, qty: 0 };
         return { ...i, qty: newQty };

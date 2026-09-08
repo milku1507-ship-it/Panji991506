@@ -140,7 +140,7 @@ export default function StoreCatalog({ userId, onBack }: StoreCatalogProps) {
         if (i.variantId === variantId) {
           const product = products.find(p => p.id === i.productId);
           const variant = product?.varian.find(v => v.id === variantId);
-          const minOrder = variant ? Math.max(1, Number(variant.min_order) || 1) : 1;
+          const minOrder = variant ? Math.max(1, Number(variant.min_order ?? product?.min_order) || 1) : Math.max(1, Number(product?.min_order) || 1);
           const newQty = i.qty + delta;
           if (delta < 0 && newQty < minOrder) return { ...i, qty: 0 }; // Will be filtered out
           return { ...i, qty: newQty };
@@ -156,7 +156,7 @@ export default function StoreCatalog({ userId, onBack }: StoreCatalogProps) {
     const initialVariant = sellable[0];
     setSelectedProduct(product);
     setSelectedVariantId(initialVariant?.id || '');
-    setDetailQty(initialVariant ? Math.max(1, Number(initialVariant.min_order) || 1) : 1);
+    setDetailQty(initialVariant ? Math.max(1, Number(initialVariant.min_order ?? product.min_order) || 1) : Math.max(1, Number(product.min_order) || 1));
     setDetailNote('');
   };
 
@@ -531,7 +531,7 @@ export default function StoreCatalog({ userId, onBack }: StoreCatalogProps) {
                         {selectedProduct.varian.filter(v => v.harga_jual > 0).map(v => {
                           const active = selectedVariantId === v.id;
                           return (
-                            <button key={v.id} onClick={() => { setSelectedVariantId(v.id); setDetailQty(Math.max(1, Number(v.min_order) || 1)); }}
+                            <button key={v.id} onClick={() => { setSelectedVariantId(v.id); setDetailQty(Math.max(1, Number(v.min_order ?? selectedProduct.min_order) || 1)); }}
                               className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl border-2 transition-all ${active ? 'border-red-500 bg-red-50' : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}>
                               <div className="flex items-center gap-3">
                                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${active ? 'border-red-500 bg-red-500' : 'border-gray-300'}`}>
@@ -571,7 +571,7 @@ export default function StoreCatalog({ userId, onBack }: StoreCatalogProps) {
                   {/* Qty stepper */}
                   <div className="flex items-center gap-3">
                     <button onClick={() => setDetailQty(q => {
-                      const minOrder = Math.max(1, Number(selectedProduct.varian.find(v => v.id === selectedVariantId)?.min_order) || 1);
+                      const minOrder = Math.max(1, Number(selectedProduct.varian.find(v => v.id === selectedVariantId)?.min_order ?? selectedProduct.min_order) || 1);
                       return Math.max(minOrder, q - 1);
                     })}
                       className="w-10 h-10 rounded-full border-2 border-gray-200 flex items-center justify-center text-gray-600 hover:border-gray-300 transition-colors">
@@ -753,7 +753,7 @@ function MenuListItem({
             {minPrice === maxPrice ? `Rp${formatRp(minPrice)}` : `Rp${formatRp(minPrice)} – Rp${formatRp(maxPrice)}`}
           </p>
           {(() => {
-            const minOrder = Math.min(...sellable.map(v => Number(v.min_order) || 1));
+            const minOrder = Math.min(...sellable.map(v => Number(v.min_order ?? product.min_order) || 1));
             if (minOrder > 1) {
               return (
                 <span className="text-[9px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded uppercase border border-amber-200 shadow-sm">

@@ -1463,7 +1463,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   let v1TotalFeePct = 0, v1TotalFeeNominalOrder = 0;
 
   if (v1Product && v1Variant) {
-    v1MinOrder = Math.max(1, Number(v1Variant.min_order) || 1);
+    v1MinOrder = Math.max(1, Number(v1Variant.min_order ?? v1Product.min_order) || 1);
     v1HargaPcs = v1Variant.harga_jual;
     v1HppPcs = calcHppPerPcs(v1Variant, ingredients);
     
@@ -1501,7 +1501,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
   if (v2Product && v2Product.varian?.length) {
     let sumOrderPrice = 0, sumOrderMargin = 0, sumFeePct = 0, sumPotongan = 0;
     v2Product.varian.forEach(v => {
-      const vMinOrder = Math.max(1, Number(v.min_order) || 1);
+      const vMinOrder = Math.max(1, Number(v.min_order ?? v2Product.min_order) || 1);
       if (vMinOrder > v2MinOrder) v2MinOrder = vMinOrder;
       
       const vHargaOrder = v.harga_jual * vMinOrder;
@@ -1542,7 +1542,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     let sumOrderPrice = 0, sumOrderMargin = 0, sumFeePct = 0, sumPotongan = 0;
     products.filter(p => v3SelectedProductIds.includes(p.id)).forEach(p => {
       p.varian?.forEach(v => {
-        const pMinOrder = Math.max(1, Number(v.min_order) || 1);
+        const pMinOrder = Math.max(1, Number(v.min_order ?? p.min_order) || 1);
         totalVariantsGroup++;
         
         const vHargaOrder = v.harga_jual * pMinOrder;
@@ -2400,7 +2400,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
 
               {/* Multi-Varian Mode */}
               {adMode === 'product' && v2Product && v2Product.varian?.map(v => {
-                const vMinOrder = Math.max(1, Number(v.min_order) || 1);
+                const vMinOrder = Math.max(1, Number(v.min_order ?? v2Product.min_order) || 1);
                 const hppPcs = calcHppPerPcs(v, ingredients);
                 const feeConf = extractFeeRates(v2Product, v);
                 const feePct = feeConf.percentRate;
@@ -2518,7 +2518,7 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
               {/* Grup Iklan Mode */}
               {adMode === 'group' && v3SelectedProductIds.length > 0 && products.filter(p => v3SelectedProductIds.includes(p.id)).map(p => {
                 return p.varian?.map(v => {
-                  const pMinOrder = Math.max(1, Number(v.min_order) || 1);
+                  const pMinOrder = Math.max(1, Number(v.min_order ?? p.min_order) || 1);
                   const hppPcs = calcHppPerPcs(v, ingredients);
                   const feeConf = extractFeeRates(p, v);
                   const feePct = feeConf.percentRate;

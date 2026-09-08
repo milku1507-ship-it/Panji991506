@@ -48,6 +48,7 @@ export type Product = {
   deskripsi?: string;
   foto?: string;
   kategori?: string;
+  min_order?: number;
   varian: Variant[];
   biaya_lain?: AdditionalFee[];
 };

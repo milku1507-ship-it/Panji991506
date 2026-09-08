@@ -216,6 +216,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const nama = (formData.get('nama') as string || '').trim();
       const sku = (formData.get('sku') as string || '').trim();
       const deskripsi = (formData.get('deskripsi') as string || '').trim();
+      const min_order = Math.max(1, parseInt(formData.get('min_order') as string) || 1);
 
       if (!nama) {
         toast.error('Nama produk wajib diisi');
@@ -224,12 +225,18 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       }
 
       if (editingProduct) {
+        const updatedVarian = (editingProduct.varian || []).map(v => ({
+          ...v,
+          min_order,
+        }));
         const updatedProduct = { 
           ...editingProduct, 
           nama, 
           sku, 
           deskripsi, 
           foto: productPhoto,
+          min_order,
+          varian: updatedVarian,
           biaya_lain: productFees 
         };
         
@@ -259,6 +266,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           nama,
           deskripsi,
           foto: productPhoto,
+          min_order,
           varian: [],
           biaya_lain: productFees
         };
@@ -668,7 +676,6 @@ function VariantPricingInputs({
       const diskon_persen_raw = parseFloat(formData.get('diskon_persen') as string) || 0;
       const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
       const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
-      const min_order = Math.max(1, parseInt(formData.get('min_order') as string) || 1);
 
       let harga_coret: number | undefined = undefined;
       let diskon_persen: number | undefined = undefined;
@@ -694,6 +701,8 @@ function VariantPricingInputs({
       if (!product) {
         throw new Error("Produk tidak ditemukan");
       }
+
+      const min_order = product.min_order ?? editingVariant?.min_order ?? 1;
 
       let updatedVarian;
       if (editingVariant) {
@@ -2028,7 +2037,7 @@ function VariantPricingInputs({
                       const econ = calculateProductEconomics({
                         sellingPrice: activeHppVariant.harga_jual,
                         hppPcs: 0,
-                        minOrder: Number(activeHppVariant.min_order) || 1,
+                        minOrder: Number(activeHppVariant.min_order ?? selectedProduct?.min_order) || 1,
                         additionalCosts: allFees,
                       });
                       return (
@@ -2140,7 +2149,7 @@ function VariantPricingInputs({
                     const econ = calculateProductEconomics({
                       sellingPrice: activeHppVariant.harga_jual,
                       hppPcs: hppBase,
-                      minOrder: Number(activeHppVariant.min_order) || 1,
+                      minOrder: Number(activeHppVariant.min_order ?? selectedProduct?.min_order) || 1,
                       additionalCosts: allFees,
                     });
                     const labaBersih = econ.profitBeforeAdsPerUnit;
@@ -2373,6 +2382,21 @@ function VariantPricingInputs({
               <Input id="deskripsi" name="deskripsi" defaultValue={editingProduct?.deskripsi || ''} placeholder="Contoh: Produk dengan berbagai pilihan varian" className="rounded-xl" />
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="min_order" className="font-bold">Minimal Order (pcs)</Label>
+              <Input 
+                id="min_order" 
+                name="min_order" 
+                type="number" 
+                min={1} 
+                defaultValue={editingProduct?.min_order || 1} 
+                required 
+                className="rounded-xl h-12" 
+                placeholder="Contoh: 1" 
+              />
+              <p className="text-[11px] text-gray-400 font-medium">Jumlah pembelian minimum per checkout untuk semua varian produk ini.</p>
+            </div>
+
             <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">
               <div className="flex items-center justify-between">
                 <Label className="font-bold text-sm">Pajak / Biaya Tambahan</Label>
@@ -2469,32 +2493,6 @@ function VariantPricingInputs({
               <Label htmlFor="harga_packing" className="font-bold">Gaji / pack</Label>
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
             </div>
-            {(() => {
-              const v = editingVariant;
-              const materials = v ? v.bahan.reduce((a, b) => a + getMaterialCost(b), 0) : 0;
-              const qb = Math.max(1, v?.qty_batch || 1);
-              const matPerPcs = materials / qb;
-              const hj = v?.harga_jual || 0;
-              const hp = v?.harga_packing || 0;
-              const margin = hj - matPerPcs;
-              const suggested = margin > 0 ? Math.max(1, Math.ceil(hp / margin)) : null;
-              const defaultMin = v?.min_order ?? (suggested || 1);
-              return (
-                <div className="space-y-2">
-                  <Label htmlFor="min_order" className="font-bold">Minimal Order (pcs)</Label>
-                  <Input id="min_order" name="min_order" type="number" min={1} defaultValue={defaultMin} required className="rounded-xl h-12" />
-                  {suggested !== null ? (
-                    <p className="text-[11px] text-gray-500 font-medium">
-                      Saran logis: <span className="font-bold text-primary">{suggested} pcs</span> — agar biaya gaji 1 pack ({formatCurrency(hp, true)}) tertutup oleh margin per pcs ({formatCurrency(margin, true)}).
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-amber-600 font-medium">
-                      Margin per pcs masih rugi. Naikkan harga jual atau turunkan biaya bahan dulu.
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
 
             <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">
               <div className="flex items-center justify-between">
