@@ -2020,11 +2020,11 @@ function VariantPricingInputs({
                       const totalHppPcs = calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch);
                       const materialsPcs = calculateMaterialsPerPcs(activeHppVariant.bahan, activeHppVariant.qty_batch);
                       const gajiPcs = (Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1);
-                      const matPct = totalHppPcs > 0 ? (materialsPcs / totalHppPcs) * 100 : 0;
-                      const gajiPct = totalHppPcs > 0 ? (gajiPcs / totalHppPcs) * 100 : 0;
+                      const matPct = totalHppPcs > 0 && isFinite(materialsPcs / totalHppPcs) ? (materialsPcs / totalHppPcs) * 100 : 0;
+                      const gajiPct = totalHppPcs > 0 && isFinite(gajiPcs / totalHppPcs) ? (gajiPcs / totalHppPcs) * 100 : 0;
 
                       return (
-                        <>
+                        <div key="summary-breakdown" className="space-y-2">
                           <div className="flex justify-between items-center text-sm">
                             <span className="text-gray-500 font-bold">Komponen / pcs</span>
                             <div className="flex items-center gap-1.5">
@@ -2047,7 +2047,7 @@ function VariantPricingInputs({
                               </Badge>
                             </div>
                           </div>
-                        </>
+                        </div>
                       );
                     })()}
                     {(() => {

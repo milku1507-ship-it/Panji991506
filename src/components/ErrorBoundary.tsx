@@ -48,6 +48,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           }
         } else if (message.includes('offline')) {
           errorMessage = "Koneksi terputus. Pastikan internet kamu aktif dan coba lagi.";
+        } else if (message.includes('insertBefore') || message.includes('removeChild') || message.includes('NotFoundError')) {
+          errorMessage = "Terjadi konflik rendering DOM browser (biasanya karena fitur Terjemahan Otomatis / Google Translate di Chrome). Silakan muat ulang.";
         }
       } catch (e) {
         // Not a JSON error or other error
