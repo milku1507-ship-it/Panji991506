@@ -83,6 +83,62 @@ function parseQty(token: string): { qty: number; unit: string } | null {
   return { qty, unit };
 }
 
+// ─── Fraction Normalizer & Unit Converter ─────────────────────────────────────
+
+function normalizeFractions(str: string): string {
+  return str
+    .replace(/(\d+)\s*½/g, '$1.5')
+    .replace(/(\d+)\s*¼/g, '$1.25')
+    .replace(/(\d+)\s*¾/g, '$1.75')
+    .replace(/½/g, '0.5')
+    .replace(/¼/g, '0.25')
+    .replace(/¾/g, '0.75')
+    .replace(/(\d+)\s+1\/2(?=\s*([a-zA-Z]|$))/g, '$1.5')
+    .replace(/1\/2(?=\s*([a-zA-Z]|$))/g, '0.5')
+    .replace(/(\d+)\s+1\/4(?=\s*([a-zA-Z]|$))/g, '$1.25')
+    .replace(/1\/4(?=\s*([a-zA-Z]|$))/g, '0.25')
+    .replace(/(\d+)\s+3\/4(?=\s*([a-zA-Z]|$))/g, '$1.75')
+    .replace(/3\/4(?=\s*([a-zA-Z]|$))/g, '0.75');
+}
+
+function convertUnitIfNeeded(qty: number, fromUnit?: string, toUnit?: string): number {
+  if (!qty || !fromUnit || !toUnit) return qty;
+  const from = fromUnit.toLowerCase().trim();
+  const to = toUnit.toLowerCase().trim();
+  if (from === to) return qty;
+
+  // gram / gr / g -> kg / kilogram
+  if ((from === 'gr' || from === 'gram' || from === 'g') && (to === 'kg' || to === 'kilogram')) {
+    return Math.round((qty / 1000) * 1000) / 1000;
+  }
+  // kg / kilogram -> gram / gr / g
+  if ((from === 'kg' || from === 'kilogram') && (to === 'gr' || to === 'gram' || to === 'g')) {
+    return qty * 1000;
+  }
+  // ons -> kg (1 ons = 100 gram = 0.1 kg)
+  if (from === 'ons' && (to === 'kg' || to === 'kilogram')) {
+    return Math.round((qty * 0.1) * 100) / 100;
+  }
+  // ml -> liter / lt / l
+  if (from === 'ml' && (to === 'liter' || to === 'lt' || to === 'l')) {
+    return Math.round((qty / 1000) * 1000) / 1000;
+  }
+  return qty;
+}
+
+function isPureNominal(s: string): boolean {
+  const clean = s.trim().replace(/^rp\s*/i, '');
+  return /^[\d]+(?:[.,][\d]+)*(?:rb|ribu|k|jt)?$/i.test(clean) && parseNominal(clean) !== null;
+}
+
+function tokensHasNominal(text: string): boolean {
+  const toks = text.split(/\s+/).filter(Boolean);
+  return toks.some(t => {
+    const nom = parseNominal(t);
+    return nom !== null && nom > 0;
+  });
+}
+
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
 
 function todayStr() {
@@ -98,7 +154,7 @@ function offsetDate(days: number): string {
 const BULAN: Record<string, number> = {
   jan: 1, januari: 1, feb: 2, februari: 2, mar: 3, maret: 3,
   apr: 4, april: 4, mei: 5, jun: 6, juni: 6, jul: 7, juli: 7,
-  agu: 8, agustus: 8, sep: 9, september: 9, okt: 10, oktober: 10,
+  agu: 8, agustus: 8, sep: 9, sept: 9, september: 9, okt: 10, oktober: 10,
   nov: 11, november: 11, des: 12, desember: 12,
 };
 
@@ -107,7 +163,8 @@ function extractDateFromTokens(
   defaultDate: string,
 ): { date: string; indices: number[] } | null {
   for (let i = 0; i < tokens.length; i++) {
-    const t0 = tokens[i].toLowerCase();
+    const rawT = tokens[i].trim().replace(/^[\(\[\{]/, '').replace(/[\)\]\}:;,]$/, '');
+    const t0 = rawT.toLowerCase();
 
     if (t0 === 'kemarin') return { date: offsetDate(-1), indices: [i] };
     if (t0 === 'kemarin2' || t0 === 'kemarinnya') return { date: offsetDate(-2), indices: [i] };
@@ -131,13 +188,14 @@ function extractDateFromTokens(
     }
 
     if ((t0 === 'tgl' || t0 === 'tanggal') && tokens[i + 1]) {
-      const day = parseInt(tokens[i + 1]);
+      const day = parseInt(tokens[i + 1].replace(/[^0-9]/g, ''));
       if (!isNaN(day) && day >= 1 && day <= 31) {
         if (tokens[i + 2]) {
-          const monthNum = BULAN[tokens[i + 2].toLowerCase()];
+          const mClean = tokens[i + 2].toLowerCase().replace(/[^a-z]/g, '');
+          const monthNum = BULAN[mClean];
           if (monthNum) {
-            if (tokens[i + 3] && /^\d{4}$/.test(tokens[i + 3])) {
-              const y = tokens[i + 3];
+            if (tokens[i + 3] && /^\d{4}/.test(tokens[i + 3])) {
+              const y = tokens[i + 3].substring(0, 4);
               const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
               return { date: `${y}-${mo}-${d}`, indices: [i, i + 1, i + 2, i + 3] };
             }
@@ -154,10 +212,11 @@ function extractDateFromTokens(
 
     if (/^\d{1,2}$/.test(t0) && tokens[i + 1]) {
       const day = parseInt(t0);
-      const monthNum = BULAN[tokens[i + 1].toLowerCase()];
+      const mClean = tokens[i + 1].toLowerCase().replace(/[^a-z]/g, '');
+      const monthNum = BULAN[mClean];
       if (!isNaN(day) && day >= 1 && day <= 31 && monthNum) {
-        if (tokens[i + 2] && /^\d{4}$/.test(tokens[i + 2])) {
-          const y = tokens[i + 2];
+        if (tokens[i + 2] && /^\d{4}/.test(tokens[i + 2])) {
+          const y = tokens[i + 2].substring(0, 4);
           const d = String(day).padStart(2, '0'), mo = String(monthNum).padStart(2, '0');
           return { date: `${y}-${mo}-${d}`, indices: [i, i + 1, i + 2] };
         }
@@ -182,29 +241,73 @@ const JUAL_KEYWORDS = ['jual', 'jualin', 'jualan', 'penjualan', 'selling', 'sold
 const BELI_KEYWORDS = ['beli', 'belin', 'beliin', 'pembelian', 'bayar', 'bayarin', 'kulak', 'kulakan', 'restock', 'belanja', 'nota', 'ongkir', 'transport', 'gaji', 'listrik', 'sewa', 'pengeluaran'];
 
 const CATEGORY_KEYWORDS: Record<string, { jenis: 'Pengeluaran' | 'Pemasukan'; kategori: string }> = {
-  gaji: { jenis: 'Pengeluaran', kategori: 'Gaji' },
-  upah: { jenis: 'Pengeluaran', kategori: 'Gaji' },
-  karyawan: { jenis: 'Pengeluaran', kategori: 'Gaji' },
-  listrik: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  air: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  gas: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  operasional: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  transportasi: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  bensin: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  sewa: { jenis: 'Pengeluaran', kategori: 'Operasional' },
-  tabungan: { jenis: 'Pengeluaran', kategori: 'Tabungan' },
-  nabung: { jenis: 'Pengeluaran', kategori: 'Tabungan' },
-  iklan: { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
-  promosi: { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
-  ads: { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
-  saldo: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
-  modal: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
-  sisa: { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
-  'sisa uang': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
-  'saldo sisa': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  // Pemasukan Penjualan / Penarikan Dana Marketplace
+  'tarik dana shopee': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik saldo shopee': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik shopee': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik dana': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik saldo': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik tunai': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'pencairan dana': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'pencairan': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'penarikan dana': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'penarikan': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+  'tarik': { jenis: 'Pemasukan', kategori: 'Penjualan' },
+
+  // Biaya Iklan & Promosi (harus sebelum 'saldo' agar 'isi saldo iklan' tidak jadi Pemasukan)
+  'isi saldo iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'top up iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'topup iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'saldo iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'biaya iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'shopee ads': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'iklan': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'promosi': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+  'ads': { jenis: 'Pengeluaran', kategori: 'Biaya Iklan' },
+
+  // Packing & Packaging
+  'paket lakban': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'bubble wrap': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'bubble': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'lakban': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'solasi': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'plastik': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'dus': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'kardus': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'packing': { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'kemasan': { jenis: 'Pengeluaran', kategori: 'Packing' },
+
+  // Operasional & Peralatan
+  'alat vakum': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'vakum': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'alat': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'bensin': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'bbm': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'gas': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'listrik': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'air': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'operasional': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'transportasi': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+  'sewa': { jenis: 'Pengeluaran', kategori: 'Operasional' },
+
+  // Gaji
+  'gaji': { jenis: 'Pengeluaran', kategori: 'Gaji' },
+  'upah': { jenis: 'Pengeluaran', kategori: 'Gaji' },
+  'karyawan': { jenis: 'Pengeluaran', kategori: 'Gaji' },
+
+  // Tabungan
+  'tabungan': { jenis: 'Pengeluaran', kategori: 'Tabungan' },
+  'nabung': { jenis: 'Pengeluaran', kategori: 'Tabungan' },
+
+  // Saldo Sisa / Kas
   'saldo awal': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
-  packing: { jenis: 'Pengeluaran', kategori: 'Packing' },
-  kemasan: { jenis: 'Pengeluaran', kategori: 'Packing' },
+  'saldo sisa': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'sisa uang': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'sisa saldo': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'modal awal': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'modal': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'saldo': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
+  'sisa': { jenis: 'Pemasukan', kategori: 'Saldo sisa' },
 };
 
 function resolveCategory(
@@ -246,6 +349,8 @@ const COMMON_ALIASES: Record<string, string> = {
   baso: 'bakso',
   bso: 'bakso',
   terigu: 'tepung terigu',
+  tepung: 'tepung',
+  jando: 'jando',
   cabe: 'cabe',
   cabai: 'cabe',
   minyak: 'minyak goreng',
@@ -313,7 +418,8 @@ function parseLine(
   hppCategories: string[] = [],
   forcedJenis?: 'Pemasukan' | 'Pengeluaran' | null,
 ): QuickEntryFields | null {
-  const line = raw.trim();
+  // Bersihkan teks catatan pinjaman jika ada
+  let line = raw.replace(/\bini\s+pinjam\s+ke\s+[a-zA-Z0-9_]+\b/gi, '').trim();
   if (!line) return null;
   let tokens = line.split(/\s+/);
   if (tokens.length === 0) return null;
@@ -343,7 +449,8 @@ function parseLine(
   if (actionIdx >= 0) tokens = tokens.filter((_, i) => i !== actionIdx);
 
   const lineLower = tokens.join(' ').toLowerCase();
-  for (const [kw, meta] of Object.entries(CATEGORY_KEYWORDS)) {
+  const sortedCategoryKeywords = Object.entries(CATEGORY_KEYWORDS).sort((a, b) => b[0].length - a[0].length);
+  for (const [kw, meta] of sortedCategoryKeywords) {
     if (lineLower.includes(kw)) { jenis = meta.jenis; kategori = meta.kategori; break; }
   }
   if (kategori === 'Lainnya') {
@@ -354,6 +461,7 @@ function parseLine(
 
   let nominal = 0;
   let qty_beli = 0;
+  let inputUnit = 'pcs';
   const usedIndices = new Set<number>();
   const descTokens: string[] = [];
 
@@ -363,9 +471,10 @@ function parseLine(
     //    Must run before parseNominal so "1" isn't grabbed as Rp 1.
     if (qty_beli === 0 && i + 1 < tokens.length) {
       const bareNum = tokens[i].match(/^[\d]+(?:[.,][\d]+)?$/);
-      const nextLower = tokens[i + 1].toLowerCase();
+      const nextLower = tokens[i + 1].toLowerCase().replace(/[,;:]$/, '');
       if (bareNum && UNIT_WORDS.has(nextLower) && !usedIndices.has(i + 1)) {
         qty_beli = parseFloat(tokens[i].replace(',', '.'));
+        inputUnit = nextLower;
         usedIndices.add(i);
         usedIndices.add(i + 1);
         continue;
@@ -375,12 +484,13 @@ function parseLine(
     //    treated as a price, not qty=21000 (parseQty allows a missing unit).
     const nom = parseNominal(tokens[i]);
     if (nom !== null && nom > 0) { if (nom > nominal) nominal = nom; usedIndices.add(i); continue; }
-    // ③ Number+unit fused in one token (e.g. "1kg", "2liter").
-    //    parseNominal returns null for these (suffix not in rb/k/jt/…), so they
-    //    safely reach this branch.
+    // ③ Number+unit fused in one token (e.g. "1kg", "4597gr", "250gr", "100gr").
     const qtyParsed = parseQty(tokens[i]);
     if (qtyParsed && qtyParsed.qty > 0 && qtyParsed.qty < 100_000 && qty_beli === 0) {
-      qty_beli = qtyParsed.qty; usedIndices.add(i); continue;
+      qty_beli = qtyParsed.qty;
+      inputUnit = qtyParsed.unit;
+      usedIndices.add(i);
+      continue;
     }
   }
   for (let i = 0; i < tokens.length; i++) {
@@ -415,6 +525,9 @@ function parseLine(
     if (exactIng) {
       materialId = exactIng.id;
       if (kategori === 'Lainnya' && exactIng.category) kategori = exactIng.category;
+      if (qty_beli > 0 && exactIng.unit) {
+        qty_beli = convertUnitIfNeeded(qty_beli, inputUnit, exactIng.unit);
+      }
       if (nominal === 0 && qty_beli > 0) nominal = Math.round(exactIng.price * qty_beli);
       else if (nominal > 0 && qty_beli === 0 && exactIng.price > 0) qty_beli = Math.round((nominal / exactIng.price) * 100) / 100;
       keterangan = `Beli ${exactIng.name}`;
@@ -435,6 +548,9 @@ function parseLine(
         const singleIng = matchedIngs[0];
         materialId = singleIng.id;
         if (kategori === 'Lainnya' && singleIng.category) kategori = singleIng.category;
+        if (qty_beli > 0 && singleIng.unit) {
+          qty_beli = convertUnitIfNeeded(qty_beli, inputUnit, singleIng.unit);
+        }
         if (nominal === 0 && qty_beli > 0) nominal = Math.round(singleIng.price * qty_beli);
         else if (nominal > 0 && qty_beli === 0 && singleIng.price > 0) qty_beli = Math.round((nominal / singleIng.price) * 100) / 100;
         keterangan = `Beli ${singleIng.name}`;
@@ -446,6 +562,9 @@ function parseLine(
         const primaryIng = matchedIngs[0];
         materialId = primaryIng.id;
         if (kategori === 'Lainnya' && primaryIng.category) kategori = primaryIng.category;
+        if (qty_beli > 0 && primaryIng.unit) {
+          qty_beli = convertUnitIfNeeded(qty_beli, inputUnit, primaryIng.unit);
+        }
         if (nominal === 0 && qty_beli > 0) nominal = Math.round(primaryIng.price * qty_beli);
         else if (nominal > 0 && qty_beli === 0 && primaryIng.price > 0) qty_beli = Math.round((nominal / primaryIng.price) * 100) / 100;
         keterangan = `Beli ${primaryIng.name}`;
@@ -598,26 +717,83 @@ function parseAll(
   today: string,
   hppCategories: string[] = [],
 ): { raw: string; parsed: QuickEntryFields | null }[] {
-  const lines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
-  const results: { raw: string; parsed: QuickEntryFields | null }[] = [];
-  let currentSectionJenis: 'Pemasukan' | 'Pengeluaran' | null = null;
+  const defaultYear = parseInt(today.split('-')[0]) || new Date().getFullYear();
+  const rawLines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
+  const normalizedLines: { raw: string; text: string; headerDate?: string }[] = [];
 
-  for (const raw of lines) {
-    const rawLower = raw.toLowerCase().replace(/[:\-_]/g, ' ').trim();
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    let line = normalizeFractions(rawLine);
+    let headerDate: string | undefined = undefined;
 
-    // 1. Abaikan baris ringkasan total / rekapitulasi agar tidak double-count
-    if (
-      rawLower.startsWith('ringkasan') ||
-      rawLower.startsWith('rekapitulasi') ||
-      rawLower.startsWith('total pemasukan') ||
-      rawLower.startsWith('total pengeluaran') ||
-      rawLower.startsWith('sisa akhir') ||
-      rawLower.startsWith('grand total')
-    ) {
+    // Detect WhatsApp Header (e.g. "[5/9 11.48] Milku2: ..." or "5/9 11.48 - Milku2: ...")
+    const waMatch = line.match(/^\[(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?[,\s]+(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?\]\s*([^:]+:)?\s*/i)
+      || line.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?[,\s]+(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?\s*-\s*([^:]+:)?\s*/i);
+
+    if (waMatch) {
+      const d = waMatch[1].padStart(2, '0');
+      const m = waMatch[2].padStart(2, '0');
+      const y = waMatch[3] ? (waMatch[3].length === 2 ? '20' + waMatch[3] : waMatch[3]) : String(defaultYear);
+      headerDate = `${y}-${m}-${d}`;
+      line = line.substring(waMatch[0].length).trim();
+    }
+
+    if (!line) {
+      if (headerDate) normalizedLines.push({ raw: rawLine, text: '', headerDate });
       continue;
     }
 
-    // 2. Deteksi baris header section untuk konteks jenis transaksi
+    // 1. Abaikan baris rumus matematika / perhitungan running balance
+    // contoh: "378.750+432.198=810.948", "810.948-175.000=695.948", "695.948+340.688-269.750=766.886", "344.938-539.000=-194.062 (Kurang) ini pinjam ke agil"
+    if (line.includes('=') && /[\d][\d.,]*\s*[\+\-]\s*[\d.,]*/.test(line)) {
+      continue;
+    }
+    if (/^[\d.,\s\+\-\*\/]+=\s*[\-]?[\d.,\s]+/.test(line)) {
+      continue;
+    }
+
+    // 2. Abaikan baris subtotal / total ringkasan
+    // contoh: "Total 175.000", "Total 539.000", "Total 108.000 ini pinjam ke agil", "Total 102.500 ini pinjam ke agil"
+    if (/^(total|subtotal|grand\s*total|jumlah)\b/i.test(line)) {
+      continue;
+    }
+    if (/^(ringkasan|rekapitulasi|rekap)\b/i.test(line)) {
+      continue;
+    }
+
+    // 3. Abaikan baris pencatatan saldo kas berjalan harian ("SISA UANG 695.948", "Sisa 223.938") jika di tengah multi baris
+    if (/^sisa(\s+(uang|saldo|kas))?\s*[:\s]*[\d.,]+$/i.test(line) && rawLines.length > 2) {
+      if (headerDate) normalizedLines.push({ raw: rawLine, text: '', headerDate });
+      continue;
+    }
+
+    // 4. Jika deskripsi dan nominal terpisah 2 baris (misal baris i: "Tarik dana shopee tgl 5 sept 2026", baris i+1: "432.198")
+    if (i + 1 < rawLines.length) {
+      const nextRaw = rawLines[i + 1].trim();
+      const lineLower = line.toLowerCase();
+      const isDateOrHeaderOnly = line.includes(':') || lineLower.startsWith('tanggal') || lineLower.startsWith('belanja') || lineLower.startsWith('tgl');
+      if (isPureNominal(nextRaw) && !isDateOrHeaderOnly) {
+        line = `${line} ${nextRaw}`;
+        i++; // Gabungkan dan lewati baris berikutnya
+      }
+    }
+
+    normalizedLines.push({ raw: rawLine, text: line, headerDate });
+  }
+
+  const results: { raw: string; parsed: QuickEntryFields | null }[] = [];
+  let currentSectionJenis: 'Pemasukan' | 'Pengeluaran' | null = null;
+  let currentContextDate = today;
+
+  for (const { raw, text: lineText, headerDate } of normalizedLines) {
+    if (headerDate) {
+      currentContextDate = headerDate;
+    }
+    if (!lineText) continue;
+
+    const rawLower = lineText.toLowerCase().replace(/[:\-_]/g, ' ').trim();
+
+    // Deteksi baris header section untuk konteks jenis transaksi
     if (rawLower === 'pemasukan' || rawLower === 'pemasukan baru' || rawLower === 'pemasukan/omset' || rawLower === 'pemasukan:') {
       currentSectionJenis = 'Pemasukan';
       continue;
@@ -627,13 +803,44 @@ function parseAll(
       continue;
     }
 
-    const parsed = parseLine(raw, ingredients, products, categories, today, hppCategories, currentSectionJenis);
+    // Cek apakah baris ini semata-mata adalah judul tanggal / section header (tanpa nominal belanja)
+    // contoh: "Belanja tgl 14-09-2026 :", "Tanggal 18-09-2026", "19-09-2026 s/d 22-09-2026"
+    const dateRangeMatch = lineText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*(?:s\/?d|sampai|-)\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/i);
+    if (dateRangeMatch) {
+      const d = dateRangeMatch[1].padStart(2, '0'), m = dateRangeMatch[2].padStart(2, '0'), y = dateRangeMatch[3];
+      currentContextDate = `${y}-${m}-${d}`;
+      const rest = lineText.replace(dateRangeMatch[0], '').trim();
+      if (!rest || !tokensHasNominal(rest)) {
+        continue;
+      }
+    }
+
+    const dmyMatch = lineText.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
+    if (dmyMatch && !tokensHasNominal(lineText.replace(dmyMatch[0], '').trim())) {
+      const d = dmyMatch[1].padStart(2, '0'), m = dmyMatch[2].padStart(2, '0'), y = dmyMatch[3];
+      currentContextDate = `${y}-${m}-${d}`;
+      continue;
+    }
+
+    const tglWordsMatch = lineText.match(/\b(?:tgl|tanggal)\s*(\d{1,2})\s+([a-zA-Z]+)(?:\s+(\d{4}))?\b/i);
+    if (tglWordsMatch && !tokensHasNominal(lineText.replace(tglWordsMatch[0], '').trim())) {
+      const mon = BULAN[tglWordsMatch[2].toLowerCase()];
+      if (mon) {
+        const d = tglWordsMatch[1].padStart(2, '0');
+        const m = String(mon).padStart(2, '0');
+        const y = tglWordsMatch[3] || String(defaultYear);
+        currentContextDate = `${y}-${m}-${d}`;
+        continue;
+      }
+    }
+
+    const parsed = parseLine(lineText, ingredients, products, categories, currentContextDate, hppCategories, currentSectionJenis);
     if (parsed) {
-      // 3. Abaikan entri tanpa nominal dan tanpa qty/detail
+      // Abaikan entri tanpa nominal dan tanpa qty/detail
       if (parsed.nominal === 0 && parsed.qty_beli === 0 && (!parsed.penjualan_detail || parsed.penjualan_detail.length === 0)) {
         continue;
       }
-      results.push({ raw, parsed });
+      results.push({ raw: lineText, parsed });
     }
   }
 
@@ -1550,7 +1757,7 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
       const customApiKey = localStorage.getItem('gemini_api_key') || undefined;
       const data = await runAIParse({
         customApiKey,
-        userMessage: input,
+        userMessage: normalizeFractions(input),
         products,
         ingredients,
         categories,
