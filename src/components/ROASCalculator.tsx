@@ -1783,8 +1783,100 @@ export default function ROASCalculator({ products: rawProducts = [], ingredients
     };
   };
 
+  const shopeeRealAdsEvaluation = React.useMemo(() => {
+    let totalRealSales = 0;
+    let totalRealAds = 0;
+    let auditPeriode = '';
+
+    if (Array.isArray(rawTransactions)) {
+      rawTransactions.forEach(t => {
+        const j = (t.jenis || '').toLowerCase();
+        const kat = (t.kategori || '').toLowerCase();
+        const ket = (t.keterangan || '').toLowerCase();
+        const nom = Number(t.nominal) || 0;
+
+        if (j === 'pemasukan' && (kat.includes('penjualan') || ket.includes('shopee'))) {
+          totalRealSales += Number(t.total_penjualan) || nom;
+        }
+        if (j === 'pengeluaran' && (kat.includes('iklan') || kat.includes('marketing') || ket.includes('shopee iklan'))) {
+          totalRealAds += nom;
+        }
+      });
+    }
+
+    try {
+      const auditsStr = localStorage.getItem('ceumilan_shopee_audits');
+      if (auditsStr) {
+        const audits = JSON.parse(auditsStr);
+        if (Array.isArray(audits) && audits.length > 0) {
+          const latest = audits[0];
+          auditPeriode = latest.periode;
+          if (totalRealAds === 0 && latest.totalBiayaIklanIncPpn > 0) {
+            totalRealAds = latest.totalBiayaIklanIncPpn;
+            totalRealSales = latest.totalOmzetToko || latest.totalPendapatanDilepas;
+          }
+        }
+      }
+    } catch (_) {}
+
+    const roasAktual = totalRealAds > 0 ? totalRealSales / totalRealAds : 0;
+    return {
+      hasData: totalRealAds > 0 || totalRealSales > 0,
+      totalRealSales,
+      totalRealAds,
+      roasAktual,
+      auditPeriode,
+    };
+  }, [rawTransactions]);
+
   return (
     <div className="w-full max-w-6xl mx-auto px-2 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6 pb-36">
+      {/* EVALUASI ROAS AKTUAL SHOPEE & REAL SALES BANNER */}
+      {shopeeRealAdsEvaluation.hasData && (
+        <div className="bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 p-4 sm:p-5 rounded-2xl sm:rounded-3xl text-white shadow-md space-y-3">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                <ShoppingBag className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-white">
+                  Evaluasi ROAS Aktual (Integrasi Shopee & Transaksi Riil)
+                </h4>
+                <p className="text-[11px] text-orange-100 font-medium">
+                  {shopeeRealAdsEvaluation.auditPeriode ? `Periode Audit: ${shopeeRealAdsEvaluation.auditPeriode} • ` : ''}
+                  Dihitung otomatis dari total omzet dan biaya iklan riil (inc. PPN 11%).
+                </p>
+              </div>
+            </div>
+            <Badge className="bg-white text-orange-700 font-black text-xs px-3 py-1 border-none shadow-xs">
+              ROAS Aktual: {shopeeRealAdsEvaluation.roasAktual.toFixed(2)}x
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/20 text-xs">
+            <div className="bg-white/10 p-2.5 rounded-xl backdrop-blur-xs">
+              <span className="text-[10px] text-orange-200 block font-bold">TOTAL OMZET RIIL</span>
+              <span className="font-black text-white text-sm">{formatCurrency(shopeeRealAdsEvaluation.totalRealSales)}</span>
+            </div>
+            <div className="bg-white/10 p-2.5 rounded-xl backdrop-blur-xs">
+              <span className="text-[10px] text-orange-200 block font-bold">BIAYA IKLAN RIIL (INC. PPN)</span>
+              <span className="font-black text-amber-200 text-sm">{formatCurrency(shopeeRealAdsEvaluation.totalRealAds)}</span>
+            </div>
+            <div className="bg-white/10 p-2.5 rounded-xl backdrop-blur-xs">
+              <span className="text-[10px] text-orange-200 block font-bold">STATUS PERFORMA IKLAN</span>
+              <span className="font-black text-white text-sm">
+                {shopeeRealAdsEvaluation.roasAktual >= 4 ? '🔥 Sangat Efektif' : shopeeRealAdsEvaluation.roasAktual >= 2 ? '✓ Menguntungkan' : '⚠️ Perlu Optimasi'}
+              </span>
+            </div>
+            <div className="bg-white/10 p-2.5 rounded-xl backdrop-blur-xs">
+              <span className="text-[10px] text-orange-200 block font-bold">TARGET ROAS MINIMAL</span>
+              <span className="font-black text-white text-sm">Target: {targetRoasInput || 8}x</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER & TABS MODE */}
       <div className="flex flex-col gap-4 sm:gap-5 bg-white p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xs border border-gray-100">
         <div>

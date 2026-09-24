@@ -48,6 +48,8 @@ import {
 import { useDateFilter } from '../lib/dateFilterContext';
 
 import * as XLSX from 'xlsx';
+import ShopeeAuditModal from './ShopeeAuditModal';
+import { ShopeeAuditResult } from '../lib/shopeeAuditEngine';
 
 interface TransactionManagerProps {
   user: User | null;
@@ -142,6 +144,7 @@ export default function TransactionManager({ user, transactions, setTransactions
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isRange, setIsRange] = React.useState(false);
   const [quickEntryOpen, setQuickEntryOpen] = React.useState(false);
+  const [isShopeeAuditOpen, setIsShopeeAuditOpen] = React.useState(false);
   const [editingTxId, setEditingTxId] = React.useState<string | null>(null);
   const formRef = React.useRef<HTMLDivElement>(null);
 
@@ -521,6 +524,139 @@ export default function TransactionManager({ user, transactions, setTransactions
       })();
     }
     return txToSave;
+  };
+
+  const handleCommitShopeeAudit = async (
+    audit: ShopeeAuditResult,
+    mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
+  ) => {
+    if (!user) return;
+
+    // 1. Permanently update SKU in products if any
+    if (mappedNewSkus && mappedNewSkus.length > 0) {
+      try {
+        const batch = writeBatch(db);
+        let productsModified = false;
+        const updatedProducts = products.map(prod => {
+          let prodModified = false;
+          const updatedVariants = prod.varian.map(vr => {
+            const mapped = mappedNewSkus.find(m => m.productId === prod.id && m.variantId === vr.id);
+            if (mapped) {
+              prodModified = true;
+              return { ...vr, sku: mapped.sku };
+            }
+            return vr;
+          });
+          if (prodModified) {
+            productsModified = true;
+            const updated = { ...prod, varian: updatedVariants };
+            batch.set(doc(db, `users/${user.uid}/hpp/${prod.id}`), sanitizeData(updated));
+            return updated;
+          }
+          return prod;
+        });
+
+        if (productsModified) {
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error('Gagal memperbarui SKU produk di database:', err);
+      }
+    }
+
+    // 2. Prepare transaction date
+    const txDate = audit.periode.includes(' s/d ')
+      ? audit.periode.split(' s/d ')[1]
+      : (audit.periode.split(' ')[0] || new Date().toISOString().split('T')[0]);
+
+    // 3. Prepare Pemasukan Transaction with penjualan_detail
+    const prodMap = new Map<string, { produk_id: string; produk_nama: string; varian: { varian_id: string; varian_nama: string; qty: number; harga: number }[] }>();
+    for (const vb of audit.variantBreakdown) {
+      if (vb.qtyTerjual <= 0) continue;
+      if (!prodMap.has(vb.productId)) {
+        prodMap.set(vb.productId, { produk_id: vb.productId, produk_nama: vb.productName, varian: [] });
+      }
+      prodMap.get(vb.productId)!.varian.push({
+        varian_id: vb.variantId,
+        varian_nama: vb.variantName,
+        qty: vb.qtyTerjual,
+        harga: vb.qtyTerjual > 0 ? Math.round(vb.omzetVarian / vb.qtyTerjual) : 0,
+      });
+    }
+
+    const pemasukanTx = {
+      jenis: 'Pemasukan',
+      kategori: 'Penjualan',
+      tanggal: txDate,
+      keterangan: `Penjualan Shopee (Dana Dilepas) - Periode ${audit.periode}`,
+      nominal: audit.totalPendapatanDilepas,
+      total_penjualan: audit.totalOmzetToko,
+      penjualan_detail: Array.from(prodMap.values()),
+      qty_total: audit.totalQtySold,
+    };
+
+    setIsSaving(true);
+    try {
+      // Save Pemasukan & trigger stock auto-deduction
+      await processAndSaveTransaction(pemasukanTx);
+
+      // 4. Save Pengeluaran: Biaya Admin & Layanan Shopee
+      if (audit.totalAdminLayanan > 0) {
+        const adminTx = {
+          jenis: 'Pengeluaran',
+          kategori: 'Biaya Shopee',
+          tanggal: txDate,
+          keterangan: `Biaya Admin & Layanan Shopee - Periode ${audit.periode}`,
+          nominal: audit.totalAdminLayanan,
+          qty_beli: 0,
+          qty_total: 0,
+        };
+        await processAndSaveTransaction(adminTx);
+      }
+
+      // 5. Save Pengeluaran: Biaya Iklan Shopee (Inc. PPN 11%)
+      if (audit.totalBiayaIklanIncPpn > 0) {
+        const iklanTx = {
+          jenis: 'Pengeluaran',
+          kategori: 'Iklan & Marketing',
+          tanggal: txDate,
+          keterangan: `Biaya Iklan Shopee (Inc. PPN 11%) - Periode ${audit.periode}`,
+          nominal: audit.totalBiayaIklanIncPpn,
+          qty_beli: 0,
+          qty_total: 0,
+        };
+        await processAndSaveTransaction(iklanTx);
+      }
+
+      // 6. Save Pengeluaran: Biaya Operasional Shopee (if any)
+      if (audit.biayaOperasionalManual > 0) {
+        const opTx = {
+          jenis: 'Pengeluaran',
+          kategori: 'Operasional',
+          tanggal: txDate,
+          keterangan: `Biaya Operasional Shopee - Periode ${audit.periode}`,
+          nominal: audit.biayaOperasionalManual,
+          qty_beli: 0,
+          qty_total: 0,
+        };
+        await processAndSaveTransaction(opTx);
+      }
+
+      // 7. Save Audit to Firestore & Local Storage
+      try {
+        await setDoc(doc(db, `users/${user.uid}/shopee_audits/${audit.id}`), sanitizeData(audit));
+        const existingAuditsStr = localStorage.getItem('ceumilan_shopee_audits');
+        const existingAudits: ShopeeAuditResult[] = existingAuditsStr ? JSON.parse(existingAuditsStr) : [];
+        const updatedAudits = [audit, ...existingAudits.filter(a => a.id !== audit.id)];
+        localStorage.setItem('ceumilan_shopee_audits', JSON.stringify(updatedAudits));
+      } catch (err) {
+        console.warn('Failed saving audit to Firestore:', err);
+      }
+
+      if (onSuccess) onSuccess();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1646,20 +1782,14 @@ export default function TransactionManager({ user, transactions, setTransactions
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-bold text-gray-400 uppercase">Langkah 1: Pilih Produk</Label>
                   <div className="relative">
-                    <input 
-                      type="file" 
-                      accept=".xlsx, .xls" 
-                      className="hidden" 
-                      id="excel-import" 
-                      onChange={handleExcelImport}
-                    />
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => document.getElementById('excel-import')?.click()}
-                      className="text-[10px] h-7 font-black text-primary hover:bg-brand-50 gap-1.5 px-2 rounded-lg border border-primary/20"
+                      onClick={() => setIsShopeeAuditOpen(true)}
+                      className="text-[10px] h-7 font-black text-orange-600 hover:bg-orange-50 gap-1.5 px-2.5 rounded-lg border border-orange-200"
                     >
-                      <ShoppingBag className="w-3 h-3 text-primary" />
+                      <ShoppingBag className="w-3 h-3 text-orange-600" />
                       Import Excel (XLS)
                     </Button>
                   </div>
@@ -2107,6 +2237,14 @@ export default function TransactionManager({ user, transactions, setTransactions
         onSaveBatch={saveQuickBatch}
         user={user}
         setIngredients={setIngredients}
+      />
+
+      <ShopeeAuditModal
+        isOpen={isShopeeAuditOpen}
+        onClose={() => setIsShopeeAuditOpen(false)}
+        products={products}
+        ingredients={ingredients}
+        onCommitAudit={handleCommitShopeeAudit}
       />
     </div>
   );

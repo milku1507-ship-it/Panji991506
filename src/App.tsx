@@ -787,7 +787,7 @@ function AppContent() {
           setDompets={setDompets}
         />;
       case 'reports':
-        return <FinancialReport transactions={transactions} products={products} dompets={dompets} />;
+        return <FinancialReport transactions={transactions} products={products} dompets={dompets} user={user} />;
       case 'roas':
         return <ROASCalculator products={products} ingredients={ingredients} transactions={transactions} user={user} />;
       case 'store-settings':

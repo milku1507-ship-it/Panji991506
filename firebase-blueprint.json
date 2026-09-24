@@ -76,6 +76,26 @@
         "satuan_unit": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["kategori_hpp", "kategori_produk", "satuan_unit"]
+    },
+    "ShopeeAudit": {
+      "title": "ShopeeAudit",
+      "description": "Shopee automated financial and loss audit records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "periode": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "labaBersih": { "type": "number" },
+        "totalPendapatanDilepas": { "type": "number" },
+        "totalAdminLayanan": { "type": "number" },
+        "totalHppTerjual": { "type": "number" },
+        "totalIklan": { "type": "number" },
+        "totalBiayaOperasional": { "type": "number" },
+        "discrepancies": { "type": "array" },
+        "rtsPackages": { "type": "array" },
+        "variantBreakdown": { "type": "array" }
+      },
+      "required": ["id", "periode", "labaBersih", "totalPendapatanDilepas"]
     }
   },
   "firestore": {
@@ -98,6 +118,10 @@
     "/users/{uid}/transaksi/{transactionId}": {
       "schema": "Transaction",
       "description": "User's financial transactions"
+    },
+    "/users/{uid}/shopee_audits/{auditId}": {
+      "schema": "ShopeeAudit",
+      "description": "User's Shopee audit records"
     }
   }
 }

@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Download, TrendingUp, TrendingDown, PieChart as PieIcon, BarChart as BarIcon, Calendar, FileText, Package, Loader2, Inbox, ShoppingBag, Wallet, PiggyBank } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Transaction, Product, Variant, HppMaterial, Dompet } from '../types';
+import { User } from '../lib/firebase';
+import ShopeeAuditReportWidget from './ShopeeAuditReportWidget';
 import { CATEGORIES_LIST } from '../constants/data';
 import { cn } from '@/lib/utils';
 import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
@@ -24,9 +26,10 @@ interface FinancialReportProps {
   transactions: Transaction[];
   products: Product[];
   dompets?: Dompet[];
+  user?: User | null;
 }
 
-export default function FinancialReport({ transactions, products, dompets = [] }: FinancialReportProps) {
+export default function FinancialReport({ transactions, products, dompets = [], user }: FinancialReportProps) {
   const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
@@ -618,6 +621,9 @@ export default function FinancialReport({ transactions, products, dompets = [] }
             </CardContent>
           </Card>
         </div>
+
+        {/* Shopee Automated Financial & Loss Audit Engine */}
+        <ShopeeAuditReportWidget user={user} />
 
         {/* Product Performance Section */}
         <Card className="border-none shadow-sm rounded-3xl bg-white">
