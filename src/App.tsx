@@ -780,6 +780,7 @@ function AppContent() {
           transactions={transactions} 
           setTransactions={setTransactions} 
           products={products} 
+          setProducts={setProducts}
           ingredients={ingredients} 
           setIngredients={setIngredients} 
           onSuccess={() => {}}

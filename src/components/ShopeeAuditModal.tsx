@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,12 @@ import {
   RotateCcw,
   Sparkles,
   Info,
+  X,
+  Search,
+  Receipt,
+  CheckSquare,
+  Square,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Product, Ingredient } from '../types';
@@ -40,16 +46,51 @@ import {
   runShopeeAuditEngine,
   ShopeeAuditResult,
   normalizeSKU,
+  parseIdAmount,
+  parseShopeeDate,
+  OrderCompleteItem,
+  UnmappedSku,
 } from '../lib/shopeeAuditEngine';
 import * as XLSX from 'xlsx';
 
-interface ShopeeAuditModalProps {
+export interface ProposedTransaction {
+  id: string;
+  orderId: string;
+  tanggal: string;
+  jenis: 'Pemasukan' | 'Pengeluaran';
+  kategori: string;
+  keterangan: string;
+  nominal: number;
+  total_penjualan: number;
+  penjualan_detail?: Array<{
+    produk_id: string;
+    produk_nama: string;
+    varian: Array<{
+      varian_id: string;
+      varian_nama: string;
+      qty: number;
+      harga: number;
+      sku?: string;
+    }>;
+  }>;
+  qty_total: number;
+  unmatchedItemsCount: number;
+  selected: boolean;
+  itemSummary: string;
+  rawItems: any[];
+}
+
+export interface ShopeeAuditModalProps {
   isOpen: boolean;
   onClose: () => void;
   products: Product[];
   ingredients: Ingredient[];
   onCommitAudit: (
     audit: ShopeeAuditResult,
+    mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
+  ) => Promise<void>;
+  onCommitTransactions?: (
+    transactions: any[],
     mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
   ) => Promise<void>;
 }
@@ -60,23 +101,37 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
   products,
   ingredients,
   onCommitAudit,
+  onCommitTransactions,
 }) => {
-  // Upload States
+  // Workflow Mode
+  const [workflowMode, setWorkflowMode] = useState<'slot1_orders' | 'multi_slot_audit' | 'general_cash'>('slot1_orders');
+  // View Step: 'upload' = Slot selection; 'preview' = Review & Approval screen
+  const [viewStep, setViewStep] = useState<'upload' | 'preview'>('upload');
+
+  // Uploaded Files State
   const [orderFiles, setOrderFiles] = useState<File[]>([]);
   const [incomeFiles, setIncomeFiles] = useState<File[]>([]);
   const [rtsArchiveFile, setRtsArchiveFile] = useState<File | null>(null);
+  const [generalCashFile, setGeneralCashFile] = useState<File | null>(null);
 
-  // Manual Inputs
+  // Manual Inputs (for Shopee Multi-Slot Audit)
   const [biayaIklanManual, setBiayaIklanManual] = useState<string>('');
   const [biayaOperasionalManual, setBiayaOperasionalManual] = useState<string>('');
 
-  // Processing & Results
+  // Processing & State
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [auditResult, setAuditResult] = useState<ShopeeAuditResult | null>(null);
-  const [activeTab, setActiveTab] = useState<'variants' | 'discrepancies' | 'rts'>('variants');
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
 
-  // Raw parsed datasets cached for re-running if user maps SKUs
+  // Multi-Slot Audit Result
+  const [auditResult, setAuditResult] = useState<ShopeeAuditResult | null>(null);
+  const [auditActiveTab, setAuditActiveTab] = useState<'variants' | 'discrepancies' | 'rts'>('variants');
+
+  // Single-Slot Orders or General Cash Proposed Transactions
+  const [proposedTransactions, setProposedTransactions] = useState<ProposedTransaction[]>([]);
+  const [rawOrderCompleteItems, setRawOrderCompleteItems] = useState<OrderCompleteItem[]>([]);
+  const [unmappedSkusList, setUnmappedSkusList] = useState<UnmappedSku[]>([]);
+
+  // Raw parsed cache for re-runs
   const [rawOrders, setRawOrders] = useState<any[]>([]);
   const [rawIncome, setRawIncome] = useState<any[]>([]);
   const [rawRts, setRawRts] = useState<any[]>([]);
@@ -85,7 +140,10 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
   const [skuMapping, setSkuMapping] = useState<Record<string, { productId: string; variantId: string }>>({});
   const [saveSkuToDb, setSaveSkuToDb] = useState<boolean>(true);
 
-  // Reset state on close
+  // Search & Filter in Preview
+  const [previewSearch, setPreviewSearch] = useState<string>('');
+
+  // Reset or Close
   const handleDialogClose = () => {
     if (isProcessing || isCommitting) return;
     onClose();
@@ -98,77 +156,420 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
     return isRp ? `Rp ${formatted}` : formatted;
   };
 
-  // Handle parsing
-  const handleStartAudit = async () => {
-    if (orderFiles.length === 0) {
-      toast.error('Slot 1 wajib diisi', {
-        description: 'Lampirkan minimal file Order Complete (.xlsx).',
-      });
-      return;
-    }
-    if (incomeFiles.length === 0) {
-      toast.error('Slot 2 wajib diisi', {
-        description: 'Lampirkan file Income Released (Dana Dilepas) (.xlsx).',
-      });
-      return;
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Helper to group parsed OrderComplete items into ProposedTransaction[]
+  const buildTransactionsFromOrders = (
+    orderItems: OrderCompleteItem[],
+    currentProducts: Product[],
+    mapping: Record<string, { productId: string; variantId: string }>
+  ) => {
+    // 1. Build lookup tables
+    const dbProducts = currentProducts.map(p => ({ ...p, normSku: normalizeSKU(p.sku) }));
+    const productBySku = new Map<string, typeof dbProducts[number]>();
+    for (const p of dbProducts) {
+      if (p.normSku) productBySku.set(p.normSku, p);
     }
 
+    const variantBySku = new Map<string, { product: typeof dbProducts[number]; variant: typeof dbProducts[number]['varian'][number] }>();
+    for (const p of dbProducts) {
+      for (const v of p.varian) {
+        const vs = normalizeSKU(v.sku || '');
+        if (vs) variantBySku.set(vs, { product: p, variant: v });
+      }
+    }
+
+    const unmappedMap = new Map<string, UnmappedSku>();
+    const orderGroups = new Map<string, {
+      orderId: string;
+      tanggal: string;
+      items: Array<{
+        produk_id: string;
+        produk_nama: string;
+        varian_id: string;
+        varian_nama: string;
+        qty: number;
+        harga: number;
+        sku: string;
+        isMatched: boolean;
+      }>;
+      totalPayment: number;
+    }>();
+
+    for (const item of orderItems) {
+      // Abaikan status pesanan dibatalkan
+      const statusLower = (item.status || '').toLowerCase();
+      if (statusLower.includes('batal') || statusLower.includes('cancel')) {
+        continue;
+      }
+
+      const rawSku = item.sku || '';
+      const normSku = normalizeSKU(rawSku);
+
+      let matchedProduct: Product | undefined;
+      let matchedVariant: any | undefined;
+      let isMatched = false;
+
+      // 1) Manual mapping override
+      if (mapping[rawSku]) {
+        const m = mapping[rawSku];
+        matchedProduct = currentProducts.find(p => p.id === m.productId);
+        matchedVariant = matchedProduct?.varian.find(v => v.id === m.variantId);
+        if (matchedProduct && matchedVariant) isMatched = true;
+      }
+
+      // 2) Exact variant SKU
+      if (!isMatched && normSku && variantBySku.has(normSku)) {
+        const mv = variantBySku.get(normSku)!;
+        matchedProduct = mv.product;
+        matchedVariant = mv.variant;
+        isMatched = true;
+      }
+
+      // 3) Parent product SKU
+      if (!isMatched && normSku && productBySku.has(normSku)) {
+        matchedProduct = productBySku.get(normSku);
+        if (matchedProduct) {
+          // match variant by name or first variant
+          const rawVarNorm = normalizeSKU(item.rawVariantName);
+          matchedVariant = matchedProduct.varian.find(v => normalizeSKU(v.nama) === rawVarNorm)
+            || matchedProduct.varian[0];
+          isMatched = true;
+        }
+      }
+
+      if (!isMatched && rawSku) {
+        const existing = unmappedMap.get(rawSku) || {
+          sku: rawSku,
+          rawProductName: item.rawProductName || 'Produk Tanpa Nama',
+          rawVariantName: item.rawVariantName || '-',
+          totalQty: 0,
+          totalOmzet: 0,
+        };
+        existing.totalQty += item.qty;
+        existing.totalOmzet += item.totalPrice;
+        unmappedMap.set(rawSku, existing);
+      }
+
+      const prodId = matchedProduct ? matchedProduct.id : `unmapped-${rawSku || 'item'}`;
+      const prodNama = matchedProduct ? matchedProduct.nama : (item.rawProductName || 'Produk Belum Terdaftar');
+      const varId = matchedVariant ? matchedVariant.id : `var-${rawSku || 'default'}`;
+      const varNama = matchedVariant ? matchedVariant.nama : (item.rawVariantName || 'Standar');
+      const itemHarga = item.price > 0 ? item.price : (item.qty > 0 ? Math.round(item.totalPrice / item.qty) : 0);
+
+      if (!orderGroups.has(item.orderId)) {
+        orderGroups.set(item.orderId, {
+          orderId: item.orderId,
+          tanggal: item.orderDate || new Date().toISOString().split('T')[0],
+          items: [],
+          totalPayment: 0,
+        });
+      }
+
+      const grp = orderGroups.get(item.orderId)!;
+      grp.items.push({
+        produk_id: prodId,
+        produk_nama: prodNama,
+        varian_id: varId,
+        varian_nama: varNama,
+        qty: item.qty,
+        harga: itemHarga,
+        sku: rawSku,
+        isMatched,
+      });
+      grp.totalPayment += item.totalPrice;
+    }
+
+    const txs: ProposedTransaction[] = [];
+    for (const [orderId, grp] of orderGroups.entries()) {
+      const shortId = orderId.length > 12 ? orderId.slice(-8) : orderId;
+      const itemSummary = grp.items
+        .map(it => `${it.produk_nama}${it.varian_nama && it.varian_nama !== it.produk_nama ? ` (${it.varian_nama})` : ''} x${it.qty}`)
+        .join(', ');
+      const totalQty = grp.items.reduce((s, it) => s + it.qty, 0);
+      const unmatchedCount = grp.items.filter(it => !it.isMatched).length;
+
+      // Group per produk_id
+      const prodMap = new Map<string, { produk_id: string; produk_nama: string; varian: any[] }>();
+      for (const it of grp.items) {
+        if (!prodMap.has(it.produk_id)) {
+          prodMap.set(it.produk_id, {
+            produk_id: it.produk_id,
+            produk_nama: it.produk_nama,
+            varian: [],
+          });
+        }
+        prodMap.get(it.produk_id)!.varian.push({
+          varian_id: it.varian_id,
+          varian_nama: it.varian_nama,
+          qty: it.qty,
+          harga: it.harga,
+          sku: it.sku,
+        });
+      }
+
+      txs.push({
+        id: `tx-order-${orderId}`,
+        orderId,
+        tanggal: grp.tanggal,
+        jenis: 'Pemasukan',
+        kategori: 'Penjualan',
+        keterangan: `Pesanan #${shortId}: ${itemSummary}`,
+        nominal: grp.totalPayment,
+        total_penjualan: grp.totalPayment,
+        penjualan_detail: Array.from(prodMap.values()),
+        qty_total: totalQty,
+        unmatchedItemsCount: unmatchedCount,
+        selected: true,
+        itemSummary,
+        rawItems: grp.items,
+      });
+    }
+
+    return {
+      transactions: txs,
+      unmappedSkus: Array.from(unmappedMap.values()),
+    };
+  };
+
+  // Helper for General Cash Spreadsheet (.xlsx)
+  const parseGeneralCashSpreadsheet = async (file: File): Promise<ProposedTransaction[]> => {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
+    if (!rawRows || rawRows.length === 0) return [];
+
+    const dateKeywords = ['TANGGAL', 'DATE', 'WAKTU', 'TGL'];
+    const typeKeywords = ['JENIS', 'TIPE', 'ARUSKAS', 'TYPE'];
+    const catKeywords = ['KATEGORI', 'CATEGORY', 'POS'];
+    const descKeywords = ['KETERANGAN', 'DESKRIPSI', 'URAIAN', 'CATATAN', 'NOTE', 'MEMO', 'NAMA'];
+    const amountKeywords = ['NOMINAL', 'JUMLAH', 'TOTAL', 'BIAYA', 'AMOUNT', 'DEBET', 'KREDIT', 'NILAI'];
+
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(rawRows.length, 25); i++) {
+      const row = rawRows[i];
+      if (!Array.isArray(row)) continue;
+      const rowNorm = row.map(c => normalizeSKU(c));
+      const hasDate = dateKeywords.some(k => rowNorm.some(c => c.includes(k)));
+      const hasAmount = amountKeywords.some(k => rowNorm.some(c => c.includes(k)));
+      if (hasDate && hasAmount) {
+        headerIdx = i;
+        break;
+      }
+    }
+
+    if (headerIdx === -1) {
+      throw new Error('Kolom Tanggal atau Nominal tidak ditemukan dalam berkas kas.');
+    }
+
+    const headerRow = rawRows[headerIdx].map(c => normalizeSKU(c));
+    const findCol = (kw: string[]) => headerRow.findIndex(h => kw.some(k => h.includes(k)));
+
+    const dateCol = findCol(dateKeywords);
+    const typeCol = findCol(typeKeywords);
+    const catCol = findCol(catKeywords);
+    const descCol = findCol(descKeywords);
+    const amountCol = findCol(amountKeywords);
+
+    const rows = rawRows.slice(headerIdx + 1);
+    const txs: ProposedTransaction[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!Array.isArray(r) || r.length === 0) continue;
+
+      const rawAmount = amountCol !== -1 ? r[amountCol] : 0;
+      const nominal = parseIdAmount(rawAmount);
+      if (nominal <= 0) continue;
+
+      const rawDate = dateCol !== -1 ? r[dateCol] : '';
+      const tanggal = parseShopeeDate(rawDate);
+
+      const rawType = typeCol !== -1 ? String(r[typeCol] ?? '').toLowerCase() : '';
+      const jenis: 'Pemasukan' | 'Pengeluaran' = rawType.includes('masuk') || rawType.includes('in') || rawType.includes('income')
+        ? 'Pemasukan'
+        : 'Pengeluaran';
+
+      const rawCat = catCol !== -1 ? String(r[catCol] ?? '').trim() : '';
+      const kategori = rawCat || (jenis === 'Pemasukan' ? 'Penjualan' : 'Operasional');
+
+      const rawDesc = descCol !== -1 ? String(r[descCol] ?? '').trim() : '';
+      const keterangan = rawDesc || `Transaksi ${kategori}`;
+
+      txs.push({
+        id: `tx-kas-${i + 1}`,
+        orderId: `KAS-${String(i + 1).padStart(4, '0')}`,
+        tanggal,
+        jenis,
+        kategori,
+        keterangan,
+        nominal,
+        total_penjualan: jenis === 'Pemasukan' ? nominal : 0,
+        qty_total: 0,
+        unmatchedItemsCount: 0,
+        selected: true,
+        itemSummary: keterangan,
+        rawItems: [r],
+      });
+    }
+
+    return txs;
+  };
+
+  // Execution: Process Files based on Mode
+  const handleProcessFiles = async () => {
     setIsProcessing(true);
-    toast.info('Memproses & Mengaudit Berkas Shopee...', { duration: 3000 });
-
     try {
-      // 1. Parse Order Complete Files
-      const parsedOrders = await parseOrderCompleteFiles(orderFiles);
-      setRawOrders(parsedOrders);
+      if (workflowMode === 'slot1_orders') {
+        // MODE 1: Slot 1 Orders Only
+        if (orderFiles.length === 0) {
+          toast.error('Berkas Slot 1 belum dipilih', {
+            description: 'Silakan pilih berkas Pesanan Selesai / Order Complete (.xlsx/.xls).',
+          });
+          setIsProcessing(false);
+          return;
+        }
 
-      // 2. Parse Income Released Files
-      const parsedIncome = await parseIncomeReleasedFiles(incomeFiles);
-      setRawIncome(parsedIncome);
+        toast.info('Mengekstrak data pesanan & mencocokkan SKU...', { duration: 2500 });
+        const parsedOrders = await parseOrderCompleteFiles(orderFiles);
+        if (parsedOrders.length === 0) {
+          toast.error('Tidak ada pesanan valid yang terbaca dari berkas yang diunggah.');
+          setIsProcessing(false);
+          return;
+        }
 
-      // 3. Parse RTS/RR Archive if uploaded
-      let parsedRts: any[] = [];
-      if (rtsArchiveFile) {
-        parsedRts = await parseRtsRrArchive(rtsArchiveFile, ingredients, products);
-        setRawRts(parsedRts);
+        setRawOrderCompleteItems(parsedOrders);
+        const { transactions, unmappedSkus } = buildTransactionsFromOrders(parsedOrders, products, skuMapping);
+        setProposedTransactions(transactions);
+        setUnmappedSkusList(unmappedSkus);
+        setViewStep('preview');
+
+        if (unmappedSkus.length > 0) {
+          toast.warning(`Ditemukan ${unmappedSkus.length} SKU baru belum terdaftar`, {
+            description: 'Anda dapat memetakan SKU ke produk toko di layar tinjauan.',
+          });
+        } else {
+          toast.success(`Berhasil memuat ${transactions.length} pesanan siap ditinjau!`);
+        }
+      } else if (workflowMode === 'multi_slot_audit') {
+        // MODE 2: Full Shopee Multi-Slot Audit
+        if (orderFiles.length === 0) {
+          toast.error('Slot 1 belum dipilih', {
+            description: 'Lampirkan file Order Complete (.xlsx).',
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        // Jika hanya ada Slot 1 dan user lupa Slot 2, tawarkan opsi beralih ke Mode 1
+        if (incomeFiles.length === 0) {
+          toast.info('File Income Released (Slot 2) tidak ditemukan.', {
+            description: 'Beralih memproses berkas sebagai Impor Pesanan Selesai...',
+          });
+          const parsedOrders = await parseOrderCompleteFiles(orderFiles);
+          setRawOrderCompleteItems(parsedOrders);
+          const { transactions, unmappedSkus } = buildTransactionsFromOrders(parsedOrders, products, skuMapping);
+          setProposedTransactions(transactions);
+          setUnmappedSkusList(unmappedSkus);
+          setWorkflowMode('slot1_orders');
+          setViewStep('preview');
+          setIsProcessing(false);
+          return;
+        }
+
+        toast.info('Memproses & Mengaudit Berkas Multi-Slot Shopee...', { duration: 3000 });
+        const parsedOrders = await parseOrderCompleteFiles(orderFiles);
+        setRawOrders(parsedOrders);
+
+        const parsedIncome = await parseIncomeReleasedFiles(incomeFiles);
+        setRawIncome(parsedIncome);
+
+        let parsedRts: any[] = [];
+        if (rtsArchiveFile) {
+          parsedRts = await parseRtsRrArchive(rtsArchiveFile, ingredients, products);
+          setRawRts(parsedRts);
+        }
+
+        const adsManualNum = Number(biayaIklanManual) || 0;
+        const opManualNum = Number(biayaOperasionalManual) || 0;
+
+        const result = runShopeeAuditEngine({
+          orders: parsedOrders,
+          incomeItems: parsedIncome,
+          rtsRrItems: parsedRts,
+          products,
+          ingredients,
+          biayaIklanManual: adsManualNum,
+          biayaOperasionalManual: opManualNum,
+          manualSkuMap: skuMapping,
+        });
+
+        setAuditResult(result);
+        setViewStep('preview');
+
+        if (result.unmappedSkus.length > 0) {
+          toast.warning(`Ditemukan ${result.unmappedSkus.length} SKU belum terdaftar`, {
+            description: 'Petakan SKU agar nilai HPP & Laba Konsolidasi akurat.',
+          });
+        } else {
+          toast.success('Audit Keuangan & Deteksi Kerugian Selesai!');
+        }
+      } else if (workflowMode === 'general_cash') {
+        // MODE 3: General Cash Spreadsheet
+        if (!generalCashFile) {
+          toast.error('Berkas Buku Kas belum dipilih', {
+            description: 'Silakan pilih berkas Excel rekap transaksi keuangan (.xlsx/.xls).',
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        toast.info('Membaca berkas buku kas...');
+        const txs = await parseGeneralCashSpreadsheet(generalCashFile);
+        if (txs.length === 0) {
+          toast.error('Tidak ada baris transaksi yang dapat dibaca dari berkas ini.');
+          setIsProcessing(false);
+          return;
+        }
+        setProposedTransactions(txs);
+        setUnmappedSkusList([]);
+        setViewStep('preview');
+        toast.success(`Berhasil memuat ${txs.length} baris transaksi kas!`);
       }
-
-      // 4. Run calculation engine
-      const adsManualNum = Number(biayaIklanManual) || 0;
-      const opManualNum = Number(biayaOperasionalManual) || 0;
-
-      const result = runShopeeAuditEngine({
-        orders: parsedOrders,
-        incomeItems: parsedIncome,
-        rtsRrItems: parsedRts,
-        products,
-        ingredients,
-        biayaIklanManual: adsManualNum,
-        biayaOperasionalManual: opManualNum,
-        manualSkuMap: skuMapping,
-      });
-
-      setAuditResult(result);
-
-      if (result.unmappedSkus.length > 0) {
-        toast.warning(
-          `Ditemukan ${result.unmappedSkus.length} SKU yang belum terdaftar di aplikasi`,
-          { description: 'Silakan petakan SKU ke produk/varian di bawah ini.' }
-        );
-      } else {
-        toast.success('Audit Keuangan & Deteksi Kerugian Selesai!');
-      }
-    } catch (err) {
-      console.error('Audit Engine Error:', err);
-      toast.error('Gagal memproses berkas Shopee', {
-        description: 'Pastikan file Excel yang diunggah adalah berkas resmi dari Shopee Seller Center.',
+    } catch (err: any) {
+      console.error('Import Processing Error:', err);
+      toast.error('Gagal memproses berkas Excel', {
+        description: err?.message || 'Pastikan format kolom berkas sesuai panduan.',
       });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Re-run audit with updated SKU mappings
-  const handleApplySkuMapping = () => {
+  // Re-run mapping for Slot 1 Orders
+  const handleApplyOrderSkuMapping = () => {
+    if (!rawOrderCompleteItems.length) return;
+    setIsProcessing(true);
+    try {
+      const { transactions, unmappedSkus } = buildTransactionsFromOrders(rawOrderCompleteItems, products, skuMapping);
+      setProposedTransactions(transactions);
+      setUnmappedSkusList(unmappedSkus);
+      toast.success('Pemetaan SKU diterapkan & data pratinjau diperbarui!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal memperbarui pemetaan SKU');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Re-run mapping for Multi-Slot Shopee Audit
+  const handleApplyShopeeAuditSkuMapping = () => {
     if (!rawOrders.length) return;
     setIsProcessing(true);
     try {
@@ -196,31 +597,88 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
     }
   };
 
-  // Commit audit to main app state and database
-  const handleConfirmAndCommit = async () => {
-    if (!auditResult) return;
+  // Toggle selection of proposed transactions
+  const toggleSelectTransaction = (id: string) => {
+    setProposedTransactions(prev =>
+      prev.map(t => (t.id === id ? { ...t, selected: !t.selected } : t))
+    );
+  };
+
+  const toggleSelectAll = (select: boolean) => {
+    setProposedTransactions(prev => prev.map(t => ({ ...t, selected: select })));
+  };
+
+  // Filtered transactions in preview table
+  const filteredProposedTxs = useMemo(() => {
+    const q = previewSearch.toLowerCase().trim();
+    if (!q) return proposedTransactions;
+    return proposedTransactions.filter(
+      t =>
+        t.orderId.toLowerCase().includes(q) ||
+        t.keterangan.toLowerCase().includes(q) ||
+        t.tanggal.includes(q) ||
+        t.kategori.toLowerCase().includes(q)
+    );
+  }, [proposedTransactions, previewSearch]);
+
+  const selectedTransactionsCount = useMemo(() => {
+    return proposedTransactions.filter(t => t.selected).length;
+  }, [proposedTransactions]);
+
+  const selectedTotalNominal = useMemo(() => {
+    return proposedTransactions.filter(t => t.selected).reduce((s, t) => s + t.nominal, 0);
+  }, [proposedTransactions]);
+
+  const selectedTotalQty = useMemo(() => {
+    return proposedTransactions.filter(t => t.selected).reduce((s, t) => s + t.qty_total, 0);
+  }, [proposedTransactions]);
+
+  // Mandatory User Approval & Commit to Database
+  const handleUserApprovalCommit = async () => {
     setIsCommitting(true);
     try {
+      // 1. Compile mapped SKUs list for permanent storage in HPP catalog if requested
       const mappedList: { productId: string; variantId: string; sku: string }[] = [];
       if (saveSkuToDb) {
-        for (const [sku, mapping] of Object.entries(skuMapping)) {
-          const m = mapping as { productId: string; variantId: string };
-          if (m?.productId && m?.variantId) {
+        for (const [sku, mapping] of Object.entries(skuMapping) as [string, { productId: string; variantId: string }][]) {
+          if (mapping?.productId && mapping?.variantId) {
             mappedList.push({
-              productId: m.productId,
-              variantId: m.variantId,
+              productId: mapping.productId,
+              variantId: mapping.variantId,
               sku,
             });
           }
         }
       }
 
-      await onCommitAudit(auditResult, mappedList);
-      toast.success('Data Shopee berhasil diterapkan ke Catat Transaksi, Stok & Laporan!');
-      onClose();
-    } catch (err) {
-      console.error('Commit Audit Error:', err);
-      toast.error('Gagal menerapkan transaksi ke database.');
+      if (workflowMode === 'multi_slot_audit' && auditResult) {
+        // Commit Shopee Full Audit
+        await onCommitAudit(auditResult, mappedList);
+        toast.success('Audit Shopee berhasil disetujui & disimpan ke database!', {
+          description: 'Data omzet, biaya, dan stok produk telah diperbarui.',
+        });
+        onClose();
+      } else {
+        // Commit Selected Proposed Transactions
+        const txsToSave = proposedTransactions.filter(t => t.selected);
+        if (txsToSave.length === 0) {
+          toast.error('Tidak ada transaksi yang dipilih untuk disimpan.');
+          setIsCommitting(false);
+          return;
+        }
+
+        if (onCommitTransactions) {
+          await onCommitTransactions(txsToSave, mappedList);
+        } else {
+          toast.warning('Handler penyimpanan transaksi belum dikonfigurasi.');
+        }
+        onClose();
+      }
+    } catch (err: any) {
+      console.error('Commit Error:', err);
+      toast.error('Gagal menyimpan transaksi ke database', {
+        description: err?.message || 'Periksa koneksi atau hak akses akun Anda.',
+      });
     } finally {
       setIsCommitting(false);
     }
@@ -232,107 +690,103 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
     toast.success(`${label} disalin ke clipboard!`);
   };
 
-  // Copy all discrepancy order IDs
-  const copyAllDiscrepancyOrderIds = () => {
-    if (!auditResult || auditResult.discrepancies.length === 0) return;
-    const ids = auditResult.discrepancies.map(d => d.orderId).join('\n');
-    navigator.clipboard.writeText(ids);
-    toast.success(`${auditResult.discrepancies.length} No. Pesanan Selisih Ongkir disalin!`);
-  };
-
-  // Copy all stuck RTS package IDs
-  const copyAllStuckRts = () => {
-    if (!auditResult) return;
-    const stuck = auditResult.rtsPackages.filter(p => p.isStuck);
-    if (stuck.length === 0) return;
-    const text = stuck
-      .map(p => `No. Resi: ${p.trackingNumber} | No. Pesanan: ${p.orderId} | Tertahan: ${p.daysStuck} hari`)
-      .join('\n');
-    navigator.clipboard.writeText(text);
-    toast.success(`${stuck.length} Paket RTS/RR Tertahan disalin untuk Klaim!`);
-  };
-
-  // Export Audit to XLSX
-  const exportAuditToExcel = () => {
-    if (!auditResult) return;
+  // Export Audit / Proposed Transactions to Excel
+  const exportPreviewToExcel = () => {
     try {
       const wb = XLSX.utils.book_new();
 
-      // Sheet 1: Ringkasan
-      const summaryData = [
-        ['Laporan Audit Finansial & Kerugian Shopee'],
-        ['Periode', auditResult.periode],
-        ['Waktu Audit', new Date(auditResult.createdAt).toLocaleString('id-ID')],
-        ['Total Pesanan Selesai', auditResult.orderCount],
-        ['Total Qty Terjual', `${auditResult.totalQtySold} pcs`],
-        ['Total Omzet Toko (Gross)', auditResult.totalOmzetToko],
-        ['Total Pendapatan Bersih Dilepas', auditResult.totalPendapatanDilepas],
-        ['Total Biaya Admin & Layanan', auditResult.totalAdminLayanan],
-        ['Total HPP Modal Terjual', auditResult.totalHppTerjual],
-        ['Total Biaya Iklan (Inc. PPN 11%)', auditResult.totalBiayaIklanIncPpn],
-        ['Biaya Operasional Tambahan', auditResult.biayaOperasionalManual],
-        ['LABA BERSIH RIIL KONSOLIDASI', auditResult.labaBersihKonsolidasi],
-        ['Margin Bersih (%)', `${auditResult.marginKonsolidasi.toFixed(2)}%`],
-        ['Total Kerugian Selisih Ongkir', auditResult.totalDiscrepancyLoss],
-        ['Total Potensi Kerugian Paket RTS Hilang', auditResult.totalRtsLoss],
-      ];
-      const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Konsolidasi');
+      if (workflowMode === 'multi_slot_audit' && auditResult) {
+        // Full Audit Export
+        const summaryData = [
+          ['Laporan Audit Finansial & Kerugian Shopee'],
+          ['Periode', auditResult.periode],
+          ['Waktu Audit', new Date(auditResult.createdAt).toLocaleString('id-ID')],
+          ['Total Pesanan Selesai', auditResult.orderCount],
+          ['Total Qty Terjual', `${auditResult.totalQtySold} pcs`],
+          ['Total Omzet Toko (Gross)', auditResult.totalOmzetToko],
+          ['Total Pendapatan Bersih Dilepas', auditResult.totalPendapatanDilepas],
+          ['Total Biaya Admin & Layanan', auditResult.totalAdminLayanan],
+          ['Total HPP Modal Terjual', auditResult.totalHppTerjual],
+          ['Total Biaya Iklan (Inc. PPN 11%)', auditResult.totalBiayaIklanIncPpn],
+          ['Biaya Operasional Tambahan', auditResult.biayaOperasionalManual],
+          ['LABA BERSIH RIIL KONSOLIDASI', auditResult.labaBersihKonsolidasi],
+          ['Margin Bersih (%)', `${auditResult.marginKonsolidasi.toFixed(2)}%`],
+          ['Total Kerugian Selisih Ongkir', auditResult.totalDiscrepancyLoss],
+          ['Total Potensi Kerugian Paket RTS Hilang', auditResult.totalRtsLoss],
+        ];
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Konsolidasi');
 
-      // Sheet 2: Performa Varian
-      const variantData = [
-        ['SKU', 'Nama Produk', 'Nama Varian', 'Qty Terjual', 'Omzet (Rp)', 'HPP Modal / pcs', 'Total HPP', 'Alokasi Admin', 'Laba Bersih', 'Margin (%)'],
-        ...auditResult.variantBreakdown.map(v => [
-          v.sku,
-          v.productName,
-          v.variantName,
-          v.qtyTerjual,
-          v.omzetVarian,
-          v.hppModalPerUnit,
-          v.totalHppVarian,
-          v.alokasiAdminVarian,
-          v.labaBersihVarian,
-          `${v.marginVarian.toFixed(1)}%`,
-        ]),
-      ];
-      const wsVariant = XLSX.utils.aoa_to_sheet(variantData);
-      XLSX.utils.book_append_sheet(wb, wsVariant, 'Laba per Varian');
+        const variantData = [
+          ['SKU', 'Nama Produk', 'Nama Varian', 'Qty Terjual', 'Omzet (Rp)', 'HPP Modal / pcs', 'Total HPP', 'Alokasi Admin', 'Laba Bersih', 'Margin (%)'],
+          ...auditResult.variantBreakdown.map(v => [
+            v.sku,
+            v.productName,
+            v.variantName,
+            v.qtyTerjual,
+            v.omzetVarian,
+            v.hppModalPerUnit,
+            v.totalHppVarian,
+            v.alokasiAdminVarian,
+            v.labaBersihVarian,
+            `${v.marginVarian.toFixed(1)}%`,
+          ]),
+        ];
+        const wsVariant = XLSX.utils.aoa_to_sheet(variantData);
+        XLSX.utils.book_append_sheet(wb, wsVariant, 'Laba per Varian');
 
-      // Sheet 3: Selisih Ongkir
-      const discData = [
-        ['No. Pesanan', 'Tanggal', 'Ongkir Dibayar Pembeli', 'Ongkir Ditagihkan Ekspedisi', 'Selisih Kerugian (Rp)'],
-        ...auditResult.discrepancies.map(d => [
-          d.orderId,
-          d.date,
-          d.shippingBuyer,
-          d.shippingCourier,
-          d.discrepancy,
-        ]),
-      ];
-      const wsDisc = XLSX.utils.aoa_to_sheet(discData);
-      XLSX.utils.book_append_sheet(wb, wsDisc, 'Selisih Ongkir (Loss)');
+        const discData = [
+          ['No. Pesanan', 'Tanggal', 'Ongkir Dibayar Pembeli', 'Ongkir Ditagihkan Ekspedisi', 'Selisih Kerugian (Rp)'],
+          ...auditResult.discrepancies.map(d => [
+            d.orderId,
+            d.date,
+            d.shippingBuyer,
+            d.shippingCourier,
+            d.discrepancy,
+          ]),
+        ];
+        const wsDisc = XLSX.utils.aoa_to_sheet(discData);
+        XLSX.utils.book_append_sheet(wb, wsDisc, 'Selisih Ongkir (Loss)');
 
-      // Sheet 4: RTS / Retur
-      const rtsData = [
-        ['No. Resi', 'No. Pesanan', 'Status', 'Hari Tertahan', 'Alasan', 'SKU', 'Nama Produk', 'Jumlah', 'Nilai Kerugian (HPP)', 'Status Hilang (> 7 hari)'],
-        ...auditResult.rtsPackages.map(r => [
-          r.trackingNumber,
-          r.orderId,
-          r.status,
-          r.daysStuck,
-          r.reason,
-          r.sku,
-          r.productName,
-          r.qty,
-          r.lossValueHpp,
-          r.isStuck ? 'YA (POTENSI HILANG)' : 'NORMAL',
-        ]),
-      ];
-      const wsRts = XLSX.utils.aoa_to_sheet(rtsData);
-      XLSX.utils.book_append_sheet(wb, wsRts, 'Paket RTS & Retur');
+        const rtsData = [
+          ['No. Resi', 'No. Pesanan', 'Status', 'Hari Tertahan', 'Alasan', 'SKU', 'Nama Produk', 'Jumlah', 'Nilai Kerugian (HPP)', 'Status Hilang (> 7 hari)'],
+          ...auditResult.rtsPackages.map(r => [
+            r.trackingNumber,
+            r.orderId,
+            r.status,
+            r.daysStuck,
+            r.reason,
+            r.sku,
+            r.productName,
+            r.qty,
+            r.lossValueHpp,
+            r.isStuck ? 'YA (POTENSI HILANG)' : 'NORMAL',
+          ]),
+        ];
+        const wsRts = XLSX.utils.aoa_to_sheet(rtsData);
+        XLSX.utils.book_append_sheet(wb, wsRts, 'Paket RTS & Retur');
 
-      XLSX.writeFile(wb, `Shopee_Financial_Audit_${Date.now()}.xlsx`);
-      toast.success('Laporan Excel berhasil diunduh!');
+        XLSX.writeFile(wb, `Shopee_Financial_Audit_${Date.now()}.xlsx`);
+      } else {
+        // Orders or General Cash Preview Export
+        const rows = [
+          ['No. Pesanan / ID', 'Tanggal', 'Jenis', 'Kategori', 'Keterangan Item', 'Total Qty', 'Nominal (Rp)', 'Status Persetujuan'],
+          ...proposedTransactions.map(t => [
+            t.orderId,
+            t.tanggal,
+            t.jenis,
+            t.kategori,
+            t.itemSummary,
+            t.qty_total,
+            t.nominal,
+            t.selected ? 'Disetujui' : 'Dilewati',
+          ]),
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, 'Pratinjau Impor');
+        XLSX.writeFile(wb, `Pratinjau_Import_Excel_${Date.now()}.xlsx`);
+      }
+      toast.success('Berkas Excel berhasil diunduh!');
     } catch (err) {
       console.error(err);
       toast.error('Gagal mengekspor file Excel');
@@ -341,71 +795,169 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleDialogClose}>
-      <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-white border-none shadow-2xl">
-        {/* Header */}
-        <DialogHeader className="p-6 bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500 text-white shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center">
-                <ShoppingBag className="w-6 h-6 text-white" />
+      <DialogContent className="max-w-5xl max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-white border-none shadow-2xl">
+        {/* Modern Modal Header */}
+        <DialogHeader className="p-6 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-700 text-white shrink-0">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-inner">
+                <FileSpreadsheet className="w-6 h-6" />
               </div>
               <div>
                 <DialogTitle className="text-xl font-black text-white flex items-center gap-2">
-                  Shopee Automated Financial & Loss Audit Engine
-                  <Sparkles className="w-4 h-4 text-amber-200 fill-amber-200" />
+                  Modal Import Excel (XLS / XLSX) & Rekonsiliasi
+                  <Sparkles className="w-4 h-4 text-emerald-200 fill-emerald-200" />
                 </DialogTitle>
-                <DialogDescription className="text-xs text-orange-100 font-medium">
-                  Audit laba bersih riil, pencocokan SKU HPP otomatis, selisih ongkir, dan pelacakan paket RTS/RR hilang.
+                <DialogDescription className="text-xs text-emerald-100 font-medium">
+                  {viewStep === 'upload'
+                    ? 'Pilih slot berkas atau perintah impor, ekstrak data otomatis, dan tinjau sebelum disetujui.'
+                    : 'Tinjau ringkasan pesanan & status SKU di bawah. Tekan tombol setujui untuk menyimpan ke database.'}
                 </DialogDescription>
               </div>
             </div>
-            {auditResult && (
-              <Badge className="bg-white text-orange-700 font-black text-xs px-3 py-1">
-                {auditResult.periode}
+
+            <div className="flex items-center gap-2">
+              <Badge className="bg-white/20 text-white border-none font-bold text-xs px-3 py-1">
+                {viewStep === 'upload' ? 'Tahap 1: Pilih Slot Berkas' : 'Tahap 2: Tinjau & Setujui User'}
               </Badge>
-            )}
+              {auditResult && (
+                <Badge className="bg-white text-emerald-800 font-black text-xs px-3 py-1">
+                  {auditResult.periode}
+                </Badge>
+              )}
+            </div>
           </div>
         </DialogHeader>
 
-        {/* Content Body */}
+        {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {!auditResult ? (
-            /* STEP 1: UPLOAD SLOTS FORM */
+          {viewStep === 'upload' ? (
+            /* STEP 1: WORKFLOW COMMAND SELECTION & UPLOAD SLOTS */
             <div className="space-y-6">
-              <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 text-xs text-orange-800 space-y-1">
+              {/* Workflow / Command Tabs */}
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                  Pilih Perintah / Format Impor Berkas:
+                </Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Option 1: Slot 1 Pesanan */}
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowMode('slot1_orders')}
+                    className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
+                      workflowMode === 'slot1_orders'
+                        ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 font-black text-xs">
+                          <Package className="w-4 h-4" />
+                        </div>
+                        <Badge className="bg-emerald-600 text-white text-[9px] font-black uppercase">
+                          Rekomendasi
+                        </Badge>
+                      </div>
+                      <h4 className="font-black text-sm text-gray-900">Pesanan Selesai (Slot 1)</h4>
+                      <p className="text-[11px] text-gray-500 leading-snug">
+                        Impor berkas pesanan penjualan Shopee/Tokopedia/TikTok Shop & potong stok otomatis.
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 2: Multi-Slot Audit Shopee */}
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowMode('multi_slot_audit')}
+                    className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
+                      workflowMode === 'multi_slot_audit'
+                        ? 'border-orange-500 bg-orange-50/70 shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-700 font-black text-xs">
+                        <TrendingUp className="w-4 h-4" />
+                      </div>
+                      <h4 className="font-black text-sm text-gray-900">Audit Shopee (Multi-Slot)</h4>
+                      <p className="text-[11px] text-gray-500 leading-snug">
+                        Rekonsiliasi omzet, potongan biaya admin, selisih ongkir, dan paket retur/RTS.
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 3: Buku Kas Umum */}
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowMode('general_cash')}
+                    className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
+                      workflowMode === 'general_cash'
+                        ? 'border-blue-600 bg-blue-50/70 shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 font-black text-xs">
+                        <Receipt className="w-4 h-4" />
+                      </div>
+                      <h4 className="font-black text-sm text-gray-900">Buku Kas Toko (.xlsx)</h4>
+                      <p className="text-[11px] text-gray-500 leading-snug">
+                        Impor tabel spreadsheet arus kas umum (Tanggal, Jenis, Kategori, Nominal, Keterangan).
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Informational Guidance */}
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-900 space-y-1">
                 <p className="font-bold flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-orange-600" />
-                  Panduan Berkas Shopee Seller Center:
+                  <Info className="w-4 h-4 text-emerald-700" />
+                  {workflowMode === 'slot1_orders' && 'Petunjuk Impor Pesanan Selesai (Slot 1):'}
+                  {workflowMode === 'multi_slot_audit' && 'Petunjuk Audit Multi-Slot Shopee Seller Center:'}
+                  {workflowMode === 'general_cash' && 'Petunjuk Format Buku Kas Excel:'}
                 </p>
-                <p className="text-[11px] leading-relaxed">
-                  Unggah berkas mentah langsung dari Seller Center. Sistem otomatis menggabungkan multi-part files, mengekstrak arsip ZIP, mencocokkan SKU ke Master HPP internal, dan mendeteksi anomali kerugian.
+                <p className="text-[11px] leading-relaxed text-emerald-800">
+                  {workflowMode === 'slot1_orders' &&
+                    'Unggah laporan pesanan (.xlsx / .xls). Sistem otomatis mengenali No. Pesanan, Tanggal, SKU, Qty, dan Harga. Data TIDAK langsung dimasukkan ke database sebelum Anda melihat pratinjau dan menyetujuinya.'}
+                  {workflowMode === 'multi_slot_audit' &&
+                    'Unggah minimal Slot 1 (Order Complete) dan Slot 2 (Income Released) untuk menghitung laba bersih riil, alokasi potongan admin, serta selisih ongkir. Slot 3 bersifat opsional.'}
+                  {workflowMode === 'general_cash' &&
+                    'Pastikan tabel Excel memiliki baris judul dengan kata kunci seperti Tanggal, Jenis (Pemasukan/Pengeluaran), Kategori, Keterangan, dan Nominal. Sistem akan mengekstrak setiap baris menjadi transaksi.'}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Slot 1: Order Complete */}
-                <Card className="border-2 border-dashed border-orange-200 hover:border-orange-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
-                  <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
-                    <div className="space-y-2">
-                      <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600">
-                        <FileSpreadsheet className="w-4 h-4" />
+              {/* UPLOAD SLOTS GRID */}
+              {workflowMode === 'slot1_orders' && (
+                /* SINGLE-SLOT: ORDER COMPLETE ONLY */
+                <Card className="border-2 border-dashed border-emerald-300 hover:border-emerald-500 transition-colors bg-white rounded-3xl overflow-hidden shadow-sm">
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                          <Package className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <Label className="font-black text-sm text-gray-900 block">
+                            Slot 1: Berkas Pesanan Selesai / Order Complete (.xlsx, .xls)
+                          </Label>
+                          <p className="text-xs text-gray-500 font-medium">
+                            Mendukung file pesanan harian, mingguan, bulanan, atau multi-part berkas.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <Label className="font-black text-xs text-gray-900 block">
-                          Slot 1: Order Complete (.xlsx)
-                        </Label>
-                        <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                          Lampirkan file Pesanan Selesai (Bulan H-1 & H, atau Multi-Part).
-                        </p>
-                      </div>
+                      <Badge className="bg-emerald-100 text-emerald-800 font-bold border-none text-[10px]">
+                        Slot Utama
+                      </Badge>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <input
                         type="file"
                         multiple
                         accept=".xlsx, .xls"
-                        id="slot1-upload"
+                        id="slot1-standalone-upload"
                         className="hidden"
                         onChange={(e) => {
                           if (e.target.files) {
@@ -416,579 +968,822 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
-                        onClick={() => document.getElementById('slot1-upload')?.click()}
-                        className="w-full h-9 rounded-xl border-orange-200 text-orange-700 hover:bg-orange-50 font-bold text-xs gap-1.5"
+                        onClick={() => document.getElementById('slot1-standalone-upload')?.click()}
+                        className="w-full h-12 rounded-2xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold text-xs gap-2"
                       >
-                        <Upload className="w-3.5 h-3.5" />
-                        Pilih Berkas ({orderFiles.length})
+                        <Upload className="w-4 h-4 text-emerald-600" />
+                        {orderFiles.length > 0
+                          ? `Ganti / Tambah Berkas (${orderFiles.length} file dipilih)`
+                          : 'Pilih Berkas Pesanan Excel (.xlsx / .xls)'}
                       </Button>
+
                       {orderFiles.length > 0 && (
-                        <div className="max-h-20 overflow-y-auto space-y-1">
-                          {orderFiles.map((f, i) => (
-                            <div key={i} className="text-[10px] bg-orange-50/80 p-1.5 rounded-lg font-bold text-orange-900 truncate">
-                              ✓ {f.name}
-                            </div>
-                          ))}
+                        <div className="space-y-2">
+                          <Label className="text-[11px] font-bold text-gray-400 uppercase">
+                            Berkas Terpilih ({orderFiles.length}):
+                          </Label>
+                          <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                            {orderFiles.map((f, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs"
+                              >
+                                <div className="flex items-center gap-2 truncate">
+                                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                                  <span className="font-bold text-emerald-950 truncate">{f.name}</span>
+                                  <span className="text-[10px] text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md shrink-0">
+                                    {formatFileSize(f.size)}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setOrderFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                  className="text-gray-400 hover:text-red-600 p-1 rounded-lg"
+                                  title="Hapus berkas"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
                   </CardContent>
                 </Card>
+              )}
 
-                {/* Slot 2: Income Released */}
-                <Card className="border-2 border-dashed border-blue-200 hover:border-blue-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
-                  <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
-                    <div className="space-y-2">
-                      <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                        <DollarSign className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <Label className="font-black text-xs text-gray-900 block">
-                          Slot 2: Income Released (.xlsx)
-                        </Label>
-                        <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                          File Penghasilan Saya status 'Sudah Dilepas' Bulan H.
-                        </p>
-                      </div>
-                    </div>
+              {workflowMode === 'multi_slot_audit' && (
+                /* MULTI-SLOT SHOPEE AUDIT: 3 SLOTS */
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Slot 1: Order Complete */}
+                    <Card className="border-2 border-dashed border-orange-200 hover:border-orange-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                      <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
+                        <div className="space-y-2">
+                          <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600">
+                            <FileSpreadsheet className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 1: Order Complete (.xlsx)
+                            </Label>
+                            <p className="text-[10px] text-gray-500 font-medium mt-0.5">
+                              Berkas Pesanan Selesai (Bulan H-1 & H, atau Multi-Part).
+                            </p>
+                          </div>
+                        </div>
 
-                    <div className="space-y-2">
-                      <input
-                        type="file"
-                        multiple
-                        accept=".xlsx, .xls"
-                        id="slot2-upload"
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files) {
-                            setIncomeFiles(Array.from(e.target.files));
-                          }
-                        }}
+                        <div className="space-y-2">
+                          <input
+                            type="file"
+                            multiple
+                            accept=".xlsx, .xls"
+                            id="slot1-multi-upload"
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                setOrderFiles(Array.from(e.target.files));
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => document.getElementById('slot1-multi-upload')?.click()}
+                            className="w-full h-9 rounded-xl border-orange-200 text-orange-700 hover:bg-orange-50 font-bold text-xs gap-1.5"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Pilih Berkas ({orderFiles.length})
+                          </Button>
+                          {orderFiles.length > 0 && (
+                            <div className="max-h-24 overflow-y-auto space-y-1">
+                              {orderFiles.map((f, i) => (
+                                <div key={i} className="flex items-center justify-between text-[10px] bg-orange-50/80 p-1.5 rounded-lg font-bold text-orange-900">
+                                  <span className="truncate">✓ {f.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOrderFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                    className="text-orange-500 hover:text-red-600 ml-1"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Slot 2: Income Released */}
+                    <Card className="border-2 border-dashed border-blue-200 hover:border-blue-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                      <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
+                        <div className="space-y-2">
+                          <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                            <DollarSign className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 2: Income Released (.xlsx)
+                            </Label>
+                            <p className="text-[10px] text-gray-500 font-medium mt-0.5">
+                              Berkas Penghasilan Saya status 'Sudah Dilepas' Bulan H.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <input
+                            type="file"
+                            multiple
+                            accept=".xlsx, .xls"
+                            id="slot2-multi-upload"
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                setIncomeFiles(Array.from(e.target.files));
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => document.getElementById('slot2-multi-upload')?.click()}
+                            className="w-full h-9 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 font-bold text-xs gap-1.5"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Pilih Berkas ({incomeFiles.length})
+                          </Button>
+                          {incomeFiles.length > 0 && (
+                            <div className="max-h-24 overflow-y-auto space-y-1">
+                              {incomeFiles.map((f, i) => (
+                                <div key={i} className="flex items-center justify-between text-[10px] bg-blue-50/80 p-1.5 rounded-lg font-bold text-blue-900">
+                                  <span className="truncate">✓ {f.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIncomeFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                    className="text-blue-500 hover:text-red-600 ml-1"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Slot 3: RTS / RR Archive */}
+                    <Card className="border-2 border-dashed border-purple-200 hover:border-purple-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                      <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
+                        <div className="space-y-2">
+                          <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">
+                            <Archive className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 3: RTS & Retur (.zip/.xlsx)
+                            </Label>
+                            <p className="text-[10px] text-gray-500 font-medium mt-0.5">
+                              Arsip Gagal Kirim (RTS) & Pengembalian Barang (RR).
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <input
+                            type="file"
+                            accept=".zip, .rar, .xlsx, .xls"
+                            id="slot3-multi-upload"
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                setRtsArchiveFile(e.target.files[0]);
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => document.getElementById('slot3-multi-upload')?.click()}
+                            className="w-full h-9 rounded-xl border-purple-200 text-purple-700 hover:bg-purple-50 font-bold text-xs gap-1.5"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            {rtsArchiveFile ? 'Ganti Berkas (.zip)' : 'Pilih Berkas (.zip)'}
+                          </Button>
+                          {rtsArchiveFile && (
+                            <div className="flex items-center justify-between text-[10px] bg-purple-50/80 p-1.5 rounded-lg font-bold text-purple-900">
+                              <span className="truncate">✓ {rtsArchiveFile.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => setRtsArchiveFile(null)}
+                                className="text-purple-500 hover:text-red-600 ml-1"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Optional Additional Cost Inputs for Shopee Audit */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-dashed border-gray-200">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-gray-700">
+                        Biaya Iklan Shopee Manual (Opsional)
+                      </Label>
+                      <Input
+                        type="number"
+                        placeholder="Contoh: 1500000"
+                        value={biayaIklanManual}
+                        onChange={(e) => setBiayaIklanManual(e.target.value)}
+                        className="rounded-xl h-10 font-bold"
                       />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => document.getElementById('slot2-upload')?.click()}
-                        className="w-full h-9 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 font-bold text-xs gap-1.5"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        Pilih Berkas ({incomeFiles.length})
-                      </Button>
-                      {incomeFiles.length > 0 && (
-                        <div className="max-h-20 overflow-y-auto space-y-1">
-                          {incomeFiles.map((f, i) => (
-                            <div key={i} className="text-[10px] bg-blue-50/80 p-1.5 rounded-lg font-bold text-blue-900 truncate">
-                              ✓ {f.name}
-                            </div>
-                          ))}
+                      <p className="text-[10px] text-gray-400">
+                        Otomatis menghitung PPN 11% jika tidak ditarik dari potongan invoice penghasilan.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-gray-700">
+                        Biaya Operasional Tambahan (Opsional)
+                      </Label>
+                      <Input
+                        type="number"
+                        placeholder="Contoh: 500000"
+                        value={biayaOperasionalManual}
+                        onChange={(e) => setBiayaOperasionalManual(e.target.value)}
+                        className="rounded-xl h-10 font-bold"
+                      />
+                      <p className="text-[10px] text-gray-400">
+                        Biaya ekstra seperti packing khusus atau operasional admin.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {workflowMode === 'general_cash' && (
+                /* GENERAL CASH SPREADSHEET */
+                <Card className="border-2 border-dashed border-blue-300 hover:border-blue-500 transition-colors bg-white rounded-3xl overflow-hidden shadow-sm">
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-blue-100 flex items-center justify-center text-blue-700">
+                          <Receipt className="w-5 h-5" />
                         </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Slot 3: RTS / RR Archive */}
-                <Card className="border-2 border-dashed border-purple-200 hover:border-purple-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
-                  <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
-                    <div className="space-y-2">
-                      <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">
-                        <Archive className="w-4 h-4" />
+                        <div>
+                          <Label className="font-black text-sm text-gray-900 block">
+                            Slot Berkas Buku Kas / Arus Kas (.xlsx, .xls)
+                          </Label>
+                          <p className="text-xs text-gray-500 font-medium">
+                            Berkas rekap transaksi umum dengan kolom Tanggal, Jenis, Kategori, Nominal, dan Keterangan.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <Label className="font-black text-xs text-gray-900 block">
-                          Slot 3: RTS & Retur (.zip/.xlsx)
-                        </Label>
-                        <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                          Arsip Gagal Kirim (RTS) & Pengembalian Barang (RR).
-                        </p>
-                      </div>
+                      <Badge className="bg-blue-100 text-blue-800 font-bold border-none text-[10px]">
+                        Kas Toko
+                      </Badge>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <input
                         type="file"
-                        accept=".zip, .rar, .xlsx, .xls"
-                        id="slot3-upload"
+                        accept=".xlsx, .xls"
+                        id="general-cash-upload"
                         className="hidden"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {
-                            setRtsArchiveFile(e.target.files[0]);
+                            setGeneralCashFile(e.target.files[0]);
                           }
                         }}
                       />
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
-                        onClick={() => document.getElementById('slot3-upload')?.click()}
-                        className="w-full h-9 rounded-xl border-purple-200 text-purple-700 hover:bg-purple-50 font-bold text-xs gap-1.5"
+                        onClick={() => document.getElementById('general-cash-upload')?.click()}
+                        className="w-full h-12 rounded-2xl border-blue-300 text-blue-800 hover:bg-blue-50 font-bold text-xs gap-2"
                       >
-                        <Upload className="w-3.5 h-3.5" />
-                        {rtsArchiveFile ? 'Ganti Berkas' : 'Pilih Berkas (.zip)'}
+                        <Upload className="w-4 h-4 text-blue-600" />
+                        {generalCashFile
+                          ? `Ganti Berkas: ${generalCashFile.name}`
+                          : 'Pilih Berkas Buku Kas (.xlsx / .xls)'}
                       </Button>
-                      {rtsArchiveFile && (
-                        <div className="text-[10px] bg-purple-50/80 p-1.5 rounded-lg font-bold text-purple-900 truncate">
-                          ✓ {rtsArchiveFile.name}
+
+                      {generalCashFile && (
+                        <div className="flex items-center justify-between p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs">
+                          <div className="flex items-center gap-2 truncate">
+                            <FileSpreadsheet className="w-4 h-4 text-blue-600 shrink-0" />
+                            <span className="font-bold text-blue-950 truncate">{generalCashFile.name}</span>
+                            <span className="text-[10px] text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-md shrink-0">
+                              {formatFileSize(generalCashFile.size)}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setGeneralCashFile(null)}
+                            className="text-gray-400 hover:text-red-600 p-1 rounded-lg"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       )}
                     </div>
                   </CardContent>
                 </Card>
-              </div>
+              )}
 
-              {/* Optional Additional Cost Inputs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-dashed border-gray-100">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700">
-                    Biaya Iklan Manual (Opsional)
-                  </Label>
-                  <Input
-                    type="number"
-                    placeholder="Contoh: 1500000"
-                    value={biayaIklanManual}
-                    onChange={(e) => setBiayaIklanManual(e.target.value)}
-                    className="rounded-xl h-10 font-bold"
-                  />
-                  <p className="text-[10px] text-gray-400">
-                    Sistem otomatis menghitung PPN 11% jika tidak ditarik dari potongan invoice penghasilan.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-gray-700">
-                    Biaya Operasional Tambahan (Opsional)
-                  </Label>
-                  <Input
-                    type="number"
-                    placeholder="Contoh: 500000"
-                    value={biayaOperasionalManual}
-                    onChange={(e) => setBiayaOperasionalManual(e.target.value)}
-                    className="rounded-xl h-10 font-bold"
-                  />
-                  <p className="text-[10px] text-gray-400">
-                    Biaya tambahan (packing khusus, gaji admin shopee, dll).
-                  </p>
-                </div>
-              </div>
-
+              {/* ACTION: PROCESS & PREVIEW (DOES NOT TOUCH DB) */}
               <Button
                 type="button"
-                disabled={isProcessing || orderFiles.length === 0 || incomeFiles.length === 0}
-                onClick={handleStartAudit}
-                className="w-full h-12 rounded-2xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-black text-sm gap-2 shadow-lg shadow-orange-200"
+                disabled={
+                  isProcessing ||
+                  (workflowMode === 'slot1_orders' && orderFiles.length === 0) ||
+                  (workflowMode === 'multi_slot_audit' && orderFiles.length === 0) ||
+                  (workflowMode === 'general_cash' && !generalCashFile)
+                }
+                onClick={handleProcessFiles}
+                className="w-full h-13 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm gap-2 shadow-lg shadow-emerald-200 transition-all"
               >
                 {isProcessing ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Sedang Memproses & Mengaudit Data...
+                    Sedang Mengekstrak Berkas & Menganalisis...
                   </>
                 ) : (
                   <>
-                    Mulai Audit Finansial & Loss Detection
+                    Proses & Buka Pratinjau Data (Preview)
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </Button>
             </div>
           ) : (
-            /* STEP 2 & 3: AUDIT RESULTS, QUICK-MAPPING, & EXECUTIVE SUMMARY */
+            /* STEP 2: REVIEW & APPROVAL SCREEN (USER MUST APPROVE TO SAVE TO DB) */
             <div className="space-y-6">
-              {/* Unmapped SKU Alert & Quick-Mapping */}
-              {auditResult.unmappedSkus.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+              {/* Review Mode Banner */}
+              <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3 text-amber-900">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-black text-amber-950">
+                    Mode Pratinjau: Data BELUM Disimpan ke Database
+                  </p>
+                  <p className="text-amber-800">
+                    Periksa ringkasan transaksi, pencocokan SKU produk, dan pastikan data sudah sesuai.
+                    Tekan tombol <strong>"Setujui & Simpan ke Database"</strong> di bagian bawah untuk menyimpan.
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card className="border border-emerald-100 bg-emerald-50/50 rounded-2xl">
+                  <CardContent className="p-3.5 space-y-1">
+                    <p className="text-[10px] font-bold uppercase text-emerald-700">Total Transaksi / Pesanan</p>
+                    <p className="text-lg md:text-xl font-black text-emerald-950">
+                      {workflowMode === 'multi_slot_audit' && auditResult
+                        ? `${auditResult.orderCount} Pesanan`
+                        : `${proposedTransactions.length} Baris`}
+                    </p>
+                    <p className="text-[10px] text-emerald-600 font-medium">
+                      {selectedTransactionsCount} disetujui untuk disimpan
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-blue-100 bg-blue-50/50 rounded-2xl">
+                  <CardContent className="p-3.5 space-y-1">
+                    <p className="text-[10px] font-bold uppercase text-blue-700">Total Nilai / Omzet</p>
+                    <p className="text-lg md:text-xl font-black text-blue-950 truncate">
+                      {workflowMode === 'multi_slot_audit' && auditResult
+                        ? formatCurrency(auditResult.totalOmzetToko)
+                        : formatCurrency(selectedTotalNominal)}
+                    </p>
+                    <p className="text-[10px] text-blue-600 font-medium truncate">
+                      {workflowMode === 'multi_slot_audit' && auditResult
+                        ? `Dana Dilepas: ${formatCurrency(auditResult.totalPendapatanDilepas)}`
+                        : 'Nilai dari transaksi terpilih'}
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-purple-100 bg-purple-50/50 rounded-2xl">
+                  <CardContent className="p-3.5 space-y-1">
+                    <p className="text-[10px] font-bold uppercase text-purple-700">Total Kuantitas Produk</p>
+                    <p className="text-lg md:text-xl font-black text-purple-950">
+                      {workflowMode === 'multi_slot_audit' && auditResult
+                        ? `${auditResult.totalQtySold} pcs`
+                        : `${selectedTotalQty} pcs`}
+                    </p>
+                    <p className="text-[10px] text-purple-600 font-medium">
+                      Item terjual terakumulasi
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border border-orange-100 bg-orange-50/50 rounded-2xl">
+                  <CardContent className="p-3.5 space-y-1">
+                    <p className="text-[10px] font-bold uppercase text-orange-700">Status Pencocokan SKU</p>
+                    <p className="text-lg md:text-xl font-black text-orange-950">
+                      {(workflowMode === 'multi_slot_audit' ? auditResult?.unmappedSkus.length : unmappedSkusList.length) === 0
+                        ? '100% Cocok ✓'
+                        : `${workflowMode === 'multi_slot_audit' ? auditResult?.unmappedSkus.length : unmappedSkusList.length} Perlu Pemetaan`}
+                    </p>
+                    <p className="text-[10px] text-orange-600 font-medium">
+                      Pencocokan ke katalog HPP
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* UNMAPPED SKU QUICK-MAPPING (IF ANY) */}
+              {(workflowMode === 'multi_slot_audit' ? (auditResult?.unmappedSkus.length || 0) : unmappedSkusList.length) > 0 && (
+                <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
                       <div>
                         <p className="font-black text-xs text-amber-900">
-                          Ditemukan {auditResult.unmappedSkus.length} SKU Shopee Belum Terdaftar
+                          Ditemukan {(workflowMode === 'multi_slot_audit' ? auditResult?.unmappedSkus.length : unmappedSkusList.length)} SKU Belum Terdaftar di Katalog HPP
                         </p>
                         <p className="text-[11px] text-amber-700">
-                          Petakan ke varian produk aplikasi di bawah agar nilai HPP & profit dapat dihitung presisi.
+                          Pilih varian produk aplikasi di bawah agar nilai modal HPP dan pemotongan stok otomatis akurat.
                         </p>
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={handleApplySkuMapping}
-                      disabled={isProcessing}
-                      className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-8"
-                    >
-                      {isProcessing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Terapkan & Hitung Ulang'}
-                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={saveSkuToDb}
+                          onChange={(e) => setSaveSkuToDb(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        Simpan SKU Permanen ke HPP
+                      </label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={workflowMode === 'multi_slot_audit' ? handleApplyShopeeAuditSkuMapping : handleApplyOrderSkuMapping}
+                        disabled={isProcessing}
+                        className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-8 gap-1.5"
+                      >
+                        {isProcessing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Terapkan & Hitung Ulang'}
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                    {auditResult.unmappedSkus.map((u, idx) => (
-                      <div key={idx} className="bg-white p-3 rounded-xl border border-amber-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
-                        <div className="space-y-0.5">
-                          <span className="font-black text-gray-900 bg-gray-100 px-2 py-0.5 rounded text-[11px]">
-                            SKU: {u.sku}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto pr-1">
+                    {(workflowMode === 'multi_slot_audit' ? (auditResult?.unmappedSkus || []) : unmappedSkusList).map((u) => (
+                      <div
+                        key={u.sku}
+                        className="bg-white border border-amber-200 p-2.5 rounded-xl flex flex-col justify-between space-y-1.5 text-xs shadow-xs"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-black text-amber-900 font-mono text-[11px] bg-amber-100/70 px-1.5 py-0.5 rounded">
+                            {u.sku}
                           </span>
-                          <p className="text-gray-500 font-medium text-[11px] truncate max-w-xs">
-                            {u.rawProductName} {u.rawVariantName && `(${u.rawVariantName})`}
-                          </p>
-                          <p className="text-[10px] text-amber-800 font-bold">
-                            Terjual: {u.totalQty} pcs | Omzet: {formatCurrency(u.totalOmzet)}
-                          </p>
+                          <span className="text-[10px] font-bold text-gray-500">
+                            {u.totalQty} pcs · {formatCurrency(u.totalOmzet)}
+                          </span>
                         </div>
-
-                        <div className="flex items-center gap-2 w-full md:w-auto">
-                          <select
-                            value={skuMapping[u.sku] ? `${skuMapping[u.sku].productId}::${skuMapping[u.sku].variantId}` : ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (val) {
-                                const [pId, vId] = val.split('::');
-                                setSkuMapping(prev => ({
-                                  ...prev,
-                                  [u.sku]: { productId: pId, variantId: vId }
-                                }));
-                              } else {
-                                const updated = { ...skuMapping };
-                                delete updated[u.sku];
-                                setSkuMapping(updated);
-                              }
-                            }}
-                            className="text-xs h-9 rounded-xl border border-gray-200 bg-white px-2 font-medium w-full md:w-64"
-                          >
-                            <option value="">-- Pilih Produk & Varian --</option>
-                            {products.flatMap(p =>
-                              p.varian.map(v => (
-                                <option key={`${p.id}::${v.id}`} value={`${p.id}::${v.id}`}>
-                                  {p.nama} - {v.nama} {v.sku ? `[${v.sku}]` : ''}
+                        <p className="text-[10px] text-gray-600 truncate font-medium">
+                          {u.rawProductName} {u.rawVariantName ? `(${u.rawVariantName})` : ''}
+                        </p>
+                        <select
+                          value={skuMapping[u.sku]?.variantId || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) {
+                              const copy = { ...skuMapping };
+                              delete copy[u.sku];
+                              setSkuMapping(copy);
+                              return;
+                            }
+                            const [pId, vId] = val.split(':::');
+                            setSkuMapping(prev => ({
+                              ...prev,
+                              [u.sku]: { productId: pId, variantId: vId },
+                            }));
+                          }}
+                          className="h-8 rounded-lg border-gray-200 text-[11px] font-bold w-full bg-gray-50 focus:bg-white"
+                        >
+                          <option value="">-- Pilih Varian Produk Toko --</option>
+                          {products.map(p => (
+                            <optgroup key={p.id} label={p.nama}>
+                              {p.varian.map(v => (
+                                <option key={v.id} value={`${p.id}:::${v.id}`}>
+                                  {p.nama} - {v.nama} ({formatCurrency(v.harga)})
                                 </option>
-                              ))
-                            )}
-                          </select>
-                        </div>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
                       </div>
                     ))}
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1 text-[11px] text-amber-900 font-bold">
-                    <input
-                      type="checkbox"
-                      id="saveSkuDb"
-                      checked={saveSkuToDb}
-                      onChange={(e) => setSaveSkuToDb(e.target.checked)}
-                      className="rounded text-amber-600"
-                    />
-                    <label htmlFor="saveSkuDb" className="cursor-pointer">
-                      Simpan SKU ini secara permanen ke varian produk di database aplikasi untuk audit berikutnya.
-                    </label>
                   </div>
                 </div>
               )}
 
-              {/* Executive Consolidated Financial Summary Card */}
-              <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-6 shadow-xl space-y-6">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-orange-400">
-                      Ringkasan Konsolidasi Toko
-                    </span>
-                    <h3 className="text-2xl font-black mt-0.5">
-                      Laba Bersih: {formatCurrency(auditResult.labaBersihKonsolidasi)}
-                    </h3>
-                  </div>
-                  <Badge className={auditResult.labaBersihKonsolidasi >= 0 ? 'bg-emerald-500 text-white text-xs font-black' : 'bg-red-500 text-white text-xs font-black'}>
-                    Margin: {auditResult.marginKonsolidasi.toFixed(1)}% ({auditResult.labaBersihKonsolidasi >= 0 ? 'PROFIT' : 'RUGI'})
-                  </Badge>
-                </div>
+              {/* TABLE VIEW / AUDIT TABS */}
+              {workflowMode === 'multi_slot_audit' && auditResult ? (
+                /* MULTI-SLOT SHOPEE DETAILED TABS */
+                <Tabs value={auditActiveTab} onValueChange={(v: any) => setAuditActiveTab(v)} className="w-full">
+                  <TabsList className="bg-gray-100 p-1 rounded-2xl w-full grid grid-cols-3 max-w-md">
+                    <TabsTrigger value="variants" className="rounded-xl font-bold text-xs">
+                      Performa Varian ({auditResult.variantBreakdown.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="discrepancies" className="rounded-xl font-bold text-xs">
+                      Selisih Ongkir ({auditResult.discrepancies.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="rts" className="rounded-xl font-bold text-xs">
+                      Paket RTS ({auditResult.rtsPackages.length})
+                    </TabsTrigger>
+                  </TabsList>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-700/60 text-xs font-medium">
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">TOTAL OMZET (GROSS)</span>
-                    <span className="text-base font-black text-white">{formatCurrency(auditResult.totalOmzetToko)}</span>
-                    <span className="text-[10px] text-slate-400 block">{auditResult.totalQtySold} pcs terjual</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">DANA DILEPAS (NET RELEASE)</span>
-                    <span className="text-base font-black text-emerald-400">{formatCurrency(auditResult.totalPendapatanDilepas)}</span>
-                    <span className="text-[10px] text-slate-400 block">{auditResult.orderCount} pesanan selesai</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">TOTAL HPP MODAL</span>
-                    <span className="text-base font-black text-amber-400">{formatCurrency(auditResult.totalHppTerjual)}</span>
-                    <span className="text-[10px] text-slate-400 block">Sesuai resep HPP</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">BIAYA ADMIN & LAYANAN</span>
-                    <span className="text-base font-black text-red-400">{formatCurrency(auditResult.totalAdminLayanan)}</span>
-                    <span className="text-[10px] text-slate-400 block">Potongan resmi Shopee</span>
-                  </div>
-                </div>
+                  <TabsContent value="variants" className="mt-4">
+                    <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                      <div className="max-h-80 overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-gray-50 text-gray-500 font-bold sticky top-0 border-b border-gray-200">
+                            <tr>
+                              <th className="p-3">Produk & Varian</th>
+                              <th className="p-3 text-right">Terjual</th>
+                              <th className="p-3 text-right">Omzet</th>
+                              <th className="p-3 text-right">HPP Modal</th>
+                              <th className="p-3 text-right">Laba Bersih</th>
+                              <th className="p-3 text-right">Margin</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 font-medium">
+                            {auditResult.variantBreakdown.map((vb, i) => (
+                              <tr key={i} className="hover:bg-gray-50/50">
+                                <td className="p-3">
+                                  <p className="font-bold text-gray-900">{vb.productName}</p>
+                                  <p className="text-[10px] text-gray-400 font-mono">{vb.variantName} · SKU: {vb.sku || '-'}</p>
+                                </td>
+                                <td className="p-3 text-right font-black text-gray-800">{vb.qtyTerjual} pcs</td>
+                                <td className="p-3 text-right font-black text-gray-900">{formatCurrency(vb.omzetVarian)}</td>
+                                <td className="p-3 text-right text-gray-600">{formatCurrency(vb.totalHppVarian)}</td>
+                                <td className={`p-3 text-right font-black ${vb.labaBersihVarian >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                  {formatCurrency(vb.labaBersihVarian)}
+                                </td>
+                                <td className="p-3 text-right font-black text-gray-700">{vb.marginVarian.toFixed(1)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </TabsContent>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-700/60 text-xs font-medium">
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">BIAYA IKLAN (INC. PPN)</span>
-                    <span className="text-sm font-black text-purple-300">{formatCurrency(auditResult.totalBiayaIklanIncPpn)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">BIAYA OPERASIONAL</span>
-                    <span className="text-sm font-black text-gray-300">{formatCurrency(auditResult.biayaOperasionalManual)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">SELISIH ONGKIR (LOSS)</span>
-                    <span className="text-sm font-black text-rose-400">{formatCurrency(auditResult.totalDiscrepancyLoss)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold block">POTENSI KERUGIAN RTS</span>
-                    <span className="text-sm font-black text-amber-300">{formatCurrency(auditResult.totalRtsLoss)}</span>
-                  </div>
-                </div>
-              </div>
+                  <TabsContent value="discrepancies" className="mt-4">
+                    <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                      <div className="max-h-80 overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-gray-50 text-gray-500 font-bold sticky top-0 border-b border-gray-200">
+                            <tr>
+                              <th className="p-3">No. Pesanan</th>
+                              <th className="p-3">Tanggal</th>
+                              <th className="p-3 text-right">Ongkir Pembeli</th>
+                              <th className="p-3 text-right">Ditagih Ekspedisi</th>
+                              <th className="p-3 text-right">Selisih Kerugian</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 font-medium">
+                            {auditResult.discrepancies.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">
+                                  Tidak ditemukan selisih ongkir abnormal pada berkas ini.
+                                </td>
+                              </tr>
+                            ) : (
+                              auditResult.discrepancies.map((d, i) => (
+                                <tr key={i} className="hover:bg-gray-50/50">
+                                  <td className="p-3 font-mono font-bold text-gray-800">{d.orderId}</td>
+                                  <td className="p-3 text-gray-500">{d.date}</td>
+                                  <td className="p-3 text-right text-gray-600">{formatCurrency(d.shippingBuyer)}</td>
+                                  <td className="p-3 text-right text-gray-600">{formatCurrency(d.shippingCourier)}</td>
+                                  <td className="p-3 text-right font-black text-red-600">{formatCurrency(d.discrepancy)}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </TabsContent>
 
-              {/* Tabs for Details */}
-              <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="space-y-4">
-                <TabsList className="bg-gray-100 p-1 rounded-2xl grid grid-cols-3">
-                  <TabsTrigger value="variants" className="rounded-xl font-bold text-xs">
-                    <Package className="w-3.5 h-3.5 mr-1.5" />
-                    Laba per Varian ({auditResult.variantBreakdown.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="discrepancies" className="rounded-xl font-bold text-xs">
-                    <Truck className="w-3.5 h-3.5 mr-1.5" />
-                    Selisih Ongkir ({auditResult.discrepancies.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="rts" className="rounded-xl font-bold text-xs">
-                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-                    Paket RTS/RR ({auditResult.rtsPackages.length})
-                  </TabsTrigger>
-                </TabsList>
-
-                {/* Tab 1: Breakdown Varian */}
-                <TabsContent value="variants" className="space-y-3">
-                  <div className="overflow-x-auto rounded-2xl border border-gray-100">
-                    <table className="w-full text-left text-xs font-medium">
-                      <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] font-black border-b border-gray-100">
-                        <tr>
-                          <th className="p-3">SKU & Varian</th>
-                          <th className="p-3 text-right">Terjual</th>
-                          <th className="p-3 text-right">Omzet</th>
-                          <th className="p-3 text-right">Total HPP</th>
-                          <th className="p-3 text-right">Alokasi Admin</th>
-                          <th className="p-3 text-right">Laba Bersih</th>
-                          <th className="p-3 text-right">Margin</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {auditResult.variantBreakdown.map((vb, idx) => (
-                          <tr key={idx} className="hover:bg-gray-50/50">
-                            <td className="p-3">
-                              <span className="font-bold text-gray-900 block">{vb.productName} - {vb.variantName}</span>
-                              <span className="text-[10px] text-gray-400 font-mono">SKU: {vb.sku || '-'}</span>
-                            </td>
-                            <td className="p-3 text-right font-black text-gray-800">{vb.qtyTerjual} pcs</td>
-                            <td className="p-3 text-right font-bold text-gray-900">{formatCurrency(vb.omzetVarian)}</td>
-                            <td className="p-3 text-right font-bold text-amber-700">{formatCurrency(vb.totalHppVarian)}</td>
-                            <td className="p-3 text-right font-bold text-red-600">{formatCurrency(vb.alokasiAdminVarian)}</td>
-                            <td className={`p-3 text-right font-black ${vb.labaBersihVarian >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                              {formatCurrency(vb.labaBersihVarian)}
-                            </td>
-                            <td className="p-3 text-right">
-                              <Badge className={`text-[10px] font-black ${vb.marginVarian >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                {vb.marginVarian.toFixed(1)}%
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </TabsContent>
-
-                {/* Tab 2: Selisih Ongkir */}
-                <TabsContent value="discrepancies" className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 font-medium">
-                      Transaksi di mana ongkir ditagihkan kurir lebih besar daripada dibayar pembeli.
-                    </p>
-                    {auditResult.discrepancies.length > 0 && (
+                  <TabsContent value="rts" className="mt-4">
+                    <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                      <div className="max-h-80 overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-gray-50 text-gray-500 font-bold sticky top-0 border-b border-gray-200">
+                            <tr>
+                              <th className="p-3">No. Resi & Pesanan</th>
+                              <th className="p-3">Produk</th>
+                              <th className="p-3">Status</th>
+                              <th className="p-3 text-right">Hari Tertahan</th>
+                              <th className="p-3 text-right">Estimasi Kerugian</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 font-medium">
+                            {auditResult.rtsPackages.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">
+                                  Tidak ada rekaman paket RTS / retur bermasalah.
+                                </td>
+                              </tr>
+                            ) : (
+                              auditResult.rtsPackages.map((r, i) => (
+                                <tr key={i} className="hover:bg-gray-50/50">
+                                  <td className="p-3">
+                                    <p className="font-mono font-bold text-gray-900">{r.trackingNumber}</p>
+                                    <p className="text-[10px] text-gray-400 font-mono">{r.orderId}</p>
+                                  </td>
+                                  <td className="p-3">
+                                    <p className="font-bold text-gray-800">{r.productName}</p>
+                                    <p className="text-[10px] text-gray-400 font-mono">Qty: {r.qty} pcs</p>
+                                  </td>
+                                  <td className="p-3 text-gray-600">{r.status}</td>
+                                  <td className="p-3 text-right font-bold text-gray-800">{r.daysStuck} hari</td>
+                                  <td className="p-3 text-right font-black text-amber-600">{formatCurrency(r.lossValueHpp)}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                /* INTERACTIVE PROPOSED TRANSACTIONS TABLE (FOR ORDERS & CASH) */
+                <div className="space-y-3">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
-                        onClick={copyAllDiscrepancyOrderIds}
-                        className="rounded-xl h-8 text-xs font-bold gap-1 text-orange-600 border-orange-200"
+                        size="sm"
+                        onClick={() => toggleSelectAll(selectedTransactionsCount !== proposedTransactions.length)}
+                        className="h-8 rounded-xl text-xs font-bold border-gray-200 gap-1.5"
                       >
-                        <Copy className="w-3.5 h-3.5" />
-                        Salin Semua No. Pesanan
+                        {selectedTransactionsCount === proposedTransactions.length ? (
+                          <>
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+                            Batalkan Semua
+                          </>
+                        ) : (
+                          <>
+                            <Square className="w-3.5 h-3.5 text-gray-400" />
+                            Pilih Semua ({proposedTransactions.length})
+                          </>
+                        )}
                       </Button>
-                    )}
+                      <span className="text-xs font-bold text-gray-500">
+                        {selectedTransactionsCount} dari {proposedTransactions.length} disetujui
+                      </span>
+                    </div>
+
+                    <div className="relative w-full md:w-64">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                      <Input
+                        placeholder="Cari no. pesanan / produk..."
+                        value={previewSearch}
+                        onChange={(e) => setPreviewSearch(e.target.value)}
+                        className="h-8 pl-8 text-xs rounded-xl"
+                      />
+                    </div>
                   </div>
 
-                  {auditResult.discrepancies.length === 0 ? (
-                    <div className="p-8 text-center bg-emerald-50 rounded-2xl text-emerald-700 text-xs font-bold">
-                      ✓ Tidak ada selisih ongkir yang merugikan toko pada periode ini!
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-2xl border border-gray-100 max-h-72 overflow-y-auto">
-                      <table className="w-full text-left text-xs font-medium">
-                        <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] font-black sticky top-0 border-b border-gray-100">
+                  <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                    <div className="max-h-80 overflow-y-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-50 text-gray-500 font-bold sticky top-0 border-b border-gray-200">
                           <tr>
-                            <th className="p-3">No. Pesanan</th>
+                            <th className="p-3 w-10 text-center">✓</th>
+                            <th className="p-3">No. Pesanan / Ref</th>
                             <th className="p-3">Tanggal</th>
-                            <th className="p-3 text-right">Ongkir Pembeli</th>
-                            <th className="p-3 text-right">Ongkir Ekspedisi</th>
-                            <th className="p-3 text-right">Selisih Rugi</th>
-                            <th className="p-3 text-center">Aksi</th>
+                            <th className="p-3">Rincian Item</th>
+                            <th className="p-3 text-right">Nominal (Rp)</th>
+                            <th className="p-3 text-center">Status</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {auditResult.discrepancies.map((d, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50/50">
-                              <td className="p-3 font-mono font-bold text-gray-800">{d.orderId}</td>
-                              <td className="p-3 text-gray-500">{d.date}</td>
-                              <td className="p-3 text-right">{formatCurrency(d.shippingBuyer)}</td>
-                              <td className="p-3 text-right text-red-600 font-bold">{formatCurrency(d.shippingCourier)}</td>
-                              <td className="p-3 text-right font-black text-rose-600">{formatCurrency(d.discrepancy)}</td>
-                              <td className="p-3 text-center">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => copyToClipboard(d.orderId, 'No. Pesanan')}
-                                  className="h-7 px-2 text-[10px] font-bold text-orange-600 hover:bg-orange-50 rounded-lg gap-1"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                  Salin ID
-                                </Button>
+                        <tbody className="divide-y divide-gray-100 font-medium">
+                          {filteredProposedTxs.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="p-8 text-center text-gray-400">
+                                Tidak ada data yang sesuai dengan pencarian.
                               </td>
                             </tr>
-                          ))}
+                          ) : (
+                            filteredProposedTxs.map((t) => (
+                              <tr
+                                key={t.id}
+                                className={`transition-colors ${t.selected ? 'bg-white hover:bg-emerald-50/30' : 'bg-gray-50/60 opacity-60'}`}
+                              >
+                                <td className="p-3 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={t.selected}
+                                    onChange={() => toggleSelectTransaction(t.id)}
+                                    className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="p-3 font-mono font-bold text-gray-900 truncate max-w-[140px]">
+                                  {t.orderId}
+                                </td>
+                                <td className="p-3 text-gray-500 whitespace-nowrap">
+                                  {t.tanggal}
+                                </td>
+                                <td className="p-3 max-w-[280px]">
+                                  <p className="font-bold text-gray-900 truncate" title={t.itemSummary}>
+                                    {t.itemSummary}
+                                  </p>
+                                  {t.qty_total > 0 && (
+                                    <span className="text-[10px] text-gray-400 font-semibold">
+                                      Total: {t.qty_total} pcs
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-black text-gray-900 whitespace-nowrap">
+                                  {formatCurrency(t.nominal)}
+                                </td>
+                                <td className="p-3 text-center">
+                                  {t.unmatchedItemsCount > 0 ? (
+                                    <Badge className="bg-amber-100 text-amber-800 border-none text-[9px] font-bold">
+                                      SKU Belum Dipetakan
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="bg-emerald-100 text-emerald-800 border-none text-[9px] font-bold">
+                                      Siap Simpan ✓
+                                    </Badge>
+                                  )}
+                                </td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
-                  )}
-                </TabsContent>
-
-                {/* Tab 3: RTS / RR */}
-                <TabsContent value="rts" className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 font-medium">
-                      Pelacakan paket Gagal Kirim (RTS) dan Retur. Paket yang tertahan &gt; 7 hari ditandai berpotensi hilang.
-                    </p>
-                    {auditResult.rtsPackages.some(p => p.isStuck) && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={copyAllStuckRts}
-                        className="rounded-xl h-8 text-xs font-bold gap-1 text-purple-600 border-purple-200"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        Salin Paket Tertahan untuk Klaim
-                      </Button>
-                    )}
                   </div>
+                </div>
+              )}
 
-                  {auditResult.rtsPackages.length === 0 ? (
-                    <div className="p-8 text-center bg-gray-50 rounded-2xl text-gray-500 text-xs font-bold">
-                      Tidak ada data RTS/RR atau berkas Slot 3 tidak dilampirkan.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-2xl border border-gray-100 max-h-72 overflow-y-auto">
-                      <table className="w-full text-left text-xs font-medium">
-                        <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] font-black sticky top-0 border-b border-gray-100">
-                          <tr>
-                            <th className="p-3">No. Resi & Pesanan</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3">Tertahan</th>
-                            <th className="p-3">Produk & SKU</th>
-                            <th className="p-3 text-right">Nilai Rugi HPP</th>
-                            <th className="p-3 text-center">Aksi</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {auditResult.rtsPackages.map((r, idx) => (
-                            <tr key={idx} className={r.isStuck ? 'bg-red-50/40 hover:bg-red-50/60' : 'hover:bg-gray-50/50'}>
-                              <td className="p-3">
-                                <span className="font-mono font-bold text-gray-900 block">{r.trackingNumber}</span>
-                                <span className="text-[10px] text-gray-400 font-mono">Order: {r.orderId}</span>
-                              </td>
-                              <td className="p-3">
-                                <Badge className={r.isStuck ? 'bg-red-500 text-white text-[10px]' : 'bg-gray-100 text-gray-700 text-[10px]'}>
-                                  {r.status}
-                                </Badge>
-                              </td>
-                              <td className="p-3">
-                                <span className={`font-black ${r.isStuck ? 'text-red-600' : 'text-gray-700'}`}>
-                                  {r.daysStuck} hari
-                                </span>
-                                {r.isStuck && (
-                                  <span className="block text-[9px] font-black text-red-500 uppercase animate-pulse">
-                                    Potensi Hilang
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-3">
-                                <span className="font-bold text-gray-900 block truncate max-w-xs">{r.productName || r.sku}</span>
-                                <span className="text-[10px] text-gray-500">Qty: {r.qty} pcs</span>
-                              </td>
-                              <td className="p-3 text-right font-black text-amber-700">
-                                {formatCurrency(r.lossValueHpp)}
-                              </td>
-                              <td className="p-3 text-center">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => copyToClipboard(r.trackingNumber, 'No. Resi')}
-                                  className="h-7 px-2 text-[10px] font-bold text-purple-600 hover:bg-purple-50 rounded-lg gap-1"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                  Salin Resi
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-
-              {/* Bottom Actions */}
-              <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-100">
+              {/* FOOTER ACTIONS: CANCEL, EXPORT, & MANDATORY APPROVAL BUTTON */}
+              <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
                 <div className="flex items-center gap-2 w-full md:w-auto">
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setAuditResult(null)}
-                    className="rounded-2xl h-11 text-xs font-bold border-gray-200"
+                    onClick={() => {
+                      setViewStep('upload');
+                      setAuditResult(null);
+                      setProposedTransactions([]);
+                    }}
+                    className="rounded-2xl h-11 text-xs font-bold border-gray-200 text-gray-600 hover:bg-gray-100"
                   >
-                    Unggah Berkas Baru
+                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                    Unggah Ulang / Batal
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={exportAuditToExcel}
+                    onClick={exportPreviewToExcel}
                     className="rounded-2xl h-11 text-xs font-bold border-emerald-200 text-emerald-700 hover:bg-emerald-50 gap-1.5"
                   >
-                    <Download className="w-4 h-4" />
+                    <Download className="w-3.5 h-3.5" />
                     Unduh Excel (.xlsx)
                   </Button>
                 </div>
 
+                {/* THE MANDATORY USER APPROVAL / SAVE BUTTON */}
                 <Button
                   type="button"
-                  disabled={isCommitting}
-                  onClick={handleConfirmAndCommit}
-                  className="w-full md:w-auto h-12 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm gap-2 shadow-lg shadow-emerald-200"
+                  disabled={isCommitting || (workflowMode !== 'multi_slot_audit' && selectedTransactionsCount === 0)}
+                  onClick={handleUserApprovalCommit}
+                  className="w-full md:w-auto h-12 px-7 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-700 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm gap-2 shadow-lg shadow-emerald-200 transition-all active:scale-95"
                 >
                   {isCommitting ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Menerapkan ke Database & Stok...
+                      Menyimpan ke Database & Stok...
                     </>
                   ) : (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
-                      Simpan & Terapkan ke Sistem (Transaksi & Stok)
+                      Setujui & Simpan ke Database
+                      {workflowMode === 'multi_slot_audit'
+                        ? ' (Konsolidasi Audit)'
+                        : ` (${selectedTransactionsCount} Transaksi)`}
                     </>
                   )}
                 </Button>
@@ -1000,4 +1795,5 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
     </Dialog>
   );
 };
+
 export default ShopeeAuditModal;

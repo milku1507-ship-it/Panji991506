@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X, Wallet, PiggyBank } from 'lucide-react';
+import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X, Wallet, PiggyBank, FileSpreadsheet } from 'lucide-react';
 import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
 import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee, Dompet, KategoriArusKas } from '../types';
 import { cn } from '@/lib/utils';
@@ -56,6 +56,7 @@ interface TransactionManagerProps {
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   products: Product[];
+  setProducts?: React.Dispatch<React.SetStateAction<Product[]>>;
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
   onSuccess?: () => void;
@@ -75,7 +76,7 @@ const CATEGORIES = [
   { name: 'Lainnya', type: 'Pengeluaran', fixed: false },
 ];
 
-export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess, dompets = [], setDompets }: TransactionManagerProps) {
+export default function TransactionManager({ user, transactions, setTransactions, products, setProducts, ingredients, setIngredients, onSuccess, dompets = [], setDompets }: TransactionManagerProps) {
   const { settings } = useSettings();
   const dateInputRef = React.useRef<HTMLInputElement>(null);
   const processingTxRef = React.useRef<Set<string>>(new Set());
@@ -659,303 +660,64 @@ export default function TransactionManager({ user, transactions, setTransactions
     }
   };
 
-  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleCommitTransactions = async (
+    txsToSave: any[],
+    mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
+  ) => {
+    if (!user) return;
 
-    // Normalisasi SKU: trim + UPPERCASE + hapus spasi
-    const normalizeSKU = (val: any): string => {
-      return String(val ?? '')
-        .trim()
-        .toUpperCase()
-        .replace(/\s+/g, '');
-    };
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
+    // 1. Permanently update SKU in products if any
+    if (mappedNewSkus && mappedNewSkus.length > 0) {
       try {
-        const arrayBuffer = evt.target?.result as ArrayBuffer;
-        const wb = XLSX.read(arrayBuffer, { type: 'array' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-
-        const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
-
-        if (rawRows.length === 0) {
-          toast.error("File Excel kosong.");
-          return;
-        }
-
-        // Keywords UPPERCASE — fleksibel untuk berbagai marketplace
-        const variantSkuKeywords = ["NOMORREFERENSISKU", "REFERENSISKU", "SKUVARIAN", "VARIANTSKU", "VARIATIONSKU"];
-        const productSkuKeywords = ["SKUINDUK", "SKUPRODUK", "SELLERSKU", "PRODUCTSKU", "MASTERSKU", "SKU"];
-        const variantKeywords    = ["NAMAVARIASI", "NAMAVARIAN", "VARIASI", "VARIANT", "VARIATION"];
-        const productNameKeywords= ["NAMAPRODUK", "PRODUKNAMA", "PRODUCTNAME", "ITEMNAME", "NAMABARANG"];
-        const qtyKeywords        = ["JUMLAH", "QUANTITY", "QTY", "KUANTITAS"];
-        const payKeywords        = ["DIBAYARPEMBELI", "PEMBAYARANPEMBELI", "BUYERPAYMENT", "TOTALPEMBAYARAN", "TOTALDIBAYAR", "TOTALHARGA", "TOTAL"];
-        const orderIdKeywords    = ["NO.PESANAN", "NOPESANAN", "NOMORPESANAN", "ORDERID", "ORDERNUMBER", "NOINVOICE", "NOFAKTUR", "INVOICE"];
-        const dateKeywords       = ["WAKTUPESANANDIBUAT", "TANGGALPEMBAYARAN", "TANGGAL", "ORDERCREATEDDATE", "DATE"];
-
-        // Cari baris header — scan 30 baris pertama, butuh kolom SKU (apa pun) + Jumlah
-        const allSkuKeywords = [...variantSkuKeywords, ...productSkuKeywords];
-        let headerRowIndex = -1;
-        for (let i = 0; i < Math.min(rawRows.length, 30); i++) {
-          const rowNorm = rawRows[i].map((c: any) => normalizeSKU(c));
-          const hasSkuCol = rowNorm.some((h: string) => h !== '' && allSkuKeywords.some(k => h === k || h.includes(k)));
-          const hasQtyCol = rowNorm.some((h: string) => h !== '' && qtyKeywords.some(k => h === k));
-          if (hasSkuCol && hasQtyCol) {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          toast.error("Format file tidak dikenali. Kolom SKU atau Jumlah tidak ditemukan.");
-          return;
-        }
-
-        const headerRow = rawRows[headerRowIndex] as any[];
-        const normalizedHeaders = headerRow.map((h: any) => normalizeSKU(h));
-
-        // Exact match dulu, baru substring
-        const findColIdx = (keywords: string[]): number => {
-          let idx = normalizedHeaders.findIndex((h: string) => h !== '' && keywords.includes(h));
-          if (idx !== -1) return idx;
-          return normalizedHeaders.findIndex((h: string) => h !== '' && keywords.some(k => h.includes(k)));
-        };
-
-        // Parse angka format Indonesia
-        const parseIdAmount = (val: any): number => {
-          const s = String(val ?? '0').trim().replace(/[Rp\s]/g, '');
-          if (!s || s === '0') return 0;
-          if (s.includes(',')) {
-            return Number(s.replace(/\./g, '').replace(',', '.')) || 0;
-          }
-          const lastDot = s.lastIndexOf('.');
-          if (lastDot >= 0 && s.length - lastDot - 1 === 3) {
-            return Number(s.replace(/\./g, '')) || 0;
-          }
-          return Number(s.replace(/[^0-9.]/g, '')) || 0;
-        };
-
-        const variantSkuIdx = findColIdx(variantSkuKeywords);  // Nomor Referensi SKU
-        const productSkuIdx = findColIdx(productSkuKeywords);  // SKU Induk
-        const vIdx          = findColIdx(variantKeywords);
-        const productNameIdx= findColIdx(productNameKeywords);
-        const qIdx          = findColIdx(qtyKeywords);
-        const payIdx        = findColIdx(payKeywords);
-        const oidIdx        = findColIdx(orderIdKeywords);
-        const dateIdx       = findColIdx(dateKeywords);
-
-        if ((variantSkuIdx === -1 && productSkuIdx === -1) || qIdx === -1) {
-          toast.error(`Kolom wajib tidak ditemukan. Header: ${headerRow.slice(0, 10).join(', ')}`);
-          return;
-        }
-
-        const dataRows = rawRows.slice(headerRowIndex + 1);
-        const today = new Date().toISOString().split('T')[0];
-
-        console.log(`[XLS IMPORT] Header row: ${headerRowIndex}`);
-        console.log(`[XLS IMPORT] SKU Varian col: ${variantSkuIdx}, SKU Induk col: ${productSkuIdx}, Qty: ${qIdx}, Order ID: ${oidIdx}`);
-
-        // Index katalog: by product SKU & by variant SKU
-        const dbProducts = products.map(p => ({ ...p, normSku: normalizeSKU(p.sku) }));
-        const productBySku = new Map<string, typeof dbProducts[number]>();
-        for (const p of dbProducts) {
-          if (p.normSku) productBySku.set(p.normSku, p);
-        }
-        const variantBySku = new Map<string, { product: typeof dbProducts[number]; variant: typeof dbProducts[number]['varian'][number] }>();
-        for (const p of dbProducts) {
-          for (const v of p.varian) {
-            const vs = normalizeSKU(v.sku || '');
-            if (vs) variantBySku.set(vs, { product: p, variant: v });
-          }
-        }
-
-        const missingSku: string[] = [];
-
-        const parseDate = (val: any): string => {
-          if (!val) return today;
-          const s = String(val).trim();
-          const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-          if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-          if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-          return today;
-        };
-
-        // Setiap baris XLS = 1 OrderItem terpisah (TIDAK digabung walau SKU+varian sama)
-        type OrderItem = {
-          produk_id: string; produk_nama: string;
-          varian_id: string; varian_nama: string;
-          qty: number; payment: number;
-        };
-        type OrderGroup = { orderId: string; tanggal: string; totalPayment: number; items: OrderItem[] };
-        const orderMap = new Map<string, OrderGroup>();
-        let rowSeq = 0;
-
-        for (let i = 0; i < dataRows.length; i++) {
-          const row = dataRows[i] as any[];
-          if (!row || row.every((cell: any) => cell === '' || cell == null)) continue;
-
-          const rawVarSku  = variantSkuIdx !== -1 ? String(row[variantSkuIdx] ?? '').trim() : '';
-          const rawProdSku = productSkuIdx !== -1 ? String(row[productSkuIdx] ?? '').trim() : '';
-          const normVarSku  = normalizeSKU(rawVarSku);
-          const normProdSku = normalizeSKU(rawProdSku);
-          const rawVarian = vIdx !== -1 ? String(row[vIdx] ?? '').trim() : '';
-          const rawProdName = productNameIdx !== -1 ? String(row[productNameIdx] ?? '').trim() : '';
-
-          if (!normVarSku && !normProdSku) continue;
-
-          // 1) Coba match SKU varian dulu (paling spesifik)
-          let product: typeof dbProducts[number] | undefined;
-          let variant: typeof dbProducts[number]['varian'][number] | undefined;
-          let matchSource = '';
-
-          if (normVarSku && variantBySku.has(normVarSku)) {
-            const m = variantBySku.get(normVarSku)!;
-            product = m.product;
-            variant = m.variant;
-            matchSource = 'variant-sku';
-          } else if (normProdSku && productBySku.has(normProdSku)) {
-            // 2) Fallback: match via SKU induk → cari varian by name
-            product = productBySku.get(normProdSku);
-            if (product) {
-              if (rawVarian) {
-                variant = product.varian.find(v => normalizeSKU(v.nama) === normalizeSKU(rawVarian));
-                if (!variant) {
-                  variant = product.varian.find(v =>
-                    v.nama.toUpperCase().includes(rawVarian.toUpperCase()) ||
-                    rawVarian.toUpperCase().includes(v.nama.toUpperCase())
-                  );
-                }
-              }
-              if (!variant && product.varian.length > 0) variant = product.varian[0];
-              matchSource = 'product-sku';
+        const batch = writeBatch(db);
+        let productsModified = false;
+        const updatedProducts = products.map(prod => {
+          let prodModified = false;
+          const updatedVariants = prod.varian.map(vr => {
+            const mapped = mappedNewSkus.find(m => m.productId === prod.id && m.variantId === vr.id);
+            if (mapped) {
+              prodModified = true;
+              return { ...vr, sku: mapped.sku };
             }
-          } else if (normVarSku && productBySku.has(normVarSku)) {
-            // 3) Sebagian marketplace pakai produk SKU di kolom variant SKU — coba juga
-            product = productBySku.get(normVarSku);
-            if (product) {
-              if (product.varian.length > 0) variant = product.varian[0];
-              matchSource = 'variant-sku-as-product';
-            }
-          }
-
-          if (!product) {
-            const tag = rawVarSku || rawProdSku;
-            if (!missingSku.includes(tag)) missingSku.push(tag);
-            continue;
-          }
-
-          // Produk tanpa varian → buat varian sintetis pakai nama produk dari app
-          if (!variant) {
-            variant = {
-              id: '__no_variant__',
-              nama: product.nama,
-              sku: '',
-              harga_jual: 0,
-              qty_batch: 0,
-              harga_packing: 0,
-              bahan: [],
-            } as any;
-          }
-
-          const qty     = Number(String(row[qIdx] ?? '0').replace(/[^0-9]/g, '')) || 0;
-          const payment = payIdx !== -1 ? parseIdAmount(row[payIdx]) : 0;
-          const tanggal = parseDate(dateIdx !== -1 ? row[dateIdx] : '');
-          const rawOrderId = oidIdx !== -1 ? String(row[oidIdx] ?? '').trim() : '';
-          rowSeq++;
-          const orderId = rawOrderId !== '' ? rawOrderId : `AUTO-${rowSeq}`;
-
-          if (!orderMap.has(orderId)) {
-            orderMap.set(orderId, { orderId, tanggal, totalPayment: 0, items: [] });
-          }
-          const order = orderMap.get(orderId)!;
-          order.totalPayment += payment;
-
-          // Tiap baris XLS push sebagai item terpisah — TANPA merge
-          // Nama produk & nama varian SELALU dari katalog app (bukan dari XLS)
-          order.items.push({
-            produk_id: product.id,
-            produk_nama: product.nama,
-            varian_id: variant!.id,
-            varian_nama: variant!.nama,
-            qty,
-            payment,
+            return vr;
           });
-
-          console.log(`[XLS ROW ${i + 1}] order=${orderId} sku=${rawVarSku || rawProdSku} match=${matchSource} qty=${qty}`);
-        }
-
-        console.log(`[XLS IMPORT] Total rows: ${dataRows.length}, Pesanan: ${orderMap.size}, Missing SKU: ${missingSku.length}`);
-
-        if (orderMap.size === 0) {
-          const skuInDb = [...productBySku.keys()].slice(0, 8).join(', ');
-          toast.error(
-            `0 item cocok. SKU di file: ${missingSku.slice(0, 5).join(', ')}. SKU di katalog: ${skuInDb || 'belum terdaftar'}`,
-            { duration: 10000 }
-          );
-          return;
-        }
-
-        // 1 pesanan = 1 transaksi; tiap baris XLS = item terpisah dalam penjualan_detail
-        const transactionsToCreate = [...orderMap.values()].map(order => {
-          const shortId = order.orderId.length > 12 ? order.orderId.slice(-8) : order.orderId;
-          const itemSummary = order.items
-            .map(it => `${it.produk_nama}${it.varian_nama && it.varian_nama !== it.produk_nama ? ` (${it.varian_nama})` : ''} x${it.qty}`)
-            .join(', ');
-          const keterangan = `Pesanan #${shortId}: ${itemSummary}`;
-
-          const totalQty = order.items.reduce((s, it) => s + it.qty, 0);
-
-          // Group per produk_id, tetapi simpan tiap baris sebagai entry varian terpisah
-          // (jangan dedupe — user ingin tiap baris XLS tetap ada)
-          const produkMap = new Map<string, { produk_id: string; produk_nama: string; varian: { varian_id: string; varian_nama: string; qty: number }[] }>();
-          for (const it of order.items) {
-            if (!produkMap.has(it.produk_id)) {
-              produkMap.set(it.produk_id, { produk_id: it.produk_id, produk_nama: it.produk_nama, varian: [] });
-            }
-            produkMap.get(it.produk_id)!.varian.push({
-              varian_id: it.varian_id,
-              varian_nama: it.varian_nama,
-              qty: it.qty,
-            });
+          if (prodModified) {
+            productsModified = true;
+            const updated = { ...prod, varian: updatedVariants };
+            batch.set(doc(db, `users/${user.uid}/hpp/${prod.id}`), sanitizeData(updated));
+            return updated;
           }
-
-          return {
-            jenis: 'Pemasukan',
-            kategori: 'Penjualan',
-            tanggal: order.tanggal,
-            keterangan,
-            nominal: order.totalPayment,
-            total_penjualan: order.totalPayment,
-            penjualan_detail: [...produkMap.values()],
-            qty_total: totalQty
-          };
+          return prod;
         });
 
-        setIsSaving(true);
-        for (const tx of transactionsToCreate) {
-          try {
-            await processAndSaveTransaction(tx);
-          } catch (err) {
-            console.error("Gagal save tx:", err);
-          }
+        if (productsModified) {
+          await batch.commit();
+          if (setProducts) setProducts(updatedProducts);
         }
-        setIsSaving(false);
-
-        toast.success(`Import Selesai!`, {
-          description: `${transactionsToCreate.length} pesanan berhasil diimport. ${missingSku.length} SKU tidak cocok.`
-        });
-
-        if (e.target) e.target.value = '';
-
       } catch (err) {
-        console.error("[IMPORT FATAL] error:", err);
-        toast.error("Gagal membaca file Excel. Pastikan format file benar.");
+        console.error('Gagal memperbarui SKU produk di database:', err);
       }
-    };
-    reader.readAsArrayBuffer(file);
+    }
+
+    // 2. Save each transaction and adjust stock
+    setIsSaving(true);
+    let successCount = 0;
+    try {
+      for (const tx of txsToSave) {
+        try {
+          await processAndSaveTransaction(tx);
+          successCount++;
+        } catch (err) {
+          console.error("Gagal save tx:", err);
+        }
+      }
+      toast.success('Penyimpanan Berhasil Disetujui!', {
+        description: `${successCount} transaksi berhasil disimpan ke database dan stok bahan baku telah disesuaikan.`
+      });
+      if (onSuccess) onSuccess();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // === Filter periode bersama (sinkron dengan halaman Laporan) ===
@@ -1507,7 +1269,18 @@ export default function TransactionManager({ user, transactions, setTransactions
           <p className="text-gray-500 font-medium">Catat pemasukan & pengeluaran.</p>
         </div>
 
-        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+        <div className="flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsShopeeAuditOpen(true)}
+            className="rounded-2xl border border-emerald-200 shadow-sm bg-white font-bold gap-2 text-emerald-800 hover:bg-emerald-50 hover:border-emerald-300 transition-all active:scale-95"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            Import Excel (XLS)
+          </Button>
+
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger
             render={
               <Button
@@ -1574,6 +1347,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             </div>
           </PopoverContent>
         </Popover>
+        </div>
       </div>
 
       {/* Wallet Balance Summary */}
@@ -1628,14 +1402,26 @@ export default function TransactionManager({ user, transactions, setTransactions
                 Batal
               </Button>
             ) : (
-              <Button
-                onClick={() => setQuickEntryOpen(true)}
-                size="sm"
-                className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
-              >
-                <Zap className="w-4 h-4" />
-                Cepat
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={() => setIsShopeeAuditOpen(true)}
+                  size="sm"
+                  variant="outline"
+                  className="rounded-2xl gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold shadow-sm"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  Excel
+                </Button>
+                <Button
+                  onClick={() => setQuickEntryOpen(true)}
+                  size="sm"
+                  className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
+                >
+                  <Zap className="w-4 h-4" />
+                  Cepat
+                </Button>
+              </div>
             )}
           </CardHeader>
           <CardContent className="space-y-4">
@@ -2245,6 +2031,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         products={products}
         ingredients={ingredients}
         onCommitAudit={handleCommitShopeeAudit}
+        onCommitTransactions={handleCommitTransactions}
       />
     </div>
   );
