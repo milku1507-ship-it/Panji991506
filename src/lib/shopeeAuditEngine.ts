@@ -74,6 +74,30 @@ export interface ShippingDiscrepancy {
   discrepancy: number; // courier - buyer (positive means loss to seller)
 }
 
+export interface CrossSlotItem {
+  orderId: string;
+  orderDate: string;
+  inSlot1: boolean; // Order Complete
+  inSlot2: boolean; // Income Released
+  inSlot3: boolean; // RTS/RR
+  omzet: number;
+  netIncome: number;
+  adminFee: number;
+  statusMatch: 'Cocok & Cair' | 'Pending Cair' | 'Cair Periode Lalu' | 'Retur / RTS';
+  skuSummary: string;
+  qty: number;
+}
+
+export interface CrossSlotAuditSummary {
+  ordersCount: number; // Slot 1 total unique orders
+  incomeOrdersCount: number; // Slot 2 total unique orders
+  matchedCount: number; // Found in both Slot 1 and Slot 2
+  pendingReleaseCount: number; // Found in Slot 1 but not Slot 2
+  priorPeriodCount: number; // Found in Slot 2 but not Slot 1
+  rtsCount: number; // Found in Slot 3
+  items: CrossSlotItem[];
+}
+
 export interface ShopeeAuditResult {
   id: string;
   periode: string;
@@ -95,6 +119,7 @@ export interface ShopeeAuditResult {
   rtsPackages: RtsRrItem[];
   totalRtsLoss: number;
   unmappedSkus: UnmappedSku[];
+  crossSlotSummary?: CrossSlotAuditSummary;
 }
 
 /**
@@ -699,6 +724,101 @@ export function runShopeeAuditEngine(params: {
   const endDate = dates[dates.length - 1] || startDate;
   const periode = startDate === endDate ? startDate : `${startDate} s/d ${endDate}`;
 
+  // 8. Cross-Slot Audit & Reconciliation across Slot 1, Slot 2, and Slot 3
+  const allOrderIds = new Set<string>();
+  const slot1ByOrder = new Map<string, { items: OrderCompleteItem[]; date: string; omzet: number; qty: number; skus: string[] }>();
+  for (const ord of orders) {
+    if (!ord.orderId) continue;
+    allOrderIds.add(ord.orderId);
+    if (!slot1ByOrder.has(ord.orderId)) {
+      slot1ByOrder.set(ord.orderId, { items: [], date: ord.orderDate, omzet: 0, qty: 0, skus: [] });
+    }
+    const entry = slot1ByOrder.get(ord.orderId)!;
+    entry.items.push(ord);
+    entry.omzet += ord.totalPrice || (ord.price * ord.qty);
+    entry.qty += ord.qty;
+    const skuNorm = normalizeSKU(ord.sku);
+    if (skuNorm && !entry.skus.includes(skuNorm)) entry.skus.push(skuNorm);
+  }
+
+  const slot2ByOrder = new Map<string, IncomeReleasedItem>();
+  for (const inc of incomeItems) {
+    if (!inc.orderId) continue;
+    allOrderIds.add(inc.orderId);
+    slot2ByOrder.set(inc.orderId, inc);
+  }
+
+  const slot3ByOrder = new Map<string, RtsRrItem>();
+  for (const rts of rtsRrItems) {
+    if (!rts.orderId) continue;
+    allOrderIds.add(rts.orderId);
+    slot3ByOrder.set(rts.orderId, rts);
+  }
+
+  const crossSlotItems: CrossSlotItem[] = [];
+  let matchedCount = 0;
+  let pendingReleaseCount = 0;
+  let priorPeriodCount = 0;
+  let rtsCount = 0;
+
+  for (const orderId of allOrderIds) {
+    const s1 = slot1ByOrder.get(orderId);
+    const s2 = slot2ByOrder.get(orderId);
+    const s3 = slot3ByOrder.get(orderId);
+
+    const inSlot1 = !!s1;
+    const inSlot2 = !!s2;
+    const inSlot3 = !!s3;
+
+    let statusMatch: CrossSlotItem['statusMatch'] = 'Cocok & Cair';
+    if (inSlot3) {
+      statusMatch = 'Retur / RTS';
+      rtsCount++;
+    } else if (inSlot1 && inSlot2) {
+      statusMatch = 'Cocok & Cair';
+      matchedCount++;
+    } else if (inSlot1 && !inSlot2) {
+      statusMatch = 'Pending Cair';
+      pendingReleaseCount++;
+    } else if (!inSlot1 && inSlot2) {
+      statusMatch = 'Cair Periode Lalu';
+      priorPeriodCount++;
+    }
+
+    const orderDate = s1?.date || s2?.releaseDate || s3?.requestDate || '';
+    const omzet = s1?.omzet || (s2 ? s2.netIncome + s2.adminFee + s2.serviceFee : 0);
+    const netIncome = s2?.netIncome || 0;
+    const adminFee = s2 ? (s2.adminFee + s2.serviceFee + s2.orderFee) : 0;
+    const skuSummary = s1 ? s1.skus.join(', ') : (s3?.sku || '-');
+    const qty = s1?.qty || (s3?.qty || 1);
+
+    crossSlotItems.push({
+      orderId,
+      orderDate,
+      inSlot1,
+      inSlot2,
+      inSlot3,
+      omzet,
+      netIncome,
+      adminFee,
+      statusMatch,
+      skuSummary,
+      qty,
+    });
+  }
+
+  crossSlotItems.sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '') || b.orderId.localeCompare(a.orderId));
+
+  const crossSlotSummary: CrossSlotAuditSummary = {
+    ordersCount: slot1ByOrder.size,
+    incomeOrdersCount: slot2ByOrder.size,
+    matchedCount,
+    pendingReleaseCount,
+    priorPeriodCount,
+    rtsCount,
+    items: crossSlotItems,
+  };
+
   return {
     id: `audit_shopee_${Date.now()}`,
     periode,
@@ -720,5 +840,6 @@ export function runShopeeAuditEngine(params: {
     rtsPackages: rtsRrItems,
     totalRtsLoss,
     unmappedSkus: Array.from(unmappedSkuMap.values()),
+    crossSlotSummary,
   };
 }

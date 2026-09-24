@@ -42,6 +42,11 @@ import {
   ExternalLink,
   FileText,
   FileDown,
+  ArrowRightLeft,
+  ShieldCheck,
+  Clock,
+  CheckCircle,
+  Filter,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Product, Ingredient } from '../types';
@@ -56,6 +61,8 @@ import {
   parseShopeeDate,
   OrderCompleteItem,
   UnmappedSku,
+  CrossSlotItem,
+  CrossSlotAuditSummary,
 } from '../lib/shopeeAuditEngine';
 import * as XLSX from 'xlsx';
 
@@ -109,8 +116,8 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
   onCommitAudit,
   onCommitTransactions,
 }) => {
-  // Workflow Mode
-  const [workflowMode, setWorkflowMode] = useState<'slot1_orders' | 'multi_slot_audit' | 'general_cash'>('slot1_orders');
+  // Workflow Mode - default to multi_slot_audit as requested
+  const [workflowMode, setWorkflowMode] = useState<'slot1_orders' | 'multi_slot_audit' | 'general_cash'>('multi_slot_audit');
   // View Step: 'upload' = Slot selection; 'preview' = Review & Approval screen
   const [viewStep, setViewStep] = useState<'upload' | 'preview'>('upload');
 
@@ -128,9 +135,11 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
 
-  // Multi-Slot Audit Result
+  // Multi-Slot Audit Result & Tabs
   const [auditResult, setAuditResult] = useState<ShopeeAuditResult | null>(null);
-  const [auditActiveTab, setAuditActiveTab] = useState<'variants' | 'discrepancies' | 'rts'>('variants');
+  const [auditActiveTab, setAuditActiveTab] = useState<'reconciliation' | 'variants' | 'discrepancies' | 'rts' | 'unmapped'>('reconciliation');
+  const [reconciliationFilter, setReconciliationFilter] = useState<'all' | 'matched' | 'pending' | 'prior' | 'rts'>('all');
+  const [reconciliationSearch, setReconciliationSearch] = useState<string>('');
 
   // Single-Slot Orders or General Cash Proposed Transactions
   const [proposedTransactions, setProposedTransactions] = useState<ProposedTransaction[]>([]);
@@ -148,9 +157,42 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
 
   // Search & Filter in Preview
   const [previewSearch, setPreviewSearch] = useState<string>('');
+  const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
+
+  const handleCopyOrderId = (orderId: string) => {
+    if (!orderId) return;
+    navigator.clipboard.writeText(orderId);
+    setCopiedOrderId(orderId);
+    toast.success(`No. Pesanan ${orderId} disalin ke clipboard!`);
+    setTimeout(() => setCopiedOrderId(null), 2500);
+  };
 
   // Expandable Shopee Seller Center Step-by-Step Guide
   const [showShopeeGuide, setShowShopeeGuide] = useState<boolean>(false);
+
+  // Filtered cross-slot reconciliation items
+  const filteredCrossSlotItems = useMemo(() => {
+    if (!auditResult?.crossSlotSummary) return [];
+    const q = reconciliationSearch.toLowerCase().trim();
+    let list = auditResult.crossSlotSummary.items;
+    if (reconciliationFilter === 'matched') {
+      list = list.filter(i => i.statusMatch === 'Cocok & Cair');
+    } else if (reconciliationFilter === 'pending') {
+      list = list.filter(i => i.statusMatch === 'Pending Cair');
+    } else if (reconciliationFilter === 'prior') {
+      list = list.filter(i => i.statusMatch === 'Cair Periode Lalu');
+    } else if (reconciliationFilter === 'rts') {
+      list = list.filter(i => i.statusMatch === 'Retur / RTS');
+    }
+    if (q) {
+      list = list.filter(i =>
+        i.orderId.toLowerCase().includes(q) ||
+        i.skuSummary.toLowerCase().includes(q) ||
+        i.orderDate.includes(q)
+      );
+    }
+    return list;
+  }, [auditResult, reconciliationFilter, reconciliationSearch]);
 
   // Template download for Buku Kas Umum (.xlsx)
   const downloadCashbookTemplate = () => {
@@ -1204,33 +1246,35 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
               )}
 
               {workflowMode === 'multi_slot_audit' && (
-                /* MULTI-SLOT SHOPEE AUDIT: 3 SLOTS */
+                /* MULTI-SLOT SHOPEE AUDIT: 3 DEDICATED SLOTS */
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {/* Slot 1: Order Complete */}
-                    <Card className="border-2 border-dashed border-orange-200 hover:border-orange-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                    <Card className={`border-2 border-dashed transition-all rounded-2xl overflow-hidden shadow-sm ${
+                      orderFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/20' : 'border-orange-200 hover:border-orange-400 bg-white'
+                    }`}>
                       <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
                         <div className="space-y-2">
-                          <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600">
-                            <FileSpreadsheet className="w-4 h-4" />
+                          <div className="flex items-center justify-between">
+                            <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600">
+                              <FileSpreadsheet className="w-4 h-4" />
+                            </div>
+                            <Badge className={orderFiles.length > 0 ? 'bg-emerald-100 text-emerald-800 text-[10px] font-black border-none' : 'bg-orange-100 text-orange-800 text-[9px] font-black border-none'}>
+                              {orderFiles.length > 0 ? `✓ ${orderFiles.length} Berkas Siap` : 'Slot 1 · Wajib'}
+                            </Badge>
                           </div>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <Label className="font-black text-xs text-gray-900 block">
-                                Slot 1: Order Complete (.xlsx)
-                              </Label>
-                              <Badge className="bg-orange-100 text-orange-800 text-[9px] font-black border-none">
-                                Wajib
-                              </Badge>
-                            </div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 1: Order Complete (.xlsx)
+                            </Label>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                              Laporan Pesanan Selesai (Bulan H-1 &amp; H, atau Part 1 &amp; 2).
+                              Laporan Pesanan Selesai (Bulan H-1 &amp; Bulan H, atau Part 1 &amp; 2).
                             </p>
                           </div>
-                          <div className="text-[10px] bg-orange-50/70 p-2 rounded-xl text-orange-950 space-y-0.5">
-                            <span className="font-bold block">📍 Menu di Shopee:</span>
-                            <span>Pesanan Saya ➔ Selesai ➔ Ekspor</span>
-                            <span className="font-mono text-[9px] block text-orange-800 mt-0.5">Order.all.xxxx.xlsx</span>
+                          <div className="text-[10px] bg-orange-50/70 border border-orange-100 p-2 rounded-xl text-orange-950 space-y-0.5">
+                            <span className="font-bold block">📍 Unduh di Shopee Seller Center:</span>
+                            <span>Pesanan Saya ➔ Selesai ➔ Ekspor Pesanan</span>
+                            <span className="font-mono text-[9px] block text-orange-800 mt-0.5 font-bold">Order.all.xxxx.xlsx</span>
                           </div>
                         </div>
 
@@ -1243,7 +1287,8 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             className="hidden"
                             onChange={(e) => {
                               if (e.target.files) {
-                                setOrderFiles(Array.from(e.target.files));
+                                const newFiles = Array.from(e.target.files);
+                                setOrderFiles(prev => [...prev, ...newFiles]);
                               }
                             }}
                           />
@@ -1255,17 +1300,22 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             className="w-full h-9 rounded-xl border-orange-200 text-orange-700 hover:bg-orange-50 font-bold text-xs gap-1.5"
                           >
                             <Upload className="w-3.5 h-3.5" />
-                            Pilih Berkas ({orderFiles.length})
+                            {orderFiles.length > 0 ? `+ Tambah Berkas (${orderFiles.length})` : 'Pilih Berkas Pesanan'}
                           </Button>
                           {orderFiles.length > 0 && (
-                            <div className="max-h-24 overflow-y-auto space-y-1">
+                            <div className="max-h-28 overflow-y-auto space-y-1">
                               {orderFiles.map((f, i) => (
-                                <div key={i} className="flex items-center justify-between text-[10px] bg-orange-50/80 p-1.5 rounded-lg font-bold text-orange-900">
-                                  <span className="truncate">✓ {f.name}</span>
+                                <div key={i} className="flex items-center justify-between text-[10px] bg-white border border-emerald-200 p-1.5 rounded-lg font-bold text-gray-800 shadow-2xs">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <span className="text-emerald-600 font-black shrink-0">✓</span>
+                                    <span className="truncate">{f.name}</span>
+                                    <span className="text-[9px] text-gray-400 font-normal shrink-0">({formatFileSize(f.size)})</span>
+                                  </div>
                                   <button
                                     type="button"
                                     onClick={() => setOrderFiles(prev => prev.filter((_, idx) => idx !== i))}
-                                    className="text-orange-500 hover:text-red-600 ml-1"
+                                    className="text-gray-400 hover:text-red-600 ml-1 p-0.5"
+                                    title="Hapus"
                                   >
                                     <X className="w-3 h-3" />
                                   </button>
@@ -1278,29 +1328,31 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     </Card>
 
                     {/* Slot 2: Income Released */}
-                    <Card className="border-2 border-dashed border-blue-200 hover:border-blue-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                    <Card className={`border-2 border-dashed transition-all rounded-2xl overflow-hidden shadow-sm ${
+                      incomeFiles.length > 0 ? 'border-emerald-300 bg-emerald-50/20' : 'border-blue-200 hover:border-blue-400 bg-white'
+                    }`}>
                       <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
                         <div className="space-y-2">
-                          <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                            <DollarSign className="w-4 h-4" />
+                          <div className="flex items-center justify-between">
+                            <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                              <DollarSign className="w-4 h-4" />
+                            </div>
+                            <Badge className={incomeFiles.length > 0 ? 'bg-emerald-100 text-emerald-800 text-[10px] font-black border-none' : 'bg-blue-100 text-blue-800 text-[9px] font-black border-none'}>
+                              {incomeFiles.length > 0 ? `✓ ${incomeFiles.length} Berkas Siap` : 'Slot 2 · Wajib'}
+                            </Badge>
                           </div>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <Label className="font-black text-xs text-gray-900 block">
-                                Slot 2: Income Released (.xlsx)
-                              </Label>
-                              <Badge className="bg-blue-100 text-blue-800 text-[9px] font-black border-none">
-                                Wajib
-                              </Badge>
-                            </div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 2: Income Released (.xlsx)
+                            </Label>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
                               Penghasilan Saya status 'Sudah Dilepas' Bulan H.
                             </p>
                           </div>
-                          <div className="text-[10px] bg-blue-50/70 p-2 rounded-xl text-blue-950 space-y-0.5">
-                            <span className="font-bold block">📍 Menu di Shopee:</span>
+                          <div className="text-[10px] bg-blue-50/70 border border-blue-100 p-2 rounded-xl text-blue-950 space-y-0.5">
+                            <span className="font-bold block">📍 Unduh di Shopee Seller Center:</span>
                             <span>Keuangan ➔ Penghasilan Saya ➔ Rincian</span>
-                            <span className="font-mono text-[9px] block text-blue-800 mt-0.5">Income.released.xxxx.xlsx</span>
+                            <span className="font-mono text-[9px] block text-blue-800 mt-0.5 font-bold">Income.released.xxxx.xlsx</span>
                           </div>
                         </div>
 
@@ -1313,7 +1365,8 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             className="hidden"
                             onChange={(e) => {
                               if (e.target.files) {
-                                setIncomeFiles(Array.from(e.target.files));
+                                const newFiles = Array.from(e.target.files);
+                                setIncomeFiles(prev => [...prev, ...newFiles]);
                               }
                             }}
                           />
@@ -1325,17 +1378,22 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             className="w-full h-9 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50 font-bold text-xs gap-1.5"
                           >
                             <Upload className="w-3.5 h-3.5" />
-                            Pilih Berkas ({incomeFiles.length})
+                            {incomeFiles.length > 0 ? `+ Tambah Berkas (${incomeFiles.length})` : 'Pilih Berkas Penghasilan'}
                           </Button>
                           {incomeFiles.length > 0 && (
-                            <div className="max-h-24 overflow-y-auto space-y-1">
+                            <div className="max-h-28 overflow-y-auto space-y-1">
                               {incomeFiles.map((f, i) => (
-                                <div key={i} className="flex items-center justify-between text-[10px] bg-blue-50/80 p-1.5 rounded-lg font-bold text-blue-900">
-                                  <span className="truncate">✓ {f.name}</span>
+                                <div key={i} className="flex items-center justify-between text-[10px] bg-white border border-emerald-200 p-1.5 rounded-lg font-bold text-gray-800 shadow-2xs">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <span className="text-emerald-600 font-black shrink-0">✓</span>
+                                    <span className="truncate">{f.name}</span>
+                                    <span className="text-[9px] text-gray-400 font-normal shrink-0">({formatFileSize(f.size)})</span>
+                                  </div>
                                   <button
                                     type="button"
                                     onClick={() => setIncomeFiles(prev => prev.filter((_, idx) => idx !== i))}
-                                    className="text-blue-500 hover:text-red-600 ml-1"
+                                    className="text-gray-400 hover:text-red-600 ml-1 p-0.5"
+                                    title="Hapus"
                                   >
                                     <X className="w-3 h-3" />
                                   </button>
@@ -1348,29 +1406,31 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     </Card>
 
                     {/* Slot 3: RTS / RR Archive */}
-                    <Card className="border-2 border-dashed border-purple-200 hover:border-purple-400 transition-colors bg-white rounded-2xl overflow-hidden shadow-sm">
+                    <Card className={`border-2 border-dashed transition-all rounded-2xl overflow-hidden shadow-sm ${
+                      rtsArchiveFile ? 'border-emerald-300 bg-emerald-50/20' : 'border-purple-200 hover:border-purple-400 bg-white'
+                    }`}>
                       <CardContent className="p-4 flex flex-col justify-between h-full space-y-3">
                         <div className="space-y-2">
-                          <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">
-                            <Archive className="w-4 h-4" />
+                          <div className="flex items-center justify-between">
+                            <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600">
+                              <Archive className="w-4 h-4" />
+                            </div>
+                            <Badge className={rtsArchiveFile ? 'bg-emerald-100 text-emerald-800 text-[10px] font-black border-none' : 'bg-gray-100 text-gray-600 text-[9px] font-bold border-none'}>
+                              {rtsArchiveFile ? '✓ Berkas Siap' : 'Slot 3 · Opsional'}
+                            </Badge>
                           </div>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <Label className="font-black text-xs text-gray-900 block">
-                                Slot 3: RTS &amp; Retur (.zip/.xlsx)
-                              </Label>
-                              <Badge className="bg-gray-100 text-gray-600 text-[9px] font-bold border-none">
-                                Opsional
-                              </Badge>
-                            </div>
+                            <Label className="font-black text-xs text-gray-900 block">
+                              Slot 3: RTS &amp; Retur (.zip/.xlsx)
+                            </Label>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
                               Arsip Gagal Kirim (RTS) &amp; Pengembalian Barang (RR).
                             </p>
                           </div>
-                          <div className="text-[10px] bg-purple-50/70 p-2 rounded-xl text-purple-950 space-y-0.5">
-                            <span className="font-bold block">📍 Menu di Shopee:</span>
+                          <div className="text-[10px] bg-purple-50/70 border border-purple-100 p-2 rounded-xl text-purple-950 space-y-0.5">
+                            <span className="font-bold block">📍 Unduh di Shopee Seller Center:</span>
                             <span>Pesanan Saya ➔ Pengembalian/Pembatalan</span>
-                            <span className="font-mono text-[9px] block text-purple-800 mt-0.5">Return_Refund_Archive.zip</span>
+                            <span className="font-mono text-[9px] block text-purple-800 mt-0.5 font-bold">Return_Refund_Archive.zip</span>
                           </div>
                         </div>
 
@@ -1397,12 +1457,17 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             {rtsArchiveFile ? 'Ganti Berkas (.zip)' : 'Pilih Berkas (.zip)'}
                           </Button>
                           {rtsArchiveFile && (
-                            <div className="flex items-center justify-between text-[10px] bg-purple-50/80 p-1.5 rounded-lg font-bold text-purple-900">
-                              <span className="truncate">✓ {rtsArchiveFile.name}</span>
+                            <div className="flex items-center justify-between text-[10px] bg-white border border-emerald-200 p-1.5 rounded-lg font-bold text-gray-800 shadow-2xs">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="text-emerald-600 font-black shrink-0">✓</span>
+                                <span className="truncate">{rtsArchiveFile.name}</span>
+                                <span className="text-[9px] text-gray-400 font-normal shrink-0">({formatFileSize(rtsArchiveFile.size)})</span>
+                              </div>
                               <button
                                 type="button"
                                 onClick={() => setRtsArchiveFile(null)}
-                                className="text-purple-500 hover:text-red-600 ml-1"
+                                className="text-gray-400 hover:text-red-600 ml-1 p-0.5"
+                                title="Hapus"
                               >
                                 <X className="w-3 h-3" />
                               </button>
@@ -1411,6 +1476,57 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                         </div>
                       </CardContent>
                     </Card>
+                  </div>
+
+                  {/* CROSS-SLOT READINESS TRACKER */}
+                  <div className="bg-gradient-to-r from-slate-50 via-blue-50/40 to-slate-50 border border-blue-200/80 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ArrowRightLeft className="w-4 h-4 text-blue-600" />
+                        <span className="font-black text-xs text-gray-900">
+                          Status Kesiapan Audit &amp; Rekonsiliasi Silang Antar-Slot:
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-bold text-blue-800 bg-blue-100/70 px-2 py-0.5 rounded-full">
+                        Tahap 1: Verifikasi &amp; Pratinjau
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                      <div className={`p-2 rounded-xl flex items-center gap-2 ${
+                        orderFiles.length > 0 ? 'bg-emerald-50 text-emerald-900 font-bold border border-emerald-200' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        <span className="text-xs">{orderFiles.length > 0 ? '🟢' : '⚪'}</span>
+                        <div className="truncate">
+                          <p className="font-bold text-[11px]">Slot 1 (Pesanan Selesai)</p>
+                          <p className="text-[10px] font-normal text-gray-600">{orderFiles.length > 0 ? `${orderFiles.length} berkas terunggah` : 'Belum diunggah (Wajib)'}</p>
+                        </div>
+                      </div>
+
+                      <div className={`p-2 rounded-xl flex items-center gap-2 ${
+                        incomeFiles.length > 0 ? 'bg-emerald-50 text-emerald-900 font-bold border border-emerald-200' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        <span className="text-xs">{incomeFiles.length > 0 ? '🟢' : '⚪'}</span>
+                        <div className="truncate">
+                          <p className="font-bold text-[11px]">Slot 2 (Dana Dilepas)</p>
+                          <p className="text-[10px] font-normal text-gray-600">{incomeFiles.length > 0 ? `${incomeFiles.length} berkas terunggah` : 'Belum diunggah (Wajib)'}</p>
+                        </div>
+                      </div>
+
+                      <div className={`p-2 rounded-xl flex items-center gap-2 ${
+                        rtsArchiveFile ? 'bg-emerald-50 text-emerald-900 font-bold border border-emerald-200' : 'bg-gray-50 text-gray-500 border border-dashed border-gray-200'
+                      }`}>
+                        <span className="text-xs">{rtsArchiveFile ? '🟢' : '⚪'}</span>
+                        <div className="truncate">
+                          <p className="font-bold text-[11px]">Slot 3 (Retur &amp; RTS)</p>
+                          <p className="text-[10px] font-normal text-gray-500">{rtsArchiveFile ? 'Arsip retur siap' : 'Opsional (dapat dilewati)'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-gray-500 font-medium">
+                      💡 <strong>Alur Aman:</strong> Semua berkas akan dicocokkan silang berdasarkan No. Pesanan dan SKU HPP terlebih dahulu. Hasil audit ditampilkan di <strong>Layar Pratinjau Rekonsiliasi</strong> dan <span className="text-amber-800 font-bold">TIDAK langsung mengubah database</span> sampai Anda menekan tombol <strong>Setujui</strong>.
+                    </p>
                   </div>
 
                   {/* Optional Additional Cost Inputs for Shopee Audit */}
@@ -1770,20 +1886,318 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
               {/* TABLE VIEW / AUDIT TABS */}
               {workflowMode === 'multi_slot_audit' && auditResult ? (
                 /* MULTI-SLOT SHOPEE DETAILED TABS */
-                <Tabs value={auditActiveTab} onValueChange={(v: any) => setAuditActiveTab(v)} className="w-full">
-                  <TabsList className="bg-gray-100 p-1 rounded-2xl w-full grid grid-cols-3 max-w-md">
-                    <TabsTrigger value="variants" className="rounded-xl font-bold text-xs">
-                      Performa Varian ({auditResult.variantBreakdown.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="discrepancies" className="rounded-xl font-bold text-xs">
-                      Selisih Ongkir ({auditResult.discrepancies.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="rts" className="rounded-xl font-bold text-xs">
-                      Paket RTS ({auditResult.rtsPackages.length})
-                    </TabsTrigger>
-                  </TabsList>
+                <div className="space-y-4">
+                  {/* Cross-Slot Status KPI Card Summary */}
+                  {auditResult.crossSlotSummary && (
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ArrowRightLeft className="w-4 h-4 text-blue-600" />
+                          <span className="font-black text-xs text-gray-900">
+                            Hasil Rekonsiliasi Silang Antar-Slot ({auditResult.crossSlotSummary.items.length} Pesanan Dipetakan):
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-gray-500 font-medium">
+                          Klik kartu untuk memfilter daftar
+                        </span>
+                      </div>
 
-                  <TabsContent value="variants" className="mt-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div
+                          onClick={() => {
+                            setAuditActiveTab('reconciliation');
+                            setReconciliationFilter('matched');
+                          }}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            auditActiveTab === 'reconciliation' && reconciliationFilter === 'matched'
+                              ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-300'
+                              : 'bg-white border-emerald-200 hover:bg-emerald-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-emerald-800">🟢 Cocok &amp; Cair</span>
+                            <Badge className="bg-emerald-100 text-emerald-800 text-[10px] font-black border-none px-1.5">
+                              {auditResult.crossSlotSummary.matchedCount}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Order S1 + Dana S2 Cair</p>
+                        </div>
+
+                        <div
+                          onClick={() => {
+                            setAuditActiveTab('reconciliation');
+                            setReconciliationFilter('pending');
+                          }}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            auditActiveTab === 'reconciliation' && reconciliationFilter === 'pending'
+                              ? 'bg-amber-100 border-amber-400 ring-2 ring-amber-300'
+                              : 'bg-white border-amber-200 hover:bg-amber-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-amber-800">🟡 Pending Cair</span>
+                            <Badge className="bg-amber-100 text-amber-800 text-[10px] font-black border-none px-1.5">
+                              {auditResult.crossSlotSummary.pendingReleaseCount}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Order Selesai, Belum Dilepas</p>
+                        </div>
+
+                        <div
+                          onClick={() => {
+                            setAuditActiveTab('reconciliation');
+                            setReconciliationFilter('prior');
+                          }}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            auditActiveTab === 'reconciliation' && reconciliationFilter === 'prior'
+                              ? 'bg-blue-100 border-blue-400 ring-2 ring-blue-300'
+                              : 'bg-white border-blue-200 hover:bg-blue-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-blue-800">🔵 Cair Periode Lalu</span>
+                            <Badge className="bg-blue-100 text-blue-800 text-[10px] font-black border-none px-1.5">
+                              {auditResult.crossSlotSummary.priorPeriodCount}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Dilepas S2 dari Periode H-1</p>
+                        </div>
+
+                        <div
+                          onClick={() => {
+                            setAuditActiveTab('reconciliation');
+                            setReconciliationFilter('rts');
+                          }}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            auditActiveTab === 'reconciliation' && reconciliationFilter === 'rts'
+                              ? 'bg-purple-100 border-purple-400 ring-2 ring-purple-300'
+                              : 'bg-white border-purple-200 hover:bg-purple-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-purple-800">🟣 Retur / RTS</span>
+                            <Badge className="bg-purple-100 text-purple-800 text-[10px] font-black border-none px-1.5">
+                              {auditResult.crossSlotSummary.rtsCount}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Gagal Kirim / Kompensasi</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <Tabs value={auditActiveTab} onValueChange={(v: any) => setAuditActiveTab(v)} className="w-full">
+                    <TabsList className="bg-gray-100 p-1.5 rounded-2xl w-full grid grid-cols-2 md:grid-cols-4 max-w-2xl gap-1">
+                      <TabsTrigger value="reconciliation" className="rounded-xl font-bold text-xs flex items-center justify-center gap-1.5">
+                        <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600" />
+                        Rekonsiliasi ({auditResult.crossSlotSummary?.items.length || auditResult.orderCount})
+                      </TabsTrigger>
+                      <TabsTrigger value="variants" className="rounded-xl font-bold text-xs flex items-center justify-center gap-1.5">
+                        <Package className="w-3.5 h-3.5 text-emerald-600" />
+                        Performa Varian ({auditResult.variantBreakdown.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="discrepancies" className="rounded-xl font-bold text-xs flex items-center justify-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                        Selisih Ongkir ({auditResult.discrepancies.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="rts" className="rounded-xl font-bold text-xs flex items-center justify-center gap-1.5">
+                        <Archive className="w-3.5 h-3.5 text-purple-600" />
+                        Paket RTS ({auditResult.rtsPackages.length})
+                      </TabsTrigger>
+                    </TabsList>
+
+                    {/* TAB CONTENT: CROSS-SLOT RECONCILIATION */}
+                    <TabsContent value="reconciliation" className="mt-4 space-y-3">
+                      {/* Filter Pills and Search */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-bold text-gray-500 mr-1 flex items-center gap-1">
+                            <Filter className="w-3.5 h-3.5" /> Filter Status:
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setReconciliationFilter('all')}
+                            className={`h-7 px-2.5 text-[11px] rounded-lg font-bold ${
+                              reconciliationFilter === 'all'
+                                ? 'bg-gray-800 text-white hover:bg-gray-900 hover:text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            Semua ({auditResult.crossSlotSummary?.items.length || 0})
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setReconciliationFilter('matched')}
+                            className={`h-7 px-2.5 text-[11px] rounded-lg font-bold ${
+                              reconciliationFilter === 'matched'
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white'
+                                : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                            }`}
+                          >
+                            🟢 Cocok &amp; Cair ({auditResult.crossSlotSummary?.matchedCount || 0})
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setReconciliationFilter('pending')}
+                            className={`h-7 px-2.5 text-[11px] rounded-lg font-bold ${
+                              reconciliationFilter === 'pending'
+                                ? 'bg-amber-600 text-white hover:bg-amber-700 hover:text-white'
+                                : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                            }`}
+                          >
+                            🟡 Pending ({auditResult.crossSlotSummary?.pendingReleaseCount || 0})
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setReconciliationFilter('prior')}
+                            className={`h-7 px-2.5 text-[11px] rounded-lg font-bold ${
+                              reconciliationFilter === 'prior'
+                                ? 'bg-blue-600 text-white hover:bg-blue-700 hover:text-white'
+                                : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                            }`}
+                          >
+                            🔵 Periode Lalu ({auditResult.crossSlotSummary?.priorPeriodCount || 0})
+                          </Button>
+                          {auditResult.crossSlotSummary && auditResult.crossSlotSummary.rtsCount > 0 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setReconciliationFilter('rts')}
+                              className={`h-7 px-2.5 text-[11px] rounded-lg font-bold ${
+                                reconciliationFilter === 'rts'
+                                  ? 'bg-purple-600 text-white hover:bg-purple-700 hover:text-white'
+                                  : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
+                              }`}
+                            >
+                              🟣 Retur/RTS ({auditResult.crossSlotSummary.rtsCount})
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="relative w-full sm:w-60">
+                          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2" />
+                          <Input
+                            placeholder="Cari no. pesanan / SKU..."
+                            value={reconciliationSearch}
+                            onChange={(e) => setReconciliationSearch(e.target.value)}
+                            className="h-8 pl-8 text-xs rounded-xl"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Detailed Reconciliation Table */}
+                      <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+                        <div className="max-h-84 overflow-y-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-gray-50 text-gray-500 font-bold sticky top-0 border-b border-gray-200 z-10">
+                              <tr>
+                                <th className="p-3">No. Pesanan</th>
+                                <th className="p-3">Tanggal</th>
+                                <th className="p-3 text-center">Status Rekonsiliasi</th>
+                                <th className="p-3 text-right">Slot 1: Omzet</th>
+                                <th className="p-3 text-right">Slot 2: Dana Dilepas</th>
+                                <th className="p-3 text-right">Biaya Admin</th>
+                                <th className="p-3">Rincian Produk &amp; SKU</th>
+                                <th className="p-3 text-center">Klaim / Salin</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 font-medium">
+                              {filteredCrossSlotItems.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} className="p-8 text-center text-gray-400">
+                                    Tidak ada data pesanan yang sesuai dengan filter atau kata kunci pencarian.
+                                  </td>
+                                </tr>
+                              ) : (
+                                filteredCrossSlotItems.map((item, idx) => (
+                                  <tr key={item.orderId || idx} className="hover:bg-gray-50/70 transition-colors">
+                                    <td className="p-3">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-mono font-bold text-gray-900">{item.orderId}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopyOrderId(item.orderId)}
+                                          className="text-gray-400 hover:text-emerald-600 p-0.5 rounded"
+                                          title="Salin No. Pesanan"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-0.5">
+                                        {item.inOrderComplete && (
+                                          <span className="text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1 rounded">S1:Order</span>
+                                        )}
+                                        {item.inIncomeReleased && (
+                                          <span className="text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1 rounded">S2:Income</span>
+                                        )}
+                                        {item.inRts && (
+                                          <span className="text-[9px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1 rounded">S3:RTS</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="p-3 text-gray-500 whitespace-nowrap">
+                                      {item.orderDate || '-'}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <Badge
+                                        className={`text-[10px] font-bold border-none px-2 py-0.5 ${
+                                          item.statusMatch === 'Cocok & Cair'
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : item.statusMatch === 'Pending Cair'
+                                            ? 'bg-amber-100 text-amber-800'
+                                            : item.statusMatch === 'Cair Periode Lalu'
+                                            ? 'bg-blue-100 text-blue-800'
+                                            : 'bg-purple-100 text-purple-800'
+                                        }`}
+                                      >
+                                        {item.statusMatch}
+                                      </Badge>
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-gray-800 whitespace-nowrap">
+                                      {item.omzetOrder > 0 ? formatCurrency(item.omzetOrder) : '-'}
+                                    </td>
+                                    <td className="p-3 text-right font-mono font-bold text-emerald-700 whitespace-nowrap">
+                                      {item.danaDilepas > 0 ? formatCurrency(item.danaDilepas) : '-'}
+                                    </td>
+                                    <td className="p-3 text-right font-mono text-gray-600 whitespace-nowrap">
+                                      {item.biayaAdmin > 0 ? formatCurrency(item.biayaAdmin) : '-'}
+                                    </td>
+                                    <td className="p-3 max-w-[240px]">
+                                      <p className="font-medium text-gray-800 truncate" title={item.skuSummary}>
+                                        {item.skuSummary || '-'}
+                                      </p>
+                                      {item.qtyTotal > 0 && (
+                                        <span className="text-[10px] text-gray-400">Total: {item.qtyTotal} pcs</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopyOrderId(item.orderId)}
+                                        className="text-xs text-blue-600 hover:text-blue-800 font-bold"
+                                      >
+                                        {copiedOrderId === item.orderId ? 'Tersalin ✓' : 'Salin ID'}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="variants" className="mt-4">
                     <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
                       <div className="max-h-80 overflow-y-auto">
                         <table className="w-full text-left text-xs">
@@ -1899,8 +2313,9 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     </div>
                   </TabsContent>
                 </Tabs>
-              ) : (
-                /* INTERACTIVE PROPOSED TRANSACTIONS TABLE (FOR ORDERS & CASH) */
+              </div>
+            ) : (
+              /* INTERACTIVE PROPOSED TRANSACTIONS TABLE (FOR ORDERS & CASH) */
                 <div className="space-y-3">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
@@ -2012,6 +2427,31 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* FINAL AUDIT & APPROVAL SUMMARY CARD */}
+              <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-emerald-950">
+                      Verifikasi Akhir Sebelum Disetujui
+                    </h4>
+                    <p className="text-xs text-emerald-800">
+                      {workflowMode === 'multi_slot_audit' && auditResult
+                        ? `Laba Bersih Riil: ${formatCurrency(auditResult.labaBersihToko)} · ${auditResult.orderCount} pesanan selesai siap dicatat, HPP dihitung tanpa PPN ganda, & stok bahan/kemasan otomatis terpotong.`
+                        : `${selectedTransactionsCount} transaksi disetujui untuk dicatat ke Riwayat Transaksi & Stok.`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right text-xs text-emerald-900 font-bold shrink-0">
+                  <span className="inline-block bg-white px-3 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">
+                    🔒 Perlindungan Data: Hanya tersimpan jika Anda menekan Setujui
+                  </span>
+                </div>
+              </div>
 
               {/* FOOTER ACTIONS: CANCEL, EXPORT, & MANDATORY APPROVAL BUTTON */}
               <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
