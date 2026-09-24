@@ -1409,9 +1409,10 @@ export default function TransactionManager({ user, transactions, setTransactions
                   size="sm"
                   variant="outline"
                   className="rounded-2xl gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold shadow-sm"
+                  title="Import Excel (XLS) & Shopee Audit Engine"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  Excel
+                  Import Excel (XLS)
                 </Button>
                 <Button
                   onClick={() => setQuickEntryOpen(true)}

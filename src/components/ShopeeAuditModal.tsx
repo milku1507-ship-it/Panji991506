@@ -36,6 +36,12 @@ import {
   CheckSquare,
   Square,
   Layers,
+  ChevronDown,
+  ChevronUp,
+  HelpCircle,
+  ExternalLink,
+  FileText,
+  FileDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Product, Ingredient } from '../types';
@@ -142,6 +148,32 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
 
   // Search & Filter in Preview
   const [previewSearch, setPreviewSearch] = useState<string>('');
+
+  // Expandable Shopee Seller Center Step-by-Step Guide
+  const [showShopeeGuide, setShowShopeeGuide] = useState<boolean>(false);
+
+  // Template download for Buku Kas Umum (.xlsx)
+  const downloadCashbookTemplate = () => {
+    try {
+      const wb = XLSX.utils.book_new();
+      const sampleData = [
+        ['Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan'],
+        ['2026-09-01', 'Pemasukan', 'Penjualan', 500000, 'Penjualan produk offline toko'],
+        ['2026-09-02', 'Pengeluaran', 'Bahan Baku', 150000, 'Beli ayam filet 4.5kg & bumbu'],
+        ['2026-09-02', 'Pengeluaran', 'Packing', 35000, 'Beli standing pouch & kardus'],
+        ['2026-09-03', 'Pengeluaran', 'Operasional', 20000, 'Beli gas elpiji 3kg'],
+        ['2026-09-04', 'Pengeluaran', 'Gaji', 250000, 'Upah harian tim produksi'],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(sampleData);
+      ws['!cols'] = [{ wch: 14 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 34 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'Template Buku Kas');
+      XLSX.writeFile(wb, 'Template_Buku_Kas_Ceumilan.xlsx');
+      toast.success('Template Buku Kas berhasil diunduh!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal mengunduh template Excel');
+    }
+  };
 
   // Reset or Close
   const handleDialogClose = () => {
@@ -837,7 +869,7 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
               {/* Workflow / Command Tabs */}
               <div className="space-y-2">
                 <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                  Pilih Perintah / Format Impor Berkas:
+                  PILIH PERINTAH / FORMAT IMPOR BERKAS:
                 </Label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Option 1: Slot 1 Pesanan */}
@@ -846,7 +878,7 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     onClick={() => setWorkflowMode('slot1_orders')}
                     className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
                       workflowMode === 'slot1_orders'
-                        ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
+                        ? 'border-emerald-600 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                   >
@@ -859,9 +891,14 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                           Rekomendasi
                         </Badge>
                       </div>
-                      <h4 className="font-black text-sm text-gray-900">Pesanan Selesai (Slot 1)</h4>
+                      <div>
+                        <h4 className="font-black text-sm text-gray-900">Pesanan Selesai (Slot 1)</h4>
+                        <span className="inline-block text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded mt-0.5">
+                          File: Order.all...xlsx
+                        </span>
+                      </div>
                       <p className="text-[11px] text-gray-500 leading-snug">
-                        Impor berkas pesanan penjualan Shopee/Tokopedia/TikTok Shop & potong stok otomatis.
+                        Impor pesanan Shopee/Tokopedia. Otomatis cocokkan SKU varian produk & potong stok bahan baku resep.
                       </p>
                     </div>
                   </button>
@@ -872,17 +909,27 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     onClick={() => setWorkflowMode('multi_slot_audit')}
                     className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
                       workflowMode === 'multi_slot_audit'
-                        ? 'border-orange-500 bg-orange-50/70 shadow-sm'
+                        ? 'border-orange-500 bg-orange-50/70 shadow-sm ring-2 ring-orange-500/20'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                   >
                     <div className="space-y-1.5">
-                      <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-700 font-black text-xs">
-                        <TrendingUp className="w-4 h-4" />
+                      <div className="flex items-center justify-between">
+                        <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-orange-700 font-black text-xs">
+                          <TrendingUp className="w-4 h-4" />
+                        </div>
+                        <Badge className="bg-orange-500 text-white text-[9px] font-black uppercase">
+                          Lengkap
+                        </Badge>
                       </div>
-                      <h4 className="font-black text-sm text-gray-900">Audit Shopee (Multi-Slot)</h4>
+                      <div>
+                        <h4 className="font-black text-sm text-gray-900">Audit Shopee (Multi-Slot)</h4>
+                        <span className="inline-block text-[10px] font-bold text-orange-700 bg-orange-100/80 px-2 py-0.5 rounded mt-0.5">
+                          Pesanan + Penghasilan + Retur
+                        </span>
+                      </div>
                       <p className="text-[11px] text-gray-500 leading-snug">
-                        Rekonsiliasi omzet, potongan biaya admin, selisih ongkir, dan paket retur/RTS.
+                        Rekonsiliasi omzet bersih riil, potongan biaya admin, selisih ongkir, dan paket retur/RTS.
                       </p>
                     </div>
                   </button>
@@ -893,63 +940,202 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                     onClick={() => setWorkflowMode('general_cash')}
                     className={`p-4 rounded-2xl text-left border-2 transition-all flex flex-col justify-between ${
                       workflowMode === 'general_cash'
-                        ? 'border-blue-600 bg-blue-50/70 shadow-sm'
+                        ? 'border-blue-600 bg-blue-50/70 shadow-sm ring-2 ring-blue-500/20'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                   >
                     <div className="space-y-1.5">
-                      <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 font-black text-xs">
-                        <Receipt className="w-4 h-4" />
+                      <div className="flex items-center justify-between">
+                        <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 font-black text-xs">
+                          <Receipt className="w-4 h-4" />
+                        </div>
+                        <Badge className="bg-blue-600 text-white text-[9px] font-black uppercase">
+                          Kas Toko
+                        </Badge>
                       </div>
-                      <h4 className="font-black text-sm text-gray-900">Buku Kas Toko (.xlsx)</h4>
+                      <div>
+                        <h4 className="font-black text-sm text-gray-900">Buku Kas Toko (.xlsx)</h4>
+                        <span className="inline-block text-[10px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded mt-0.5">
+                          Format Kas Bebas / Internal
+                        </span>
+                      </div>
                       <p className="text-[11px] text-gray-500 leading-snug">
-                        Impor tabel spreadsheet arus kas umum (Tanggal, Jenis, Kategori, Nominal, Keterangan).
+                        Impor tabel kas umum (Tanggal, Jenis, Kategori, Nominal, Keterangan). Tersedia template Excel siap pakai.
                       </p>
                     </div>
                   </button>
                 </div>
               </div>
 
+              {/* COLLAPSIBLE SHOPEE SELLER CENTER GUIDE */}
+              <div className="border border-emerald-200 bg-emerald-50/70 rounded-2xl overflow-hidden transition-all shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setShowShopeeGuide(prev => !prev)}
+                  className="w-full p-3.5 flex items-center justify-between text-left font-bold text-xs text-emerald-950 hover:bg-emerald-100/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span>Panduan Lengkap: Di mana cara download file-file ini dari Shopee Seller Center?</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-black text-emerald-800 bg-white border border-emerald-300 px-3 py-1 rounded-xl shadow-2xs shrink-0">
+                    <span>{showShopeeGuide ? 'Tutup Panduan' : 'Lihat Cara Download'}</span>
+                    {showShopeeGuide ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </div>
+                </button>
+
+                {showShopeeGuide && (
+                  <div className="p-4 pt-2 border-t border-emerald-200/80 bg-white space-y-4">
+                    <p className="text-xs text-gray-600">
+                      Semua file ini bisa diunduh langsung dari komputer Anda melalui dashboard resmi Shopee Seller Center:
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Step 1 Guide */}
+                      <div className="bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-200 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-[10px]">
+                            1
+                          </span>
+                          <span className="font-black text-xs text-emerald-950">File Pesanan Selesai (Slot 1)</span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 leading-relaxed">
+                          1. Buka <strong>seller.shopee.co.id</strong>.<br />
+                          2. Pilih menu <strong>Pesanan Saya</strong>.<br />
+                          3. Klik tab <strong>Selesai</strong>.<br />
+                          4. Pilih rentang tanggal ➔ klik <strong>Ekspor</strong>.
+                        </p>
+                        <div className="p-2 bg-white rounded-xl border border-emerald-200 text-[10px] font-mono text-emerald-900 break-all">
+                          📄 <strong>Contoh Nama File:</strong><br />
+                          Order.all.20260901_20260930.xlsx
+                        </div>
+                      </div>
+
+                      {/* Step 2 Guide */}
+                      <div className="bg-blue-50/60 p-3.5 rounded-2xl border border-blue-200 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[10px]">
+                            2
+                          </span>
+                          <span className="font-black text-xs text-blue-950">File Penghasilan Dilepas (Slot 2)</span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 leading-relaxed">
+                          1. Buka menu <strong>Keuangan</strong> ➔ <strong>Penghasilan Saya</strong>.<br />
+                          2. Klik tab <strong>Rincian Penghasilan</strong>.<br />
+                          3. Filter status: pilih <strong>Sudah Dilepas</strong>.<br />
+                          4. Pilih bulan ➔ klik tombol <strong>Ekspor</strong>.
+                        </p>
+                        <div className="p-2 bg-white rounded-xl border border-blue-200 text-[10px] font-mono text-blue-900 break-all">
+                          📄 <strong>Contoh Nama File:</strong><br />
+                          Income.released.20260901_20260930.xlsx
+                        </div>
+                      </div>
+
+                      {/* Step 3 Guide */}
+                      <div className="bg-purple-50/60 p-3.5 rounded-2xl border border-purple-200 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center font-black text-[10px]">
+                            3
+                          </span>
+                          <span className="font-black text-xs text-purple-950">File Retur & RTS (Slot 3)</span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 leading-relaxed">
+                          1. Buka menu <strong>Pesanan Saya</strong>.<br />
+                          2. Pilih sub-menu <strong>Pengembalian / Pembatalan</strong>.<br />
+                          3. Klik tombol <strong>Ekspor</strong> (otomatis mengunduh berkas .zip atau .xlsx).
+                        </p>
+                        <div className="p-2 bg-white rounded-xl border border-purple-200 text-[10px] font-mono text-purple-900 break-all">
+                          📄 <strong>Contoh Nama File:</strong><br />
+                          Return_Refund_Archive.zip
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Informational Guidance */}
-              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-900 space-y-1">
-                <p className="font-bold flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-emerald-700" />
-                  {workflowMode === 'slot1_orders' && 'Petunjuk Impor Pesanan Selesai (Slot 1):'}
-                  {workflowMode === 'multi_slot_audit' && 'Petunjuk Audit Multi-Slot Shopee Seller Center:'}
-                  {workflowMode === 'general_cash' && 'Petunjuk Format Buku Kas Excel:'}
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-900 space-y-1.5">
+                <p className="font-bold flex items-center gap-1.5 text-emerald-950">
+                  <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                  {workflowMode === 'slot1_orders' && 'Petunjuk Unggah Pesanan Selesai (Slot 1):'}
+                  {workflowMode === 'multi_slot_audit' && 'Petunjuk Unggah Audit Finansial Shopee (Multi-Slot):'}
+                  {workflowMode === 'general_cash' && 'Petunjuk Unggah Buku Kas Toko Excel:'}
                 </p>
-                <p className="text-[11px] leading-relaxed text-emerald-800">
-                  {workflowMode === 'slot1_orders' &&
-                    'Unggah laporan pesanan (.xlsx / .xls). Sistem otomatis mengenali No. Pesanan, Tanggal, SKU, Qty, dan Harga. Data TIDAK langsung dimasukkan ke database sebelum Anda melihat pratinjau dan menyetujuinya.'}
-                  {workflowMode === 'multi_slot_audit' &&
-                    'Unggah minimal Slot 1 (Order Complete) dan Slot 2 (Income Released) untuk menghitung laba bersih riil, alokasi potongan admin, serta selisih ongkir. Slot 3 bersifat opsional.'}
-                  {workflowMode === 'general_cash' &&
-                    'Pastikan tabel Excel memiliki baris judul dengan kata kunci seperti Tanggal, Jenis (Pemasukan/Pengeluaran), Kategori, Keterangan, dan Nominal. Sistem akan mengekstrak setiap baris menjadi transaksi.'}
-                </p>
+                <div className="text-[11px] leading-relaxed text-emerald-800 space-y-1">
+                  {workflowMode === 'slot1_orders' && (
+                    <>
+                      <p>
+                        • <strong>File yang diunggah:</strong> File Excel pesanan selesai (ekspor dari Shopee Seller Center: <em>Pesanan Saya ➔ Selesai ➔ Ekspor</em>).
+                      </p>
+                      <p>
+                        • <strong>Keunggulan:</strong> Sistem membaca kolom <em>Nomor Referensi SKU</em> / <em>Kode Variasi</em>, <em>Jumlah Qty</em>, dan <em>Harga</em>. Stok bahan baku dan kemasan akan otomatis terpotong saat disetujui.
+                      </p>
+                      <p className="font-semibold text-emerald-900">
+                        • <strong>Aman:</strong> Berkas TIDAK langsung masuk ke database. Anda dapat meninjau semua baris data di tahap pratinjau sebelum menyetujui.
+                      </p>
+                    </>
+                  )}
+                  {workflowMode === 'multi_slot_audit' && (
+                    <>
+                      <p>
+                        • <strong>File yang diunggah:</strong> Minimal Slot 1 (Pesanan Selesai) &amp; Slot 2 (Penghasilan Dilepas). Slot 3 (Retur/RTS) bersifat opsional.
+                      </p>
+                      <p>
+                        • <strong>Keunggulan:</strong> Mengkalkulasi laba bersih riil toko setelah biaya admin Shopee &amp; biaya iklan (inc. PPN 11%), margin per varian produk, audit selisih ongkir, dan melacak paket tertahan &gt; 7 hari.
+                      </p>
+                    </>
+                  )}
+                  {workflowMode === 'general_cash' && (
+                    <>
+                      <p>
+                        • <strong>File yang diunggah:</strong> File Excel rekap kas toko internal Anda dengan baris judul seperti <em>Tanggal</em>, <em>Jenis</em> (Pemasukan/Pengeluaran), <em>Kategori</em>, <em>Nominal</em>, dan <em>Keterangan</em>.
+                      </p>
+                      <p>
+                        • Jika Anda belum memiliki formatnya, silakan klik tombol <strong>"Unduh Template Excel (.xlsx)"</strong> di bawah untuk langsung menggunakan contoh tabel yang siap pakai.
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* UPLOAD SLOTS GRID */}
               {workflowMode === 'slot1_orders' && (
                 /* SINGLE-SLOT: ORDER COMPLETE ONLY */
                 <Card className="border-2 border-dashed border-emerald-300 hover:border-emerald-500 transition-colors bg-white rounded-3xl overflow-hidden shadow-sm">
-                  <CardContent className="p-6 space-y-4">
+                  <CardContent className="p-6 space-y-5">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700">
-                          <Package className="w-5 h-5" />
+                        <div className="w-11 h-11 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
+                          <Package className="w-6 h-6" />
                         </div>
                         <div>
                           <Label className="font-black text-sm text-gray-900 block">
                             Slot 1: Berkas Pesanan Selesai / Order Complete (.xlsx, .xls)
                           </Label>
                           <p className="text-xs text-gray-500 font-medium">
-                            Mendukung file pesanan harian, mingguan, bulanan, atau multi-part berkas.
+                            Laporan pesanan penjualan selesai dari Shopee Seller Center.
                           </p>
                         </div>
                       </div>
                       <Badge className="bg-emerald-100 text-emerald-800 font-bold border-none text-[10px]">
                         Slot Utama
                       </Badge>
+                    </div>
+
+                    {/* Quick Guidance Tag Box */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100 text-[11px]">
+                      <div>
+                        <span className="font-bold text-emerald-950 block">📍 Menu di Shopee:</span>
+                        <span className="text-gray-600">Pesanan Saya ➔ Selesai ➔ Ekspor</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-emerald-950 block">📄 Contoh Nama File:</span>
+                        <span className="font-mono text-emerald-800 font-bold text-[10px]">Order.all.2026xxxx.xlsx</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-emerald-950 block">🔍 Kolom Kunci yang Dibaca:</span>
+                        <span className="text-gray-600">No. Pesanan, SKU, Qty, Harga</span>
+                      </div>
                     </div>
 
                     <div className="space-y-3">
@@ -969,13 +1155,17 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                         type="button"
                         variant="outline"
                         onClick={() => document.getElementById('slot1-standalone-upload')?.click()}
-                        className="w-full h-12 rounded-2xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold text-xs gap-2"
+                        className="w-full h-13 rounded-2xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold text-xs gap-2"
                       >
                         <Upload className="w-4 h-4 text-emerald-600" />
                         {orderFiles.length > 0
                           ? `Ganti / Tambah Berkas (${orderFiles.length} file dipilih)`
                           : 'Pilih Berkas Pesanan Excel (.xlsx / .xls)'}
                       </Button>
+
+                      <p className="text-[10px] text-gray-400 text-center">
+                        💡 Anda dapat memilih lebih dari 1 file sekaligus (misal Part 1 &amp; Part 2, atau file bulan lalu + bulan ini). Sistem akan menggabungkannya otomatis.
+                      </p>
 
                       {orderFiles.length > 0 && (
                         <div className="space-y-2">
@@ -1025,16 +1215,26 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             <FileSpreadsheet className="w-4 h-4" />
                           </div>
                           <div>
-                            <Label className="font-black text-xs text-gray-900 block">
-                              Slot 1: Order Complete (.xlsx)
-                            </Label>
+                            <div className="flex items-center justify-between">
+                              <Label className="font-black text-xs text-gray-900 block">
+                                Slot 1: Order Complete (.xlsx)
+                              </Label>
+                              <Badge className="bg-orange-100 text-orange-800 text-[9px] font-black border-none">
+                                Wajib
+                              </Badge>
+                            </div>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                              Berkas Pesanan Selesai (Bulan H-1 & H, atau Multi-Part).
+                              Laporan Pesanan Selesai (Bulan H-1 &amp; H, atau Part 1 &amp; 2).
                             </p>
+                          </div>
+                          <div className="text-[10px] bg-orange-50/70 p-2 rounded-xl text-orange-950 space-y-0.5">
+                            <span className="font-bold block">📍 Menu di Shopee:</span>
+                            <span>Pesanan Saya ➔ Selesai ➔ Ekspor</span>
+                            <span className="font-mono text-[9px] block text-orange-800 mt-0.5">Order.all.xxxx.xlsx</span>
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-2 pt-1">
                           <input
                             type="file"
                             multiple
@@ -1085,16 +1285,26 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             <DollarSign className="w-4 h-4" />
                           </div>
                           <div>
-                            <Label className="font-black text-xs text-gray-900 block">
-                              Slot 2: Income Released (.xlsx)
-                            </Label>
+                            <div className="flex items-center justify-between">
+                              <Label className="font-black text-xs text-gray-900 block">
+                                Slot 2: Income Released (.xlsx)
+                              </Label>
+                              <Badge className="bg-blue-100 text-blue-800 text-[9px] font-black border-none">
+                                Wajib
+                              </Badge>
+                            </div>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                              Berkas Penghasilan Saya status 'Sudah Dilepas' Bulan H.
+                              Penghasilan Saya status 'Sudah Dilepas' Bulan H.
                             </p>
+                          </div>
+                          <div className="text-[10px] bg-blue-50/70 p-2 rounded-xl text-blue-950 space-y-0.5">
+                            <span className="font-bold block">📍 Menu di Shopee:</span>
+                            <span>Keuangan ➔ Penghasilan Saya ➔ Rincian</span>
+                            <span className="font-mono text-[9px] block text-blue-800 mt-0.5">Income.released.xxxx.xlsx</span>
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-2 pt-1">
                           <input
                             type="file"
                             multiple
@@ -1145,16 +1355,26 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             <Archive className="w-4 h-4" />
                           </div>
                           <div>
-                            <Label className="font-black text-xs text-gray-900 block">
-                              Slot 3: RTS & Retur (.zip/.xlsx)
-                            </Label>
+                            <div className="flex items-center justify-between">
+                              <Label className="font-black text-xs text-gray-900 block">
+                                Slot 3: RTS &amp; Retur (.zip/.xlsx)
+                              </Label>
+                              <Badge className="bg-gray-100 text-gray-600 text-[9px] font-bold border-none">
+                                Opsional
+                              </Badge>
+                            </div>
                             <p className="text-[10px] text-gray-500 font-medium mt-0.5">
-                              Arsip Gagal Kirim (RTS) & Pengembalian Barang (RR).
+                              Arsip Gagal Kirim (RTS) &amp; Pengembalian Barang (RR).
                             </p>
+                          </div>
+                          <div className="text-[10px] bg-purple-50/70 p-2 rounded-xl text-purple-950 space-y-0.5">
+                            <span className="font-bold block">📍 Menu di Shopee:</span>
+                            <span>Pesanan Saya ➔ Pengembalian/Pembatalan</span>
+                            <span className="font-mono text-[9px] block text-purple-800 mt-0.5">Return_Refund_Archive.zip</span>
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-2 pt-1">
                           <input
                             type="file"
                             accept=".zip, .rar, .xlsx, .xls"
@@ -1232,11 +1452,11 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
               {workflowMode === 'general_cash' && (
                 /* GENERAL CASH SPREADSHEET */
                 <Card className="border-2 border-dashed border-blue-300 hover:border-blue-500 transition-colors bg-white rounded-3xl overflow-hidden shadow-sm">
-                  <CardContent className="p-6 space-y-4">
+                  <CardContent className="p-6 space-y-5">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-blue-100 flex items-center justify-center text-blue-700">
-                          <Receipt className="w-5 h-5" />
+                        <div className="w-11 h-11 rounded-2xl bg-blue-100 flex items-center justify-center text-blue-700 shadow-inner">
+                          <Receipt className="w-6 h-6" />
                         </div>
                         <div>
                           <Label className="font-black text-sm text-gray-900 block">
@@ -1250,6 +1470,60 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                       <Badge className="bg-blue-100 text-blue-800 font-bold border-none text-[10px]">
                         Kas Toko
                       </Badge>
+                    </div>
+
+                    {/* Format Guide and Download Template button */}
+                    <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="font-black text-xs text-blue-950 block">
+                            📋 Struktur Kolom Wajib pada Excel Buku Kas:
+                          </span>
+                          <span className="text-[11px] text-blue-800">
+                            Pastikan baris judul pada baris pertama memiliki 5 kolom berikut:
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={downloadCashbookTemplate}
+                          className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold gap-1.5 shrink-0 shadow-sm"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          Unduh Template Excel (.xlsx)
+                        </Button>
+                      </div>
+
+                      {/* Sample visual table */}
+                      <div className="overflow-x-auto rounded-xl border border-blue-200 bg-white">
+                        <table className="w-full text-left text-[11px]">
+                          <thead className="bg-blue-100/70 text-blue-950 font-bold">
+                            <tr>
+                              <th className="p-2 border-r border-blue-200">Tanggal</th>
+                              <th className="p-2 border-r border-blue-200">Jenis</th>
+                              <th className="p-2 border-r border-blue-200">Kategori</th>
+                              <th className="p-2 border-r border-blue-200">Nominal</th>
+                              <th className="p-2">Keterangan</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 text-gray-600">
+                            <tr>
+                              <td className="p-2 border-r border-gray-100 font-mono">2026-09-01</td>
+                              <td className="p-2 border-r border-gray-100 text-emerald-700 font-bold">Pemasukan</td>
+                              <td className="p-2 border-r border-gray-100">Penjualan</td>
+                              <td className="p-2 border-r border-gray-100 font-mono">500000</td>
+                              <td className="p-2">Penjualan offline toko</td>
+                            </tr>
+                            <tr>
+                              <td className="p-2 border-r border-gray-100 font-mono">2026-09-02</td>
+                              <td className="p-2 border-r border-gray-100 text-red-600 font-bold">Pengeluaran</td>
+                              <td className="p-2 border-r border-gray-100">Bahan Baku</td>
+                              <td className="p-2 border-r border-gray-100 font-mono">150000</td>
+                              <td className="p-2">Beli ayam &amp; cabai</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     <div className="space-y-3">
@@ -1268,7 +1542,7 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                         type="button"
                         variant="outline"
                         onClick={() => document.getElementById('general-cash-upload')?.click()}
-                        className="w-full h-12 rounded-2xl border-blue-300 text-blue-800 hover:bg-blue-50 font-bold text-xs gap-2"
+                        className="w-full h-13 rounded-2xl border-blue-300 text-blue-800 hover:bg-blue-50 font-bold text-xs gap-2"
                       >
                         <Upload className="w-4 h-4 text-blue-600" />
                         {generalCashFile
@@ -1289,6 +1563,7 @@ export const ShopeeAuditModal: React.FC<ShopeeAuditModalProps> = ({
                             type="button"
                             onClick={() => setGeneralCashFile(null)}
                             className="text-gray-400 hover:text-red-600 p-1 rounded-lg"
+                            title="Hapus berkas"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
