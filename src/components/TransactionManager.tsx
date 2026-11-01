@@ -1,2039 +1,397 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package, Zap, Edit2, X, Wallet, PiggyBank, FileSpreadsheet } from 'lucide-react';
-import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
-import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee, Dompet, KategoriArusKas } from '../types';
-import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
-
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-
-import { auth, db, doc, setDoc, updateDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
-import { getTxNominal, formatCompactNumber, formatCurrency } from '../lib/formatUtils';
-import { User } from 'firebase/auth';
-import { useSettings } from '../SettingsContext';
-import { formatSmartUnit } from '../lib/unitUtils';
-import {
-  RangePreset,
-  filterByDateRange,
-  computeStats,
-} from '../lib/transactionStats';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { History, Plus, Search, Trash2, TrendingUp, TrendingDown, Calendar, FileSpreadsheet, Filter, CheckCircle2, Zap } from 'lucide-react';
+import { User, db, doc, setDoc, deleteDoc, writeBatch, sanitizeData } from '../lib/firebase';
+import { Transaction, Product, Ingredient, Dompet } from '../types';
+import { formatCurrency, getTxNominal } from '../lib/formatUtils';
 import { useDateFilter } from '../lib/dateFilterContext';
-
-import * as XLSX from 'xlsx';
-import ShopeeAuditModal from './ShopeeAuditModal';
-import { ShopeeAuditResult } from '../lib/shopeeAuditEngine';
+import { filterByDateRange, RangePreset } from '../lib/transactionStats';
+import { ShopeeAuditModal } from './ShopeeAuditModal';
+import QuickEntryDialog, { QuickEntryFields } from './QuickEntryDialog';
+import { toast } from 'sonner';
+import { CATEGORIES_LIST } from '../constants/data';
 
 interface TransactionManagerProps {
-  user: User | null;
+  user: User;
   transactions: Transaction[];
-  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  setTransactions: (transactions: Transaction[]) => void;
   products: Product[];
-  setProducts?: React.Dispatch<React.SetStateAction<Product[]>>;
+  setProducts: (products: Product[]) => void;
   ingredients: Ingredient[];
-  setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
+  setIngredients: (ingredients: Ingredient[]) => void;
   onSuccess?: () => void;
   dompets?: Dompet[];
-  setDompets?: React.Dispatch<React.SetStateAction<Dompet[]>>;
+  setDompets?: (dompets: Dompet[]) => void;
 }
 
-const CATEGORIES = [
-  { name: 'Penjualan', type: 'Pemasukan', fixed: true },
-  { name: 'Bahan Baku', type: 'Pengeluaran', fixed: true },
-  { name: 'Packing', type: 'Pengeluaran', fixed: true },
-  { name: 'Gaji', type: 'Pengeluaran', fixed: true },
-  { name: 'Operasional', type: 'Pengeluaran', fixed: true },
-  { name: 'Tabungan', type: 'Pengeluaran', fixed: true },
-  { name: 'Biaya Iklan', type: 'Pengeluaran', fixed: true },
-  { name: 'Saldo sisa', type: 'Pemasukan', fixed: true },
-  { name: 'Lainnya', type: 'Pengeluaran', fixed: false },
-];
+export default function TransactionManager({
+  user,
+  transactions,
+  setTransactions,
+  products,
+  setProducts,
+  ingredients,
+  setIngredients,
+  onSuccess,
+  dompets = [],
+  setDompets
+}: TransactionManagerProps) {
+  const { startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterJenis, setFilterJenis] = useState<'all' | 'Pemasukan' | 'Pengeluaran'>('all');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isShopeeAuditModalOpen, setIsShopeeAuditModalOpen] = useState(false);
+  const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
 
-export default function TransactionManager({ user, transactions, setTransactions, products, setProducts, ingredients, setIngredients, onSuccess, dompets = [], setDompets }: TransactionManagerProps) {
-  const { settings } = useSettings();
-  const dateInputRef = React.useRef<HTMLInputElement>(null);
-  const processingTxRef = React.useRef<Set<string>>(new Set());
-  const isUpdatingRef = React.useRef(false); // Execution lock
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [typeFilter, setTypeFilter] = React.useState('Semua');
-  
-  const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
+  // Form State
+  const [formTanggal, setFormTanggal] = useState(new Date().toISOString().split('T')[0]);
+  const [formJenis, setFormJenis] = useState<'Pemasukan' | 'Pengeluaran'>('Pemasukan');
+  const [formKategori, setFormKategori] = useState('Penjualan');
+  const [formNominal, setFormNominal] = useState('');
+  const [formKeterangan, setFormKeterangan] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Dynamic Categories from Settings
-  const dynamicCategories = React.useMemo(() => {
-    const base = [
-      { name: 'Penjualan', type: 'Pemasukan' as const, fixed: true },
-      { name: 'Saldo sisa', type: 'Pemasukan' as const, fixed: true },
-    ];
-    
-    // Add categories from settings (HPP groups like Bahan Baku, Packing, Overhead, etc.)
-    const hppGroups = settings?.kategori_hpp || [];
-    const formattedGroups = hppGroups.map(group => ({
-      name: group,
-      type: 'Pengeluaran' as const,
-      fixed: false
-    }));
+  const handleSaveBatchFromQuickEntry = async (list: QuickEntryFields[]) => {
+    const batch = writeBatch(db);
+    const newTxs: Transaction[] = [];
 
-    const otherFinancial = [
-      { name: 'Gaji', type: 'Pengeluaran' as const, fixed: true },
-      { name: 'Operasional', type: 'Pengeluaran' as const, fixed: true },
-      { name: 'Tabungan', type: 'Pengeluaran' as const, fixed: true },
-      { name: 'Biaya Iklan', type: 'Pengeluaran' as const, fixed: true },
-      { name: 'Lainnya', type: 'Pengeluaran' as const, fixed: false },
-    ];
-
-    // Combine and unique by name to prevent duplicates
-    const combined = [...base, ...formattedGroups, ...otherFinancial];
-    const uniqueMap = new Map();
-    combined.forEach(c => {
-      if (!uniqueMap.has(c.name)) uniqueMap.set(c.name, c);
-    });
-    return Array.from(uniqueMap.values());
-  }, [settings]);
-
-  const [txToDelete, setTxToDelete] = React.useState<Transaction | null>(null);
-  const [bulkToDelete, setBulkToDelete] = React.useState<string[] | null>(null);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = React.useState(false);
-  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = React.useState(false);
-  
-  const [newTx, setNewTx] = React.useState<Partial<Transaction>>({
-    tanggal: new Date().toISOString().split('T')[0],
-    tanggal_akhir: null,
-    jenis: 'Pemasukan',
-    kategori: 'Penjualan',
-    nominal: 0,
-    keterangan: '',
-    qty_total: 0,
-    qty_beli: 0,
-    penjualan_detail: []
-  });
-
-  const [selectedTxIds, setSelectedTxIds] = React.useState<string[]>([]);
-  const [selectedMaterialId, setSelectedMaterialId] = React.useState<string>('');
-  // Dompet Tabungan state
-  const [selectedDompetId, setSelectedDompetId] = React.useState<string>('');   // target dompet saat kategori=Tabungan
-  const [selectedSumberDana, setSelectedSumberDana] = React.useState<string>('saldo_utama'); // sumber saat jenis=Pengeluaran
-  
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [isDeleting, setIsDeleting] = React.useState(false);
-  const [isRange, setIsRange] = React.useState(false);
-  const [quickEntryOpen, setQuickEntryOpen] = React.useState(false);
-  const [isShopeeAuditOpen, setIsShopeeAuditOpen] = React.useState(false);
-  const [editingTxId, setEditingTxId] = React.useState<string | null>(null);
-  const formRef = React.useRef<HTMLDivElement>(null);
-
-  const EMPTY_TX = {
-    tanggal: new Date().toISOString().split('T')[0],
-    tanggal_akhir: null as null,
-    jenis: 'Pemasukan' as 'Pemasukan' | 'Pengeluaran',
-    kategori: 'Penjualan',
-    nominal: 0,
-    keterangan: '',
-    qty_total: 0,
-    qty_beli: 0,
-    penjualan_detail: [] as any[],
-  };
-
-  const startEditTx = (tx: Transaction) => {
-    setEditingTxId(tx.id);
-    setNewTx({
-      tanggal: (() => { const d = tx.tanggal; if (typeof d === 'string') return d.split('T')[0]; if (d && typeof (d as any).toDate === 'function') return (d as any).toDate().toISOString().split('T')[0]; return new Date().toISOString().split('T')[0]; })(),
-      tanggal_akhir: tx.tanggal_akhir || null,
-      jenis: tx.jenis,
-      kategori: tx.kategori,
-      nominal: tx.nominal,
-      keterangan: tx.keterangan,
-      qty_beli: tx.qty_beli || 0,
-      qty_total: tx.qty_total || 0,
-      penjualan_detail: tx.penjualan_detail || [],
-    });
-    setSelectedMaterialId((tx as any).materialId || '');
-    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
-  };
-
-  const cancelEditTx = () => {
-    setEditingTxId(null);
-    setNewTx(EMPTY_TX);
-    setSelectedMaterialId('');
-    setIsRange(false);
-    setSelectedDompetId('');
-    setSelectedSumberDana('saldo_utama');
-  };
-
-  const saveQuickBatch = async (list: QuickEntryFields[]): Promise<{ saved: number; failed: number }> => {
-    let saved = 0;
-    let failed = 0;
-    for (const fields of list) {
-      try {
-        const derivedQtyTotal = Array.isArray(fields.penjualan_detail) && fields.penjualan_detail.length > 0
-          ? fields.penjualan_detail.reduce((sum, pd) => sum + pd.varian.reduce((s, v) => s + (v.qty || 0), 0), 0)
-          : (Number(fields.qty_total) || 0);
-
-        const txData: any = {
-          tanggal: fields.tanggal || new Date().toISOString().split('T')[0],
-          tanggal_akhir: fields.tanggal_akhir ?? null,
-          jenis: fields.jenis || 'Pengeluaran',
-          kategori: fields.kategori || 'Lainnya',
-          keterangan: fields.keterangan || '',
-          nominal: Number(fields.nominal) || 0,
-          qty_beli: Number(fields.qty_beli) || 0,
-          qty_total: derivedQtyTotal,
-          penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
-          materialId: fields.materialId || '',
-        };
-
-        // Penjualan: hitung subtotal, biaya, dan nominal bersih
-        // persis seperti useEffect di form manual (qty × harga_jual, lalu potong biaya_lain)
-        if (fields.kategori === 'Penjualan' && Array.isArray(fields.penjualan_detail) && fields.penjualan_detail.length > 0) {
-          const qtyByVariantId = new Map<string, number>();
-          const involvedProductIds = new Set<string>();
-
-          fields.penjualan_detail.forEach(pd => {
-            involvedProductIds.add(pd.produk_id);
-            pd.varian.forEach(v => {
-              qtyByVariantId.set(v.varian_id, (qtyByVariantId.get(v.varian_id) || 0) + v.qty);
-            });
-          });
-
-          // Hitung subtotal dari harga_jual × qty tiap varian
-          let subtotal = 0;
-          qtyByVariantId.forEach((qty, variantId) => {
-            for (const p of products) {
-              const variant = p.varian.find(v => v.id === variantId);
-              if (variant) { subtotal += qty * variant.harga_jual; break; }
-            }
-          });
-
-          // Jika user eksplisit ketik nominal, pakai itu sebagai gross subtotal
-          if (Number(fields.nominal) > 0) subtotal = Number(fields.nominal);
-
-          // Hitung biaya_lain (pajak/komisi) persis seperti form manual
-          const feesByName = new Map<string, AdditionalFee>();
-          involvedProductIds.forEach(pid => {
-            const prod = products.find(p => p.id === pid);
-            prod?.biaya_lain?.forEach(fee => {
-              if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, fee);
-            });
-          });
-
-          let totalFees = 0;
-          feesByName.forEach(fee => {
-            totalFees += fee.tipe === 'persen' ? subtotal * (fee.nilai / 100) : fee.nilai;
-          });
-
-          txData.subtotal = subtotal;
-          txData.total_penjualan = subtotal;
-          txData.total_biaya = totalFees;
-          txData.nominal = subtotal - totalFees;
-          txData.qty_total = derivedQtyTotal;
-          txData.qty_beli = 0; // qty_beli selalu 0 untuk Penjualan, sama dengan form manual
-        }
-
-        // Handle sumber_dana — jika dipilih dompet, set kategori_arus_kas & update saldo dompet atomik
-        let dompetOp: { id: string; delta: number } | undefined = undefined;
-        const sumberDana = (fields as any).sumber_dana;
-        if (sumberDana && sumberDana !== 'saldo_utama') {
-          const dompet = dompets.find(d => d.id === sumberDana);
-          if (!dompet) {
-            toast.error('Dompet tidak ditemukan, transaksi dilewati');
-            failed++;
-            continue;
-          }
-          if ((dompet.saldo_terkumpul || 0) < txData.nominal) {
-            toast.error(`Saldo dompet "${dompet.nama}" tidak cukup (tersedia: ${formatCurrency(dompet.saldo_terkumpul || 0, true)})`);
-            failed++;
-            continue;
-          }
-          txData.sumber_dana = sumberDana;
-          txData.kategori_arus_kas = 'pengeluaran_dompet';
-          dompetOp = { id: sumberDana, delta: -txData.nominal };
-        }
-
-        await processAndSaveTransaction(txData, dompetOp);
-        saved++;
-      } catch (err) {
-        console.error('[quick-entry] failed to save', err);
-        failed++;
-      }
-    }
-    if (saved > 0) {
-      toast.success(`${saved} transaksi tersimpan${failed > 0 ? `, ${failed} gagal` : ''} ✓`);
-      if (onSuccess) onSuccess();
-    } else if (failed > 0) {
-      toast.error('Gagal menyimpan transaksi');
-    }
-    return { saved, failed };
-  };
-
-  // Derive selected product IDs from penjualan_detail to prevent double counting and state sync issues
-  const selectedProductIds = React.useMemo(() => {
-    return newTx.penjualan_detail?.map(pd => pd.produk_id) || [];
-  }, [newTx.penjualan_detail]);
-
-  // Helper to process and save a single transaction (used by manual form and import)
-  const processAndSaveTransaction = async (txData: any, dompetOp?: { id: string; delta: number }) => {
-    if (!user) return;
-    
-    // Identify affected ingredients and calculate snapshot
-    const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
-    const stockUpdates: { id: string; delta: number }[] = [];
-    const ingredientIdMap = new Map(ingredients.map(i => [i.id, i]));
-    let totalHpp = 0;
-
-    if (txData.jenis === 'Pengeluaran') {
-      const matId = txData.materialId || selectedMaterialId;
-      if (matId) {
-        const material = ingredientIdMap.get(matId);
-        if (material) {
-          const delta = Number(txData.qty_beli || 0) || 0;
-          const nominal = Number(txData.nominal || 0) || 0;
-          if (delta > 0 && nominal > 0) {
-            const calcPrice = Math.round(nominal / delta);
-            if (calcPrice > 0 && Math.abs(calcPrice - (material.price || 0)) > 0.01) {
-              try {
-                const ingRef = doc(db, `users/${user.uid}/stok/${material.id}`);
-                await setDoc(ingRef, { price: calcPrice }, { merge: true });
-                setIngredients(prev => prev.map(i => i.id === material.id ? { ...i, price: calcPrice } : i));
-                toast.info(`Harga acuan "${material.name}" di database otomatis diperbarui ke Rp ${formatCurrency(calcPrice, true)}/${material.unit}`);
-              } catch (err) {
-                console.error("Gagal auto-update harga bahan baku di DB:", err);
-              }
-            }
-          }
-          snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
-          stockUpdates.push({ id: material.id, delta });
-        }
-      }
-    } else if (txData.jenis === 'Pemasukan' && txData.kategori === 'Penjualan' && txData.penjualan_detail) {
-      txData.penjualan_detail.forEach((pd: any) => {
-        const product = products.find(p => p.id === pd.produk_id);
-        if (product) {
-          pd.varian.forEach((pv: any) => {
-            if (pv.qty > 0) {
-              const variant = product.varian.find(v => v.id === pv.varian_id);
-              if (variant) {
-                const batchSize = Number(variant.qty_batch) || 1;
-                totalHpp += ((variant.harga_packing || 0) / batchSize) * pv.qty;
-                if (variant.bahan) {
-                  variant.bahan.forEach(bahan => {
-                    let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
-                    if (!ingredient && bahan.nama) {
-                      const normalizedName = bahan.nama.toLowerCase().trim();
-                      ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
-                    }
-                    if (ingredient) {
-                      let usageRaw = Number(bahan.qty) || 0;
-                      const iUnit = ingredient.unit.toLowerCase().trim();
-                      const bUnit = (bahan.satuan || '').toLowerCase().trim();
-                      if ((bUnit === 'gram' || bUnit === 'gr' || bUnit === 'g') && 
-                          (iUnit === 'kg' || iUnit === 'kilogram')) {
-                        usageRaw = usageRaw / 1000;
-                      } else if ((bUnit === 'ml' || bUnit === 'mili') && 
-                                 (iUnit === 'liter' || iUnit === 'lt' || iUnit === 'l')) {
-                        usageRaw = usageRaw / 1000;
-                      }
-                      const usagePerPcs = usageRaw / batchSize;
-                      const totalUsage = usagePerPcs * pv.qty;
-                      totalHpp += totalUsage * (ingredient.price || 0);
-                      const delta = -totalUsage;
-                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
-                      if (existingSnapshot) existingSnapshot.delta += delta;
-                      else snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
-                      const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
-                      if (existingUpdate) existingUpdate.delta += delta;
-                      else stockUpdates.push({ id: ingredient!.id, delta });
-                    }
-                  });
-                }
-              }
-            }
-          });
-        }
-      });
+    for (const item of list) {
+      const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const newTx: Transaction = {
+        id: txId,
+        tanggal: item.tanggal,
+        keterangan: item.keterangan,
+        kategori: item.kategori,
+        jenis: item.jenis,
+        nominal: item.nominal,
+        qty_total: item.qty_total || item.qty_beli || 0,
+        materialId: item.materialId,
+        penjualan_detail: item.penjualan_detail,
+        sumber_dana: item.sumber_dana || 'saldo_utama',
+      };
+      batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(newTx));
+      newTxs.push(newTx);
     }
 
-    const txId = Math.random().toString(36).substr(2, 9);
-    const isPemasukan = (txData.jenis || 'Pengeluaran') === 'Pemasukan';
-    const isPenjualan = isPemasukan && txData.kategori === 'Penjualan';
-
-    // --- Hitung pajak dari biaya_lain produk jika belum ada ---
-    let computedTotalBiaya: number | undefined = txData.total_biaya;
-    let computedSubtotal: number | undefined = txData.subtotal ?? txData.total_penjualan ?? txData.nominal;
-    let computedFeeBreakdown: { nama: string; tipe: string; nilai: number; jumlah: number }[] = txData.feeBreakdown || [];
-
-    if (isPenjualan && (computedTotalBiaya === undefined || computedTotalBiaya === null)) {
-      const subtotalBase = Number(computedSubtotal) || 0;
-      const feesByName = new Map<string, { nama: string; tipe: string; nilai: number }>();
-      if (txData.penjualan_detail) {
-        txData.penjualan_detail.forEach((pd: any) => {
-          const prod = products.find(p => p.id === pd.produk_id);
-          const allVariantIds = Array.isArray(pd.varian) ? pd.varian.map((v: any) => v?.varian_id) : [pd.varian_id];
-          const prodFees = prod?.biaya_lain || [];
-          prodFees.forEach((fee: any) => {
-            if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai });
-          });
-          if (prod?.varian) {
-            prod.varian.forEach((v) => {
-              if (allVariantIds.includes(v.id) && v.biaya_lain) {
-                v.biaya_lain.forEach((fee: any) => {
-                  if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai });
-                });
-              }
-            });
-          }
-        });
-      }
-      let autoFees = 0;
-      feesByName.forEach(fee => {
-        const jumlah = fee.tipe === 'persen' ? subtotalBase * (fee.nilai / 100) : fee.nilai;
-        autoFees += jumlah;
-        computedFeeBreakdown.push({ nama: fee.nama, tipe: fee.tipe, nilai: fee.nilai, jumlah });
-      });
-      computedTotalBiaya = autoFees;
-      console.log(`[TX] Pajak auto-hitung: subtotal=${subtotalBase}, totalBiaya=${autoFees}, breakdown=`, computedFeeBreakdown);
-    }
-
-    const currentNominal = Number(txData.nominal) || 0;
-    const currentSubtotal = Number(computedSubtotal) || currentNominal;
-    const currentTotalPenjualan = isPemasukan ? currentSubtotal : 0;
-    const saleFees = isPenjualan ? (computedTotalBiaya ?? 0) : 0;
-    const manualExpense = !isPemasukan ? currentNominal : 0;
-    const currentTotalBiaya = isPemasukan ? saleFees : manualExpense;
-    const currentFinalIncome = isPemasukan ? (currentTotalPenjualan - currentTotalBiaya) : 0;
-    const currentLaba = isPemasukan ? currentFinalIncome : -currentTotalBiaya;
-
-    const txToSave: any = {
-      id: txId,
-      userId: user.uid,
-      tanggal: txData.tanggal || new Date().toISOString().split('T')[0],
-      tanggal_akhir: txData.tanggal_akhir || null,
-      keterangan: txData.keterangan || '',
-      kategori: txData.kategori || 'Lainnya',
-      jenis: txData.jenis || 'Pengeluaran',
-      type: (txData.jenis || 'Pengeluaran').toLowerCase(),
-      nominal: isPenjualan ? currentFinalIncome : currentNominal,
-      subtotal: currentSubtotal,
-      total_penjualan: currentTotalPenjualan,
-      total_biaya: currentTotalBiaya,
-      totalTax: currentTotalBiaya,
-      finalIncome: currentFinalIncome,
-      feeBreakdown: computedFeeBreakdown.length > 0 ? computedFeeBreakdown : null,
-      laba: currentLaba,
-      totalHpp: totalHpp,
-      qty_total: txData.qty_total || 0,
-      qty_beli: txData.qty_beli || 0,
-      createdAt: serverTimestamp(),
-      stockSnapshot: snapshot.length > 0 ? snapshot : null,
-      // Dompet fields — wajib disimpan agar reversal saat delete bisa berjalan
-      ...(txData.kategori_arus_kas ? { kategori_arus_kas: txData.kategori_arus_kas } : {}),
-      ...(txData.sumber_dana ? { sumber_dana: txData.sumber_dana } : {}),
-    };
-
-    if (txData.kategori === 'Penjualan' && txData.penjualan_detail) {
-      txToSave.penjualan_detail = txData.penjualan_detail.map((pd: any) => {
-        const product = products.find(p => p.id === pd.produk_id);
-        return {
-          ...pd,
-          varian: pd.varian.map((pv: any) => {
-            const variant = product?.varian.find(v => v.id === pv.varian_id);
-            let itemHpp = 0;
-            if (variant) {
-              const batchSize = Number(variant.qty_batch) || 1;
-              const packingPcs = (variant.harga_packing || 0) / batchSize;
-              const materialsPcs = variant.bahan?.reduce((acc, b) => {
-                let ing = b.ingredientId ? ingredientIdMap.get(b.ingredientId) : null;
-                if (!ing && b.nama) ing = ingredients.find(i => i.name.toLowerCase().trim() === b.nama!.toLowerCase().trim());
-                if (ing) {
-                  let usage = Number(b.qty) || 0;
-                  const iUnit = ing.unit.toLowerCase().trim();
-                  const bUnit = (b.satuan || '').toLowerCase().trim();
-                  if ((bUnit === 'gram' || bUnit === 'gr' || bUnit === 'g') && 
-                      (iUnit === 'kg' || iUnit === 'kilogram')) {
-                    usage = usage / 1000;
-                  } else if ((bUnit === 'ml' || bUnit === 'mili') && 
-                             (iUnit === 'liter' || iUnit === 'lt' || iUnit === 'l')) {
-                    usage = usage / 1000;
-                  }
-                  return acc + (usage / batchSize) * (ing.price || 0);
-                }
-                return acc;
-              }, 0) || 0;
-              itemHpp = packingPcs + materialsPcs;
-            }
-            return { ...pv, harga_jual: variant?.harga_jual || 0, hpp_pcs: itemHpp };
-          })
-        };
-      });
-    }
-
-    // Optimistic Update
-    if (stockUpdates.length > 0) {
-      setIngredients(prev => prev.map(ing => {
-        const update = stockUpdates.find(u => u.id === ing.id);
-        return update ? { ...ing, currentStock: (ing.currentStock || 0) + update.delta } : ing;
-      }));
-    }
-    setTransactions(prev => [txToSave, ...prev]);
-
-    if (user) {
-      (async () => {
-        try {
-          const batch = writeBatch(db);
-          batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
-          stockUpdates.forEach(update => {
-            batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
-              currentStock: increment(update.delta)
-            });
-          });
-          // Dompet atomic update (mutasi masuk / pengeluaran keluar)
-          if (dompetOp) {
-            batch.update(doc(db, `users/${user.uid}/dompet/${dompetOp.id}`), {
-              saldo_terkumpul: increment(dompetOp.delta)
-            });
-          }
-          await batch.commit();
-        } catch (err) {
-          console.error('[TransactionManager] Background batch commit error:', err);
-        }
-      })();
-    }
-    return txToSave;
-  };
-
-  const handleCommitShopeeAudit = async (
-    audit: ShopeeAuditResult,
-    mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
-  ) => {
-    if (!user) return;
-
-    // 1. Permanently update SKU in products if any
-    if (mappedNewSkus && mappedNewSkus.length > 0) {
-      try {
-        const batch = writeBatch(db);
-        let productsModified = false;
-        const updatedProducts = products.map(prod => {
-          let prodModified = false;
-          const updatedVariants = prod.varian.map(vr => {
-            const mapped = mappedNewSkus.find(m => m.productId === prod.id && m.variantId === vr.id);
-            if (mapped) {
-              prodModified = true;
-              return { ...vr, sku: mapped.sku };
-            }
-            return vr;
-          });
-          if (prodModified) {
-            productsModified = true;
-            const updated = { ...prod, varian: updatedVariants };
-            batch.set(doc(db, `users/${user.uid}/hpp/${prod.id}`), sanitizeData(updated));
-            return updated;
-          }
-          return prod;
-        });
-
-        if (productsModified) {
-          await batch.commit();
-        }
-      } catch (err) {
-        console.error('Gagal memperbarui SKU produk di database:', err);
-      }
-    }
-
-    // 2. Prepare transaction date
-    const txDate = audit.periode.includes(' s/d ')
-      ? audit.periode.split(' s/d ')[1]
-      : (audit.periode.split(' ')[0] || new Date().toISOString().split('T')[0]);
-
-    // 3. Prepare Pemasukan Transaction with penjualan_detail
-    const prodMap = new Map<string, { produk_id: string; produk_nama: string; varian: { varian_id: string; varian_nama: string; qty: number; harga: number }[] }>();
-    for (const vb of audit.variantBreakdown) {
-      if (vb.qtyTerjual <= 0) continue;
-      if (!prodMap.has(vb.productId)) {
-        prodMap.set(vb.productId, { produk_id: vb.productId, produk_nama: vb.productName, varian: [] });
-      }
-      prodMap.get(vb.productId)!.varian.push({
-        varian_id: vb.variantId,
-        varian_nama: vb.variantName,
-        qty: vb.qtyTerjual,
-        harga: vb.qtyTerjual > 0 ? Math.round(vb.omzetVarian / vb.qtyTerjual) : 0,
-      });
-    }
-
-    const pemasukanTx = {
-      jenis: 'Pemasukan',
-      kategori: 'Penjualan',
-      tanggal: txDate,
-      keterangan: `Penjualan Shopee (Dana Dilepas) - Periode ${audit.periode}`,
-      nominal: audit.totalPendapatanDilepas,
-      total_penjualan: audit.totalOmzetToko,
-      penjualan_detail: Array.from(prodMap.values()),
-      qty_total: audit.totalQtySold,
-    };
-
-    setIsSaving(true);
     try {
-      // Save Pemasukan & trigger stock auto-deduction
-      await processAndSaveTransaction(pemasukanTx);
-
-      // 4. Save Pengeluaran: Biaya Admin & Layanan Shopee
-      if (audit.totalAdminLayanan > 0) {
-        const adminTx = {
-          jenis: 'Pengeluaran',
-          kategori: 'Biaya Shopee',
-          tanggal: txDate,
-          keterangan: `Biaya Admin & Layanan Shopee - Periode ${audit.periode}`,
-          nominal: audit.totalAdminLayanan,
-          qty_beli: 0,
-          qty_total: 0,
-        };
-        await processAndSaveTransaction(adminTx);
-      }
-
-      // 5. Save Pengeluaran: Biaya Iklan Shopee (Inc. PPN 11%)
-      if (audit.totalBiayaIklanIncPpn > 0) {
-        const iklanTx = {
-          jenis: 'Pengeluaran',
-          kategori: 'Iklan & Marketing',
-          tanggal: txDate,
-          keterangan: `Biaya Iklan Shopee (Inc. PPN 11%) - Periode ${audit.periode}`,
-          nominal: audit.totalBiayaIklanIncPpn,
-          qty_beli: 0,
-          qty_total: 0,
-        };
-        await processAndSaveTransaction(iklanTx);
-      }
-
-      // 6. Save Pengeluaran: Biaya Operasional Shopee (if any)
-      if (audit.biayaOperasionalManual > 0) {
-        const opTx = {
-          jenis: 'Pengeluaran',
-          kategori: 'Operasional',
-          tanggal: txDate,
-          keterangan: `Biaya Operasional Shopee - Periode ${audit.periode}`,
-          nominal: audit.biayaOperasionalManual,
-          qty_beli: 0,
-          qty_total: 0,
-        };
-        await processAndSaveTransaction(opTx);
-      }
-
-      // 7. Save Audit to Firestore & Local Storage
-      try {
-        await setDoc(doc(db, `users/${user.uid}/shopee_audits/${audit.id}`), sanitizeData(audit));
-        const existingAuditsStr = localStorage.getItem('ceumilan_shopee_audits');
-        const existingAudits: ShopeeAuditResult[] = existingAuditsStr ? JSON.parse(existingAuditsStr) : [];
-        const updatedAudits = [audit, ...existingAudits.filter(a => a.id !== audit.id)];
-        localStorage.setItem('ceumilan_shopee_audits', JSON.stringify(updatedAudits));
-      } catch (err) {
-        console.warn('Failed saving audit to Firestore:', err);
-      }
-
-      if (onSuccess) onSuccess();
-    } finally {
-      setIsSaving(false);
+      await batch.commit();
+      setTransactions([...newTxs, ...transactions]);
+      toast.success(`${newTxs.length} transaksi berhasil disimpan! 🚀`);
+      return { saved: newTxs.length, failed: 0 };
+    } catch (err) {
+      console.error('Save batch quick entry error:', err);
+      toast.error('Gagal menyimpan transaksi batch');
+      return { saved: 0, failed: list.length };
     }
   };
 
-  const handleCommitTransactions = async (
-    txsToSave: any[],
-    mappedNewSkus?: { productId: string; variantId: string; sku: string }[]
-  ) => {
-    if (!user) return;
-
-    // 1. Permanently update SKU in products if any
-    if (mappedNewSkus && mappedNewSkus.length > 0) {
-      try {
-        const batch = writeBatch(db);
-        let productsModified = false;
-        const updatedProducts = products.map(prod => {
-          let prodModified = false;
-          const updatedVariants = prod.varian.map(vr => {
-            const mapped = mappedNewSkus.find(m => m.productId === prod.id && m.variantId === vr.id);
-            if (mapped) {
-              prodModified = true;
-              return { ...vr, sku: mapped.sku };
-            }
-            return vr;
-          });
-          if (prodModified) {
-            productsModified = true;
-            const updated = { ...prod, varian: updatedVariants };
-            batch.set(doc(db, `users/${user.uid}/hpp/${prod.id}`), sanitizeData(updated));
-            return updated;
-          }
-          return prod;
-        });
-
-        if (productsModified) {
-          await batch.commit();
-          if (setProducts) setProducts(updatedProducts);
-        }
-      } catch (err) {
-        console.error('Gagal memperbarui SKU produk di database:', err);
-      }
+  const filteredTransactions = useMemo(() => {
+    let list = filterByDateRange(transactions, startDate, endDate);
+    if (filterJenis !== 'all') {
+      list = list.filter(t => (t.jenis || '').toLowerCase() === filterJenis.toLowerCase());
     }
-
-    // 2. Save each transaction and adjust stock
-    setIsSaving(true);
-    let successCount = 0;
-    try {
-      for (const tx of txsToSave) {
-        try {
-          await processAndSaveTransaction(tx);
-          successCount++;
-        } catch (err) {
-          console.error("Gagal save tx:", err);
-        }
-      }
-      toast.success('Penyimpanan Berhasil Disetujui!', {
-        description: `${successCount} transaksi berhasil disimpan ke database dan stok bahan baku telah disesuaikan.`
-      });
-      if (onSuccess) onSuccess();
-    } finally {
-      setIsSaving(false);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(t =>
+        (t.keterangan || '').toLowerCase().includes(q) ||
+        (t.kategori || '').toLowerCase().includes(q)
+      );
     }
-  };
+    return list;
+  }, [transactions, startDate, endDate, filterJenis, searchQuery]);
 
-  // === Filter periode bersama (sinkron dengan halaman Laporan) ===
-  const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const handlePreset = (p: RangePreset) => {
-    applyPreset(p);
-    if (p !== 'Custom') setPickerOpen(false);
-  };
-
-  // List transaksi dalam range periode aktif (single source of truth).
-  const periodTransactions = React.useMemo(
-    () => filterByDateRange(transactions, startDate, endDate),
-    [transactions, startDate, endDate]
-  );
-
-  // Stats Pemasukan/Pengeluaran/Saldo — pakai rumus dari transactionStats.ts
-  // sehingga IDENTIK 100% dengan halaman Laporan untuk filter yang sama.
-  const stats = React.useMemo(
-    () => computeStats(periodTransactions, { start: startDate, end: endDate }, 'Transaksi'),
-    [periodTransactions, startDate, endDate]
-  );
-
-  const totalIncome = stats.totalPemasukan;
-  const totalExpense = stats.totalPengeluaran;
-  const balance = stats.saldo;
-
-  // Saldo Kas = Laba Operasional - uang yang disisihkan ke tabungan dalam periode
-  const totalMutasiTabunganPeriode = React.useMemo(
-    () => periodTransactions
-      .filter(t => (t as any).kategori_arus_kas === 'mutasi_ke_dompet')
-      .reduce((s, t) => s + getTxNominal(t), 0),
-    [periodTransactions]
-  );
-  const saldoKas = balance - totalMutasiTabunganPeriode;
-
-  // Riwayat transaksi yang ditampilkan: filter periode + search + type.
-  const filteredTransactions = React.useMemo(
-    () =>
-      periodTransactions
-        .filter(t => {
-          const q = searchTerm.toLowerCase();
-          const matchesSearch = !q ||
-            (t.keterangan || '').toLowerCase().includes(q) ||
-            (t.kategori || '').toLowerCase().includes(q) ||
-            (t.jenis || '').toLowerCase().includes(q);
-          const matchesType = typeFilter === 'Semua' || t.jenis === typeFilter;
-          return matchesSearch && matchesType;
-        })
-        .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime()),
-    [periodTransactions, searchTerm, typeFilter]
-  );
-
-  // Handle category change and auto-type
-  const handleCategoryChange = (catName: string) => {
-    const cat = dynamicCategories.find(c => c.name === catName);
-    if (cat) {
-      setNewTx(prev => ({
-        ...prev,
-        kategori: catName,
-        jenis: cat.type as 'Pemasukan' | 'Pengeluaran',
-        // Reset fields when category changes
-        qty_beli: 0,
-        nominal: catName === 'Penjualan' ? prev.nominal : 0,
-        penjualan_detail: catName === 'Penjualan' ? prev.penjualan_detail : []
-      }));
-      setSelectedMaterialId('');
-    }
-  };
-
-  // Auto-nominal for Bahan Baku and Packing
-  React.useEffect(() => {
-    const isHppCategory = settings?.kategori_hpp.includes(newTx.kategori || '');
-    if (isHppCategory && selectedMaterialId) {
-      const material = ingredients.find(i => i.id === selectedMaterialId);
-      if (material) {
-        setNewTx(prev => ({
-          ...prev,
-          nominal: (prev.qty_beli || 0) * material.price,
-          keterangan: `${prev.kategori}: ${material.name} (${formatSmartUnit(prev.qty_beli || 0, material.unit)})`
-        }));
-      }
-    }
-  }, [selectedMaterialId, newTx.qty_beli, newTx.kategori, ingredients, settings]);
-
-  // Calculate total qty and estimated revenue from penjualan_detail
-  React.useEffect(() => {
-    if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
-      let totalQty = 0;
-      let subtotal = 0;
-      
-      const involvedProductIds = new Set<string>();
-
-      // Use a Map to aggregate totals per variant to prevent any potential double counting from state drift
-      const qtyByVariantId = new Map<string, number>();
-      
-      newTx.penjualan_detail.forEach(pd => {
-        involvedProductIds.add(pd.produk_id);
-        pd.varian.forEach(v => {
-          const current = qtyByVariantId.get(v.varian_id) || 0;
-          qtyByVariantId.set(v.varian_id, current + v.qty);
-        });
-      });
-
-      // Calculate totals from the aggregated map
-      qtyByVariantId.forEach((qty, variantId) => {
-        totalQty += qty;
-        // Find variant in products
-        let found = false;
-        for (const p of products) {
-          const variant = p.varian.find(v => v.id === variantId);
-          if (variant) {
-            subtotal += qty * variant.harga_jual;
-            found = true;
-            break; // Stop after finding the variant to prevent any potential double counting from schema errors
-          }
-        }
-      });
-
-      // Calculate Fees (once per unique fee name across all involved products)
-      const feesByName = new Map<string, AdditionalFee>();
-      involvedProductIds.forEach(pid => {
-        const product = products.find(p => p.id === pid);
-        if (product && product.biaya_lain) {
-          product.biaya_lain.forEach(fee => {
-            if (!feesByName.has(fee.nama)) {
-              feesByName.set(fee.nama, fee);
-            }
-          });
-        }
-      });
-
-      let totalFees = 0;
-      feesByName.forEach(fee => {
-        if (fee.tipe === 'persen') {
-          totalFees += subtotal * (fee.nilai / 100);
-        } else {
-          totalFees += fee.nilai;
-        }
-      });
-
-      setNewTx(prev => ({ 
-        ...prev, 
-        qty_total: totalQty, 
-        nominal: subtotal - totalFees,
-        total_penjualan: subtotal,
-        total_biaya: totalFees
-      }));
-    }
-  }, [newTx.penjualan_detail, newTx.kategori, products]);
-
-  const toggleProduct = (productId: string) => {
-    setNewTx(prev => {
-      const isSelected = prev.penjualan_detail?.some(pd => pd.produk_id === productId);
-      if (isSelected) {
-        return {
-          ...prev,
-          penjualan_detail: prev.penjualan_detail?.filter(pd => pd.produk_id !== productId)
-        };
-      } else {
-        const product = products.find(p => p.id === productId);
-        if (!product) return prev;
-        
-        // Prevent duplicate entries by checking if it already exists
-        if (prev.penjualan_detail?.some(pd => pd.produk_id === productId)) return prev;
-
-        const newDetail: PenjualanDetail = {
-          produk_id: product.id,
-          produk_nama: product.nama,
-          varian: product.varian.map(v => ({ varian_id: v.id, varian_nama: v.nama, qty: 0 }))
-        };
-        return {
-          ...prev,
-          penjualan_detail: [...(prev.penjualan_detail || []), newDetail]
-        };
-      }
-    });
-  };
-
-  const handleVariantQtyChange = (productId: string, variantId: string, qty: number) => {
-    setNewTx(prev => ({
-      ...prev,
-      penjualan_detail: prev.penjualan_detail?.map(pd => {
-        if (pd.produk_id === productId) {
-          return {
-            ...pd,
-            varian: pd.varian.map(v => v.varian_id === variantId ? { ...v, qty } : v)
-          };
-        }
-        return pd;
-      })
-    }));
-  };
-
-  const handleAddTransaction = async () => {
-    if (isSaving) return;
-    if (!newTx.keterangan || (!newTx.nominal && newTx.kategori !== 'Penjualan')) {
-      toast.error('Mohon isi keterangan dan nominal!');
+  const handleCreateTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nom = Number(formNominal.replace(/[^0-9]/g, '')) || 0;
+    if (nom <= 0) {
+      toast.error('Nominal transaksi harus lebih dari 0');
       return;
     }
 
-    if (isUpdatingRef.current) {
-      console.warn("[TransactionManager] Double Execution Blocked!");
-      return; 
-    }
-
-    // ── Edit mode: update existing transaction ──
-    if (editingTxId) {
-      isUpdatingRef.current = true;
-      setIsSaving(true);
-      try {
-        const existing = transactions.find(t => t.id === editingTxId);
-        if (!existing || !user) throw new Error('tx not found');
-        const updated = {
-          ...existing,
-          tanggal: newTx.tanggal,
-          tanggal_akhir: newTx.tanggal_akhir || null,
-          keterangan: newTx.keterangan,
-          kategori: newTx.kategori,
-          jenis: newTx.jenis,
-          nominal: newTx.nominal,
-          qty_beli: newTx.qty_beli || 0,
-          qty_total: newTx.qty_total || 0,
-          penjualan_detail: newTx.penjualan_detail || [],
-        };
-        await setDoc(doc(db, `users/${user.uid}/transaksi/${editingTxId}`), sanitizeData(updated));
-        toast.success('Transaksi diperbarui ✓');
-        cancelEditTx();
-        setSelectedTxIds([]);
-      } catch (error) {
-        console.error('[TransactionManager] Edit error:', error);
-        toast.error('Gagal memperbarui transaksi');
-      } finally {
-        setIsSaving(false);
-        isUpdatingRef.current = false;
-      }
-      return;
-    }
-
-    // ── Create mode ──
-    console.log("[TransactionManager] Starting handleAddTransaction manual save...");
-    isUpdatingRef.current = true;
-    setIsSaving(true);
-    
+    setIsSubmitting(true);
     try {
-      // Compute dompet operation
-      let dompetOp: { id: string; delta: number } | undefined;
-      let kategoriArusKas: KategoriArusKas | undefined;
-
-      if (newTx.jenis === 'Pengeluaran') {
-        if (newTx.kategori === 'Tabungan' && selectedDompetId) {
-          kategoriArusKas = 'mutasi_ke_dompet';
-          dompetOp = { id: selectedDompetId, delta: newTx.nominal || 0 };
-        } else if (selectedSumberDana && selectedSumberDana !== 'saldo_utama') {
-          const dompet = dompets.find(d => d.id === selectedSumberDana);
-          if (!dompet || dompet.saldo_terkumpul < (newTx.nominal || 0)) {
-            toast.error(`Saldo dompet "${dompet?.nama || 'yang dipilih'}" tidak cukup (tersedia: ${formatCurrency(dompet?.saldo_terkumpul || 0, true)})`);
-            setIsSaving(false);
-            isUpdatingRef.current = false;
-            return;
-          }
-          kategoriArusKas = 'pengeluaran_dompet';
-          dompetOp = { id: selectedSumberDana, delta: -(newTx.nominal || 0) };
-        } else {
-          kategoriArusKas = 'pengeluaran_operasional';
-        }
-      }
-
-      const enrichedTxData = {
-        ...newTx,
-        ...(selectedMaterialId ? { materialId: selectedMaterialId } : {}),
-        ...(kategoriArusKas ? { kategori_arus_kas: kategoriArusKas } : {}),
-        sumber_dana: (newTx.kategori === 'Tabungan' && selectedDompetId)
-          ? selectedDompetId
-          : selectedSumberDana !== 'saldo_utama'
-            ? selectedSumberDana
-            : undefined,
+      const txId = `tx_${Date.now()}`;
+      const newTx: Transaction = {
+        id: txId,
+        tanggal: formTanggal,
+        keterangan: formKeterangan.trim() || `Transaksi ${formKategori}`,
+        kategori: formKategori,
+        jenis: formJenis,
+        nominal: nom,
+        qty_total: 0
       };
 
-      await processAndSaveTransaction(enrichedTxData, dompetOp);
-      toast.success('Transaksi disimpan ✓');
-      
-      // Reset State & UI
-      setNewTx(EMPTY_TX);
-      setSelectedMaterialId('');
-      setSelectedTxIds([]);
-      setIsRange(false);
-      setSelectedDompetId('');
-      setSelectedSumberDana('saldo_utama');
-      if (onSuccess) onSuccess();
-
-      // Refocus to date input
-      setTimeout(() => {
-        dateInputRef.current?.focus();
-      }, 100);
-
-    } catch (error) {
-      console.error("[TransactionManager] Error in handleAddTransaction:", error);
-      toast.error('Gagal menyimpan transaksi');
+      await setDoc(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(newTx));
+      setTransactions([newTx, ...transactions]);
+      toast.success('Transaksi berhasil ditambahkan! 📝');
+      setIsAddDialogOpen(false);
+      setFormNominal('');
+      setFormKeterangan('');
+      onSuccess?.();
+    } catch (err) {
+      console.error('Create transaction error:', err);
+      toast.error('Gagal menambahkan transaksi.');
     } finally {
-      setIsSaving(false);
-      isUpdatingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
-  const deleteTransaction = async (id: string) => {
-    if (!user) return;
-    const tx = transactions.find(t => t.id === id);
-    if (tx && tx.stockSnapshot && tx.stockSnapshot.length > 0) {
-      setTxToDelete(tx);
-      setIsDeleteConfirmOpen(true);
-    } else {
-      try {
-        const batch = writeBatch(db);
-        batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
-
-        // Reverse dompet balance hanya jika sumber_dana valid dan dompet terdaftar
-        if (tx && tx.sumber_dana && tx.sumber_dana !== 'saldo_utama') {
-          const dompetExists = dompets.some(d => d.id === tx.sumber_dana);
-          if (dompetExists) {
-            if (tx.kategori_arus_kas === 'mutasi_ke_dompet') {
-              batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-                saldo_terkumpul: increment(-tx.nominal)
-              });
-            } else if (tx.kategori_arus_kas === 'pengeluaran_dompet') {
-              batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-                saldo_terkumpul: increment(tx.nominal)
-              });
-            }
-          }
-        }
-
-        await batch.commit();
-        setTransactions(prev => prev.filter(t => t.id !== id));
-        setSelectedTxIds(prev => prev.filter(selectedId => selectedId !== id));
-        toast.success('Transaksi dihapus');
-      } catch (error) {
-        console.error('[deleteTransaction] Error:', error);
-        toast.error('Gagal menghapus transaksi. Coba lagi.');
-      }
-    }
-  };
-
-  const confirmDelete = async (rollback: boolean) => {
-    if (!txToDelete || !user) return;
-    setIsDeleting(true);
-    setIsDeleteConfirmOpen(false);
-    const txId = txToDelete.id;
-    const txSnapshot = txToDelete;
-
+  const handleDeleteTransaction = async (id: string) => {
     try {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, `users/${user.uid}/transaksi/${txId}`));
-
-      if (rollback && txSnapshot.stockSnapshot) {
-        txSnapshot.stockSnapshot.forEach(snap => {
-          const ingExists = ingredients.some(ing => ing.id === snap.ingredientId);
-          if (ingExists) {
-            batch.update(doc(db, `users/${user.uid}/stok/${snap.ingredientId}`), {
-              currentStock: snap.stockBefore
-            });
-          }
-        });
-      }
-
-      // Reverse dompet balance hanya jika sumber_dana valid dan dompet terdaftar
-      const sumberDana = (txSnapshot as any).sumber_dana;
-      if (sumberDana && sumberDana !== 'saldo_utama') {
-        const dompetExists = dompets.some(d => d.id === sumberDana);
-        if (dompetExists) {
-          if ((txSnapshot as any).kategori_arus_kas === 'mutasi_ke_dompet') {
-            batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
-              saldo_terkumpul: increment(-txSnapshot.nominal)
-            });
-          } else if ((txSnapshot as any).kategori_arus_kas === 'pengeluaran_dompet') {
-            batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
-              saldo_terkumpul: increment(txSnapshot.nominal)
-            });
-          }
-        }
-      }
-
-      await batch.commit();
-
-      setTransactions(prev => prev.filter(t => t.id !== txId));
-      setSelectedTxIds(prev => prev.filter(id => id !== txId));
-
-      if (rollback && txSnapshot.stockSnapshot) {
-        setIngredients(prev => prev.map(ing => {
-          const snap = txSnapshot.stockSnapshot?.find(s => s.ingredientId === ing.id);
-          if (snap) return { ...ing, currentStock: snap.stockBefore };
-          return ing;
-        }));
-        toast.success('Transaksi & Stok dipulihkan ✓');
-      } else {
-        toast.success('Transaksi dihapus ✓');
-      }
-    } catch (error) {
-      console.error('[confirmDelete] Error:', error);
-      toast.error('Gagal menghapus transaksi. Data tidak berubah.');
-    } finally {
-      setIsDeleting(false);
-      setTxToDelete(null);
+      await deleteDoc(doc(db, `users/${user.uid}/transaksi/${id}`));
+      setTransactions(transactions.filter(t => t.id !== id));
+      toast.success('Transaksi berhasil dihapus');
+    } catch (err) {
+      console.error(err);
+      toast.error('Gagal menghapus transaksi');
     }
   };
 
-  const toggleSelectTx = (id: string) => {
-    setSelectedTxIds(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedTxIds.length === filteredTransactions.length) {
-      setSelectedTxIds([]);
-    } else {
-      setSelectedTxIds(filteredTransactions.map(t => t.id));
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedTxIds.length === 0 || !user) return;
-
-    const selectedTxs = transactions.filter(t => selectedTxIds.includes(t.id));
-    const hasSnapshot = selectedTxs.some(t => t.stockSnapshot && t.stockSnapshot.length > 0);
-
-    if (hasSnapshot) {
-      setBulkToDelete(selectedTxIds);
-      setIsBulkDeleteConfirmOpen(true);
-    } else {
-      const idsToDelete = [...selectedTxIds];
-      const toastId = toast.loading(`Menghapus ${idsToDelete.length} transaksi...`);
-      try {
-        const batch = writeBatch(db);
-        idsToDelete.forEach(id => {
-          batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
-        });
-
-        // Reverse dompet balances untuk setiap transaksi dompet dalam batch
-        selectedTxs.forEach(tx => {
-          if (tx.sumber_dana && tx.sumber_dana !== 'saldo_utama') {
-            const dompetExists = dompets.some(d => d.id === tx.sumber_dana);
-            if (dompetExists) {
-              if (tx.kategori_arus_kas === 'mutasi_ke_dompet') {
-                batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-                  saldo_terkumpul: increment(-tx.nominal)
-                });
-              } else if (tx.kategori_arus_kas === 'pengeluaran_dompet') {
-                batch.update(doc(db, `users/${user.uid}/dompet/${tx.sumber_dana}`), {
-                  saldo_terkumpul: increment(tx.nominal)
-                });
-              }
-            }
-          }
-        });
-
-        await batch.commit();
-        setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
-        setSelectedTxIds([]);
-        toast.success(`${idsToDelete.length} transaksi berhasil dihapus`, { id: toastId });
-      } catch (error) {
-        toast.dismiss(toastId);
-        console.error('[handleBulkDelete] Error:', error);
-        toast.error('Gagal menghapus transaksi. Data tidak berubah.');
-      }
-    }
-  };
-
-  const confirmBulkDelete = async (rollback: boolean) => {
-    if (!bulkToDelete || !user) return;
-    setIsDeleting(true);
-    const idsToDelete = [...bulkToDelete];
-    const toastId = toast.loading(rollback ? 'Mengembalikan stok massal...' : 'Menghapus transaksi massal...');
-
-    try {
-      const selectedTxs = transactions.filter(t => idsToDelete.includes(t.id));
-      const batch = writeBatch(db);
-
-      idsToDelete.forEach(id => {
-        batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
-      });
-
-      if (rollback) {
-        ingredients.forEach(ing => {
-          const totalDelta = selectedTxs.reduce((acc, t) => {
-            const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
-            return acc + (snapshot?.delta || 0);
-          }, 0);
-          if (totalDelta !== 0) {
-            batch.update(doc(db, `users/${user.uid}/stok/${ing.id}`), {
-              currentStock: increment(-totalDelta)
-            });
-          }
-        });
-      }
-
-      // Reverse dompet balances untuk setiap transaksi dompet dalam batch
-      selectedTxs.forEach(tx => {
-        const sumberDana = (tx as any).sumber_dana;
-        if (sumberDana && sumberDana !== 'saldo_utama') {
-          const dompetExists = dompets.some(d => d.id === sumberDana);
-          if (dompetExists) {
-            if ((tx as any).kategori_arus_kas === 'mutasi_ke_dompet') {
-              batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
-                saldo_terkumpul: increment(-tx.nominal)
-              });
-            } else if ((tx as any).kategori_arus_kas === 'pengeluaran_dompet') {
-              batch.update(doc(db, `users/${user.uid}/dompet/${sumberDana}`), {
-                saldo_terkumpul: increment(tx.nominal)
-              });
-            }
-          }
-        }
-      });
-
-      await batch.commit();
-
-      setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
-      setSelectedTxIds([]);
-
-      if (rollback) {
-        setIngredients(prev => prev.map(ing => {
-          const totalDelta = selectedTxs.reduce((acc, t) => {
-            const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
-            return acc + (snapshot?.delta || 0);
-          }, 0);
-          if (totalDelta !== 0) return { ...ing, currentStock: ing.currentStock - totalDelta };
-          return ing;
-        }));
-        toast.success(`${idsToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓`, { id: toastId });
-      } else {
-        toast.success(`${idsToDelete.length} transaksi dihapus ✓`, { id: toastId });
-      }
-    } catch (error) {
-      console.error('[confirmBulkDelete] Error:', error);
-      toast.error('Gagal menghapus transaksi massal. Data tidak berubah.', { id: toastId });
-    } finally {
-      setIsBulkDeleteConfirmOpen(false);
-      setBulkToDelete(null);
-      setIsDeleting(false);
-    }
+  const handleCommitAuditTransactions = async (txs: any[]) => {
+    const batch = writeBatch(db);
+    txs.forEach(t => {
+      const ref = doc(db, `users/${user.uid}/transaksi/${t.id}`);
+      batch.set(ref, sanitizeData(t));
+    });
+    await batch.commit();
+    setTransactions([...txs, ...transactions]);
+    toast.success(`${txs.length} transaksi audit berhasil disetujui & disimpan!`);
   };
 
   return (
     <div className="space-y-6">
+      {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black text-[#1A1A2E]">Transaksi</h2>
-          <p className="text-gray-500 font-medium">Catat pemasukan & pengeluaran.</p>
+          <h2 className="text-3xl font-black text-[#1A1A2E]">Riwayat Transaksi</h2>
+          <p className="text-gray-500 font-medium">Catatan pemasukan &amp; pengeluaran toko ({rangeLabel})</p>
         </div>
-
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap gap-2">
           <Button
-            type="button"
+            onClick={() => setIsQuickEntryOpen(true)}
             variant="outline"
-            onClick={() => setIsShopeeAuditOpen(true)}
-            className="rounded-2xl border border-emerald-200 shadow-sm bg-white font-bold gap-2 text-emerald-800 hover:bg-emerald-50 hover:border-emerald-300 transition-all active:scale-95"
+            className="rounded-2xl border-amber-200 text-amber-700 hover:bg-amber-50 font-bold gap-2"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-            Import Excel (XLS)
+            <Zap className="w-4 h-4 text-amber-500" /> Input Cepat (AI)
           </Button>
-
-          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                variant="outline"
-                className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-700 hover:text-primary"
-              >
-                <Calendar className="w-4 h-4 text-primary" />
-                {rangeLabel}
-              </Button>
-            }
-          />
-          <PopoverContent align="end" className="w-[320px] p-4">
-            <div className="space-y-3">
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pilihan Cepat</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Tahun Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => handlePreset(p)}
-                      className={cn(
-                        'px-3 py-2 rounded-xl text-xs font-bold transition-colors',
-                        preset === p
-                          ? 'bg-primary text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      )}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Custom</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-500">Mulai</label>
-                    <Input
-                      type="date"
-                      value={startDate}
-                      max={endDate || undefined}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-500">Akhir</label>
-                    <Input
-                      type="date"
-                      value={endDate}
-                      min={startDate || undefined}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-              <Button
-                onClick={() => setPickerOpen(false)}
-                className="w-full rounded-xl font-bold"
-              >
-                Terapkan
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+          <Button
+            onClick={() => setIsShopeeAuditModalOpen(true)}
+            variant="outline"
+            className="rounded-2xl border-orange-200 text-orange-600 hover:bg-orange-50 font-bold gap-2"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-orange-500" /> Impor Excel / Audit
+          </Button>
+          <Button
+            onClick={() => setIsAddDialogOpen(true)}
+            className="orange-gradient text-white font-bold rounded-2xl shadow-sm gap-2"
+          >
+            <Plus className="w-4 h-4" /> Tambah Transaksi
+          </Button>
         </div>
       </div>
 
-      {/* Wallet Balance Summary */}
-      <div className="wallet-gradient rounded-[2rem] md:rounded-[2.5rem] p-5 md:p-8 text-white shadow-2xl shadow-red-200 border-b-4 border-red-800/10 flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-white/20 transition-colors" />
-        <div className="flex items-center gap-4 w-full md:w-auto relative z-10">
-          <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl glass-card flex items-center justify-center shrink-0">
-            <CreditCard className="w-6 h-6 md:w-7 md:h-7" />
+      {/* Filter Controls */}
+      <Card className="border-none shadow-sm rounded-3xl bg-white p-4">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="relative w-full md:w-72">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              placeholder="Cari keterangan / kategori..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-9 rounded-2xl bg-gray-50 border-none text-xs"
+            />
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo Kas · {rangeLabel}</p>
-            <h3 className="text-2xl md:text-4xl font-black truncate">{formatCurrency(saldoKas, true)}</h3>
+
+          <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1">
+            {(['all', 'Pemasukan', 'Pengeluaran'] as const).map(j => (
+              <button
+                key={j}
+                onClick={() => setFilterJenis(j)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors shrink-0 ${
+                  filterJenis === j ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {j === 'all' ? 'Semua Tipe' : j}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="flex gap-3 md:gap-4 w-full md:w-auto">
-          <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
-            <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pemasukan</p>
-            <p className="text-base md:text-xl font-black text-green-300">{formatCurrency(totalIncome, true)}</p>
-          </div>
-          <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
-            <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pengeluaran</p>
-            <p className="text-base md:text-xl font-black text-red-300">{formatCurrency(totalExpense, true)}</p>
-          </div>
-        </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Transaction Form */}
-        <Card ref={formRef} className={cn("lg:col-span-1 border-none shadow-sm rounded-3xl bg-white transition-all", editingTxId && "ring-2 ring-primary/40")}>
-          <CardHeader className="flex flex-row items-start justify-between gap-2">
-            <div>
-              <CardTitle className="text-lg font-bold flex items-center gap-2">
-                {editingTxId ? (
-                  <>
-                    <Edit2 className="w-4 h-4 text-primary" />
-                    Edit Transaksi
-                  </>
-                ) : 'Catat Transaksi'}
-              </CardTitle>
-              <CardDescription>
-                {editingTxId ? 'Ubah data transaksi yang sudah ada' : 'Input data keuangan baru'}
-              </CardDescription>
+      {/* Transactions List Table */}
+      <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
+        <CardContent className="p-0">
+          {filteredTransactions.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 space-y-2">
+              <History className="w-10 h-10 mx-auto stroke-1" />
+              <p className="font-bold text-sm">Tidak ada transaksi ditemukan</p>
+              <p className="text-xs">Coba sesuaikan filter pencarian atau periode tanggal</p>
             </div>
-            {editingTxId ? (
-              <Button
-                onClick={cancelEditTx}
-                size="sm"
-                variant="outline"
-                className="rounded-2xl gap-1.5 border-gray-200 text-gray-500 font-bold"
-              >
-                <X className="w-3.5 h-3.5" />
-                Batal
-              </Button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  onClick={() => setIsShopeeAuditOpen(true)}
-                  size="sm"
-                  variant="outline"
-                  className="rounded-2xl gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold shadow-sm"
-                  title="Import Excel (XLS) & Shopee Audit Engine"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  Import Excel (XLS)
-                </Button>
-                <Button
-                  onClick={() => setQuickEntryOpen(true)}
-                  size="sm"
-                  className="rounded-2xl gap-1.5 bg-gradient-to-br from-orange-400 to-red-500 text-white border-none font-bold shadow-md hover:shadow-lg active:scale-95 transition-all"
-                >
-                  <Zap className="w-4 h-4" />
-                  Cepat
-                </Button>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-bold text-gray-400 uppercase">Tanggal</Label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="range-toggle"
-                    checked={isRange}
-                    onChange={(e) => {
-                      setIsRange(e.target.checked);
-                      if (e.target.checked && !newTx.tanggal_akhir) {
-                        setNewTx(prev => ({ ...prev, tanggal_akhir: prev.tanggal }));
-                      }
-                    }}
-                    className="w-3 h-3 rounded border-gray-200 text-primary focus:ring-primary"
-                  />
-                  <label htmlFor="range-toggle" className="text-[10px] font-bold text-gray-400 uppercase cursor-pointer">Rentang</label>
-                </div>
-              </div>
-              <div className={cn("grid gap-2", isRange ? "grid-cols-2" : "grid-cols-1")}>
-                <Input 
-                  ref={dateInputRef}
-                  type="date" 
-                  value={newTx.tanggal}
-                  onChange={(e) => setNewTx({...newTx, tanggal: e.target.value})}
-                  className="rounded-xl border-gray-100"
-                />
-                {isRange && (
-                  <Input 
-                    type="date" 
-                    value={newTx.tanggal_akhir || newTx.tanggal}
-                    onChange={(e) => setNewTx({...newTx, tanggal_akhir: e.target.value})}
-                    className="rounded-xl border-gray-100"
-                  />
-                )}
-              </div>
-            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {filteredTransactions.map(tx => {
+                const isIncome = (tx.jenis || '').toLowerCase() === 'pemasukan';
+                const nominal = getTxNominal(tx);
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-gray-400 uppercase">Kategori</Label>
-                <Select 
-                  value={newTx.kategori} 
-                  onValueChange={handleCategoryChange}
-                >
-                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {dynamicCategories.map(cat => (
-                      <SelectItem key={cat.name} value={cat.name}>{cat.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-gray-400 uppercase">Jenis</Label>
-                <Select 
-                  value={newTx.jenis} 
-                  onValueChange={(val: any) => setNewTx({...newTx, jenis: val})}
-                  disabled={dynamicCategories.find(c => c.name === newTx.kategori)?.fixed}
-                >
-                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="Pemasukan">Pemasukan</SelectItem>
-                    <SelectItem value="Pengeluaran">Pengeluaran</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Sumber Dana — ketika jenis Pengeluaran bukan dari Tabungan/Penjualan */}
-            {newTx.jenis === 'Pengeluaran' &&
-              newTx.kategori !== 'Penjualan' &&
-              newTx.kategori !== 'Tabungan' &&
-              dompets.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
-                  <Wallet className="w-3 h-3" />
-                  Sumber Dana
-                </Label>
-                <Select
-                  value={selectedSumberDana}
-                  onValueChange={(v) => setSelectedSumberDana(v)}
-                >
-                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="saldo_utama">💰 Saldo Utama</SelectItem>
-                    {dompets.map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        🏦 {d.nama} ({formatCurrency(d.saldo_terkumpul, true)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedSumberDana !== 'saldo_utama' && (
-                  <p className="text-[10px] font-bold text-blue-600">
-                    Pengeluaran dari dompet tidak memengaruhi laporan P&L.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Dompet target — ketika kategori Tabungan */}
-            {newTx.kategori === 'Tabungan' && dompets.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
-                  <PiggyBank className="w-3 h-3" />
-                  Simpan ke Dompet
-                </Label>
-                <Select
-                  value={selectedDompetId}
-                  onValueChange={(v) => setSelectedDompetId(v)}
-                >
-                  <SelectTrigger className="rounded-xl border-gray-100 font-bold">
-                    <SelectValue placeholder="Pilih dompet target" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="">— Tabungan umum (tanpa dompet) —</SelectItem>
-                    {dompets.map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.nama} · saldo {formatCurrency(d.saldo_terkumpul, true)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedDompetId && (
-                  <p className="text-[10px] font-bold text-green-600">
-                    ✓ Dana masuk ke dompet ini · tidak masuk hitungan P&L.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {newTx.kategori === 'Penjualan' && (
-              <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold text-gray-400 uppercase">Langkah 1: Pilih Produk</Label>
-                  <div className="relative">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsShopeeAuditOpen(true)}
-                      className="text-[10px] h-7 font-black text-orange-600 hover:bg-orange-50 gap-1.5 px-2.5 rounded-lg border border-orange-200"
-                    >
-                      <ShoppingBag className="w-3 h-3 text-orange-600" />
-                      Import Excel (XLS)
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {products.map(p => (
-                    <Button
-                      key={p.id}
-                      variant={selectedProductIds.includes(p.id) ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => toggleProduct(p.id)}
-                      className={cn(
-                        "rounded-xl font-bold transition-all",
-                        selectedProductIds.includes(p.id) ? "bg-primary text-white border-none" : "border-gray-100 text-gray-500"
-                      )}
-                    >
-                      {p.nama}
-                    </Button>
-                  ))}
-                </div>
-
-                {selectedProductIds.length > 0 && (
-                  <div className="space-y-4 mt-4">
-                    <Label className="text-xs font-bold text-gray-400 uppercase">Langkah 2: Isi Qty per Varian</Label>
-                    {selectedProductIds.map(pid => {
-                      const product = products.find(p => p.id === pid);
-                      const detail = newTx.penjualan_detail?.find(pd => pd.produk_id === pid);
-                      if (!product) return null;
-                      return (
-                        <div key={pid} className="space-y-2 p-3 bg-gray-50 rounded-2xl">
-                          <p className="text-xs font-black text-[#1A1A2E] flex items-center gap-2">
-                            <Package className="w-3 h-3 text-primary" />
-                            {product.nama}
-                          </p>
-                          <div className="space-y-2">
-                            {product.varian.map(v => (
-                              <div key={v.id} className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-gray-500">{v.nama}</span>
-                                <div className="flex items-center gap-2">
-                                  <Input 
-                                    type="number" 
-                                    placeholder="0"
-                                    value={detail?.varian.find(vv => vv.varian_id === v.id)?.qty || ''}
-                                    onChange={(e) => handleVariantQtyChange(pid, v.id, parseInt(e.target.value) || 0)}
-                                    className="w-20 h-8 rounded-lg border-gray-200 text-right font-bold text-xs"
-                                  />
-                                  <span className="text-[10px] font-bold text-gray-400">pcs</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {settings?.kategori_hpp.includes(newTx.kategori || '') && (
-              <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold text-gray-400 uppercase">Pilih Komponen / Material</Label>
-                  <Popover open={isMaterialPopoverOpen} onOpenChange={setIsMaterialPopoverOpen}>
-                    <PopoverTrigger 
-                      render={
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={isMaterialPopoverOpen}
-                          className="w-full justify-between rounded-xl border-gray-100 font-bold h-10 px-3 overflow-hidden"
-                        />
-                      }
-                    >
-                      {selectedMaterialId
-                        ? ingredients.find((i) => i.id === selectedMaterialId)?.name
-                        : "Cari bahan..."}
-                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-xl shadow-2xl border-none z-50" align="start" sideOffset={5}>
-                      <Command className="rounded-xl">
-                        <CommandInput placeholder="Ketik nama bahan..." className="h-9" />
-                        <CommandList>
-                          <CommandEmpty>Bahan tidak ditemukan.</CommandEmpty>
-                          <CommandGroup>
-                            {ingredients
-                              .filter(i => {
-                                // Dynamic filtering based on category
-                                const txCat = newTx.kategori || '';
-                                const ingCat = i.category || '';
-                                return ingCat.toLowerCase().trim() === txCat.toLowerCase().trim();
-                              })
-                              .map((i) => (
-                                <CommandItem
-                                  key={i.id}
-                                  value={i.name}
-                                  onSelect={() => {
-                                    setSelectedMaterialId(i.id);
-                                    // Auto-fill logic
-                                    setNewTx(prev => ({
-                                      ...prev,
-                                      keterangan: `Beli ${i.name}`,
-                                      nominal: (prev.qty_beli || 1) * i.price,
-                                      qty_beli: prev.qty_beli || 1
-                                    }));
-                                    setIsMaterialPopoverOpen(false);
-                                  }}
-                                  className="font-medium"
-                                >
-                                  {i.name}
-                                  <Badge variant="outline" className="ml-2 text-[8px] border-none bg-brand-50 text-primary">
-                                    {i.unit}
-                                  </Badge>
-                                </CommandItem>
-                              ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold text-gray-400 uppercase">Jumlah Beli</Label>
-                  <div className="flex items-center gap-2">
-                    <Input 
-                      type="number" 
-                      placeholder="0" 
-                      value={newTx.qty_beli || ''}
-                      onChange={(e) => {
-                        const qty = Number(e.target.value);
-                        const material = ingredients.find(m => m.id === selectedMaterialId);
-                        setNewTx(prev => ({
-                          ...prev,
-                          qty_beli: qty,
-                          nominal: material ? qty * material.price : prev.nominal
-                        }));
-                      }}
-                      className="rounded-xl border-gray-100"
-                    />
-                    <span className="text-xs font-bold text-gray-400">
-                      {ingredients.find(i => i.id === selectedMaterialId)?.unit || ''}
-                    </span>
-                  </div>
-                  {selectedMaterialId && (
-                    <p className="text-[10px] font-bold text-gray-400 mt-1">
-                      Konversi: {formatSmartUnit(newTx.qty_beli || 0, ingredients.find(i => i.id === selectedMaterialId)?.unit || '')}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {newTx.kategori === 'Saldo sisa' && (
-              <div className="space-y-2 pt-2 border-t border-dashed border-gray-100">
-                <Label className="text-xs font-bold text-gray-400 uppercase">Qty (Opsional)</Label>
-                <Input 
-                  type="number" 
-                  placeholder="0" 
-                  value={newTx.qty_beli || ''}
-                  onChange={(e) => setNewTx({...newTx, qty_beli: Number(e.target.value)})}
-                  className="rounded-xl border-gray-100"
-                />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-gray-400 uppercase">Keterangan</Label>
-              <Input 
-                placeholder="Contoh: Penjualan 50 pcs" 
-                value={newTx.keterangan}
-                onChange={(e) => setNewTx({...newTx, keterangan: e.target.value})}
-                className="rounded-xl border-gray-100"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-gray-400 uppercase">Nominal (Rp)</Label>
-              <Input 
-                type="number" 
-                placeholder="0" 
-                value={newTx.nominal || ''}
-                onChange={(e) => setNewTx({...newTx, nominal: Number(e.target.value)})}
-                className="rounded-xl border-gray-100 font-black text-lg"
-              />
-              <p className="text-[10px] text-gray-400 italic">
-                {newTx.kategori === 'Penjualan' || settings?.kategori_hpp.includes(newTx.kategori || '')
-                  ? '*Nominal terhitung otomatis, namun tetap bisa Anda ubah manual' 
-                  : '*Masukkan nominal transaksi'}
-              </p>
-            </div>
-
-            <Button 
-              onClick={handleAddTransaction}
-              disabled={isSaving}
-              className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-brand-200 mt-4 active:scale-95 transition-all hover:shadow-xl"
-            >
-              {isSaving
-                ? (editingTxId ? 'Menyimpan...' : 'Menyimpan...')
-                : editingTxId ? 'Simpan Perubahan' : 'Simpan Transaksi'}
-            </Button>
-            {editingTxId && (
-              <Button
-                variant="ghost"
-                onClick={cancelEditTx}
-                className="w-full text-gray-400 font-bold rounded-2xl h-10"
-              >
-                Batal Edit
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Transaction History */}
-        <Card className="lg:col-span-2 border-none shadow-sm rounded-3xl bg-white">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <div className="flex items-center gap-3">
-              <input 
-                type="checkbox" 
-                className="w-5 h-5 rounded-lg border-gray-200 text-primary focus:ring-primary"
-                checked={filteredTransactions.length > 0 && selectedTxIds.length === filteredTransactions.length}
-                onChange={toggleSelectAll}
-              />
-              <div>
-                <CardTitle className="text-lg font-bold">Riwayat Transaksi</CardTitle>
-                <CardDescription>Daftar aktivitas keuangan</CardDescription>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {selectedTxIds.length > 0 && (
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  onClick={handleBulkDelete}
-                  className="rounded-xl font-bold gap-2 animate-in fade-in slide-in-from-right-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Hapus ({selectedTxIds.length})
-                </Button>
-              )}
-              <Button variant="outline" size="icon" className="rounded-xl border-gray-100">
-                <Filter className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input 
-                placeholder="Cari transaksi..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 rounded-xl border-gray-100"
-              />
-            </div>
-
-            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
-              {filteredTransactions.map((t) => (
-                <div 
-                  key={t.id} 
-                  className={cn(
-                    "group flex flex-col p-4 rounded-2xl transition-all border-2",
-                    selectedTxIds.includes(t.id) 
-                      ? "bg-brand-50 border-brand-200 shadow-sm" 
-                      : "bg-gray-50 border-transparent hover:bg-brand-50/50"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="pt-1">
-                        <input 
-                          type="checkbox" 
-                          className="w-5 h-5 rounded-lg border-gray-200 text-primary focus:ring-primary cursor-pointer"
-                          checked={selectedTxIds.includes(t.id)}
-                          onChange={() => toggleSelectTx(t.id)}
-                        />
+                return (
+                  <div key={tx.id} className="p-4 sm:p-5 flex items-center justify-between hover:bg-gray-50/80 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-3 rounded-2xl ${isIncome ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                        {isIncome ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                       </div>
-                      <div className={cn(
-                        "p-2.5 rounded-2xl shrink-0 transition-transform group-hover:scale-110 duration-300",
-                        t.jenis === 'Pemasukan' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-500"
-                      )}>
-                        {t.jenis === 'Pemasukan' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold text-[#1A1A2E] text-sm md:text-base leading-tight mb-1">{t.keterangan}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="text-[9px] font-black border-none bg-white text-gray-400 uppercase px-2 py-0.5">
-                            {t.kategori}
+                      <div>
+                        <p className="font-black text-sm text-[#1A1A2E]">{tx.keterangan || tx.kategori}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 font-medium mt-0.5">
+                          <span>{tx.tanggal}</span>
+                          <span>•</span>
+                          <Badge variant="outline" className="text-[10px] rounded-md font-bold border-gray-200">
+                            {tx.kategori}
                           </Badge>
-                          <span className="text-[10px] text-gray-400 font-bold flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {t.tanggal_akhir ? `${t.tanggal} - ${t.tanggal_akhir}` : t.tanggal}
-                          </span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end shrink-0">
-                      <p className={cn(
-                        "font-black text-base md:text-lg leading-none",
-                        t.jenis === 'Pemasukan' ? "text-green-600" : "text-red-500"
-                      )}>
-                        {t.jenis === 'Pemasukan' ? '+' : '-'} Rp{formatCompactNumber(t.nominal)}
-                      </p>
-                      {t.qty_total > 0 && <p className="text-[10px] font-bold text-gray-400 mt-1">{t.qty_total} pcs terjual</p>}
-                      {t.qty_beli > 0 && (
-                        <p className="text-[10px] font-bold text-gray-400 mt-1">
-                          Ref: {(() => {
-                            const snapshot = t.stockSnapshot?.[0];
-                            // Priority: stockSnapshot → saved materialId → name fallback
-                            const ingredient = snapshot
-                              ? ingredients.find(i => i.id === snapshot.ingredientId)
-                              : t.materialId
-                                ? ingredients.find(i => i.id === t.materialId)
-                                : ingredients.find(i => i.name === t.keterangan.replace('Beli ', ''));
-                            return formatSmartUnit(t.qty_beli, ingredient?.unit || 'pcs');
-                          })()}
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className={`font-black text-sm ${isIncome ? 'text-green-600' : 'text-red-500'}`}>
+                          {isIncome ? '+' : '-'}{formatCurrency(nominal, true)}
                         </p>
-                      )}
-                      <div className="mt-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => startEditTx(t)}
-                          className="h-8 w-8 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => deleteTransaction(t.id)}
-                          className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase">{tx.jenis}</span>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteTransaction(tx.id)}
+                        className="rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
-                  
-                  {t.penjualan_detail && t.penjualan_detail.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-dashed border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-                      {Array.from(new Map<string, PenjualanDetail>(t.penjualan_detail.map((pd: PenjualanDetail) => [pd.produk_id, pd])).values()).map((pd, pdIdx) => (
-                        <div key={`${pd.produk_id}-${pdIdx}`} className="text-[10px] text-gray-500 bg-white/50 p-1.5 rounded-lg border border-gray-100/50 flex items-start gap-1.5">
-                          <Package className="w-3 h-3 text-primary shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <span className="font-black text-[#1A1A2E]">{pd.produk_nama}: </span>
-                            <span className="font-medium">
-                              {pd.varian.filter(v => v.qty > 0).map(v => `${v.varian_nama} (${v.qty})`).join(', ')}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {filteredTransactions.length === 0 && (
-                <div className="text-center py-12 space-y-3">
-                  <CreditCard className="w-12 h-12 text-gray-200 mx-auto" />
-                  <p className="text-gray-500 font-bold">Tidak ada transaksi ditemukan</p>
-                  {transactions.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-xs text-gray-400">
-                        Ada {transactions.length} transaksi di luar periode ini.
-                      </p>
-                      <button
-                        onClick={() => applyPreset('Semua Waktu')}
-                        className="text-xs font-bold text-primary underline underline-offset-2 hover:text-primary/80"
-                      >
-                        Tampilkan semua waktu
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
-      </div>
-      
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-[2rem] max-h-[90dvh] overflow-y-auto">
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Manual Add Transaction Modal */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent className="max-w-md rounded-3xl p-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-black">Konfirmasi Penghapusan</DialogTitle>
-            <DialogDescription className="font-medium">
-              Apakah stok bahan baku ingin dikembalikan ke kondisi sebelum transaksi ini terjadi?
-            </DialogDescription>
+            <DialogTitle className="font-black text-lg">Catat Transaksi Manual</DialogTitle>
+            <DialogDescription className="text-xs">Masukkan rincian pemasukan atau pengeluaran toko</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => confirmDelete(false)}
-              disabled={isDeleting}
-              className="rounded-2xl font-bold h-12 flex-1"
+
+          <form onSubmit={handleCreateTransaction} className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => { setFormJenis('Pemasukan'); setFormKategori('Penjualan'); }}
+                className={`py-2 rounded-xl font-bold text-xs ${formJenis === 'Pemasukan' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                Pemasukan
+              </button>
+              <button
+                type="button"
+                onClick={() => { setFormJenis('Pengeluaran'); setFormKategori('Operasional'); }}
+                className={`py-2 rounded-xl font-bold text-xs ${formJenis === 'Pengeluaran' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                Pengeluaran
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-gray-700">Tanggal Transaksi</Label>
+              <Input
+                type="date"
+                value={formTanggal}
+                onChange={e => setFormTanggal(e.target.value)}
+                className="rounded-xl"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-gray-700">Kategori</Label>
+              <select
+                value={formKategori}
+                onChange={e => setFormKategori(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 p-2 text-xs font-bold"
+              >
+                {CATEGORIES_LIST.filter(c => formJenis === 'Pemasukan' ? c.type === 'Pemasukan' : c.type === 'Pengeluaran').map(c => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-gray-700">Nominal (Rp)</Label>
+              <Input
+                type="number"
+                value={formNominal}
+                onChange={e => setFormNominal(e.target.value)}
+                placeholder="0"
+                className="rounded-xl"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-gray-700">Keterangan / Catatan</Label>
+              <Input
+                value={formKeterangan}
+                onChange={e => setFormKeterangan(e.target.value)}
+                placeholder="Misal: Penjualan offline atau beli bahan baku"
+                className="rounded-xl"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full orange-gradient text-white font-bold rounded-xl h-11 text-xs shadow-md"
             >
-              Tidak, Biarkan Stok
+              {isSubmitting ? 'Menyimpan...' : 'Simpan Transaksi'}
             </Button>
-            <Button 
-              onClick={() => confirmDelete(true)}
-              disabled={isDeleting}
-              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1 shadow-lg shadow-brand-200"
-            >
-              {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Bulk Delete Confirmation Dialog */}
-      <Dialog open={isBulkDeleteConfirmOpen} onOpenChange={setIsBulkDeleteConfirmOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-[2rem] max-h-[90dvh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-black">Hapus Massal ({bulkToDelete?.length})</DialogTitle>
-            <DialogDescription className="font-medium">
-              Apakah stok bahan baku ingin dikembalikan ke kondisi sebelum transaksi-transaksi ini terjadi?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => confirmBulkDelete(false)}
-              disabled={isDeleting}
-              className="rounded-2xl font-bold h-12 flex-1"
-            >
-              Tidak, Biarkan Stok
-            </Button>
-            <Button 
-              onClick={() => confirmBulkDelete(true)}
-              disabled={isDeleting}
-              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1 shadow-lg shadow-brand-200"
-            >
-              {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
-            </Button>
-          </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
-      <QuickEntryDialog
-        open={quickEntryOpen}
-        onOpenChange={setQuickEntryOpen}
-        products={products}
-        ingredients={ingredients}
-        categories={dynamicCategories}
-        hppCategories={settings?.kategori_hpp || []}
-        dompets={dompets}
-        onSaveBatch={saveQuickBatch}
-        user={user}
-        setIngredients={setIngredients}
-      />
+      {/* Shopee Audit / Import Modal */}
+      {isShopeeAuditModalOpen && (
+        <ShopeeAuditModal
+          isOpen={isShopeeAuditModalOpen}
+          onClose={() => setIsShopeeAuditModalOpen(false)}
+          products={products}
+          ingredients={ingredients}
+          onCommitAudit={async () => {}}
+          onCommitTransactions={handleCommitAuditTransactions}
+        />
+      )}
 
-      <ShopeeAuditModal
-        isOpen={isShopeeAuditOpen}
-        onClose={() => setIsShopeeAuditOpen(false)}
-        products={products}
-        ingredients={ingredients}
-        onCommitAudit={handleCommitShopeeAudit}
-        onCommitTransactions={handleCommitTransactions}
-      />
+      {/* Quick Entry Dialog */}
+      {isQuickEntryOpen && (
+        <QuickEntryDialog
+          open={isQuickEntryOpen}
+          onOpenChange={setIsQuickEntryOpen}
+          products={products}
+          ingredients={ingredients}
+          categories={CATEGORIES_LIST as { name: string; type: 'Pemasukan' | 'Pengeluaran' }[]}
+          hppCategories={['Bahan baku', 'Bumbu', 'Packing', 'Overhead']}
+          dompets={dompets}
+          onSaveBatch={handleSaveBatchFromQuickEntry}
+          user={user}
+          setIngredients={setIngredients}
+          setProducts={setProducts}
+        />
+      )}
     </div>
   );
 }

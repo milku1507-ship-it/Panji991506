@@ -8,7 +8,8 @@ import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 import { User } from 'firebase/auth';
-import { doc, updateDoc, setDoc, db } from '../lib/firebase';
+import { doc, updateDoc, setDoc, db, writeBatch, sanitizeData } from '../lib/firebase';
+import { toBaseValue } from '../lib/unitUtils';
 import { toast } from 'sonner';
 
 export type QuickEntryFields = {
@@ -53,6 +54,7 @@ interface Props {
   onSaveBatch: (list: QuickEntryFields[]) => Promise<{ saved: number; failed: number }>;
   user?: User | null;
   setIngredients?: React.Dispatch<React.SetStateAction<Ingredient[]>>;
+  setProducts?: React.Dispatch<React.SetStateAction<Product[]>>;
 }
 
 // ─── Nominal Parser ───────────────────────────────────────────────────────────
@@ -952,7 +954,13 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     involvedProductIds.forEach(pid => {
       const prod = products.find(p => p.id === pid);
       prod?.biaya_lain?.forEach(fee => {
-        if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, fee);
+        const feeName = fee.nama || fee.name || 'Biaya Lain';
+        if (!feesByName.has(feeName)) {
+          feesByName.set(feeName, {
+            tipe: fee.tipe || 'nominal',
+            nilai: fee.nilai ?? fee.amount ?? 0
+          });
+        }
       });
     });
     let totalFees = 0;
@@ -1586,7 +1594,9 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     <button
                       type="button"
                       onClick={() => {
-                        setDraft(prev => ({ ...prev, saveToDatabase: true }));
+                        const updated = { ...draft, saveToDatabase: true };
+                        setDraft(updated);
+                        onUpdate(updated);
                         if (onUpdateIngredientPrice) {
                           onUpdateIngredientPrice(selectedMaterial.id, calcUnitPrice);
                         }
@@ -1610,7 +1620,9 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     <button
                       type="button"
                       onClick={() => {
-                        setDraft(prev => ({ ...prev, saveToDatabase: false }));
+                        const updated = { ...draft, saveToDatabase: false };
+                        setDraft(updated);
+                        onUpdate(updated);
                         toast.info("Set ke: Jangan update acuan Database");
                       }}
                       className={cn(
@@ -1706,7 +1718,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, dompets = [], onSaveBatch, user, setIngredients }: Props) {
+export default function QuickEntryDialog({ open, onOpenChange, products, ingredients, categories, hppCategories, dompets = [], onSaveBatch, user, setIngredients, setProducts }: Props) {
   const [input, setInput] = React.useState('');
   const [entries, setEntries] = React.useState<{ raw: string; parsed: QuickEntryFields }[]>([]);
   const [saving, setSaving] = React.useState(false);
@@ -1733,14 +1745,87 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
   }, [open]);
 
   const handleUpdateIngredientPrice = async (ingredientId: string, newPrice: number) => {
+    const targetIng = ingredients.find(i => i.id === ingredientId);
+    const targetNameNorm = targetIng?.name.toLowerCase().trim();
+
+    // 1. Local state update for ingredients
     if (setIngredients) {
-      setIngredients(prev => prev.map(ing => ing.id === ingredientId ? { ...ing, price: newPrice } : ing));
+      setIngredients(prev => prev.map(ing => {
+        if (ing.id === ingredientId || (targetNameNorm && ing.name.toLowerCase().trim() === targetNameNorm)) {
+          return { ...ing, price: newPrice };
+        }
+        return ing;
+      }));
     }
+
+    // 2. Local state update for HPP products (bahan prices in recipes)
+    if (setProducts && products.length > 0) {
+      setProducts(prevProducts => prevProducts.map(p => {
+        let updated = false;
+        const newVarian = p.varian.map(v => {
+          if (!v.bahan || v.bahan.length === 0) return v;
+          let vUpdated = false;
+          const newBahan = v.bahan.map(b => {
+            const matchesId = b.ingredientId === ingredientId;
+            const matchesName = targetNameNorm && b.nama && b.nama.toLowerCase().trim() === targetNameNorm;
+            if (matchesId || matchesName) {
+              vUpdated = true;
+              updated = true;
+              const unitPrice = newPrice;
+              const qtyInBase = toBaseValue(b.qty || 0, b.satuan || 'gram');
+              const newTotal = Math.round(qtyInBase * unitPrice);
+              return { ...b, harga: newPrice, total: newTotal };
+            }
+            return b;
+          });
+          return vUpdated ? { ...v, bahan: newBahan } : v;
+        });
+        return updated ? { ...p, varian: newVarian } : p;
+      }));
+    }
+
+    // 3. Firestore persistence (stok collection & hpp collection)
     if (user) {
       try {
-        const ingRef = doc(db, `users/${user.uid}/stok/${ingredientId}`);
-        await setDoc(ingRef, { price: newPrice }, { merge: true });
-        toast.success(`Harga acuan di database berhasil diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
+        const batch = writeBatch(db);
+        const sameNameIngredients = ingredients.filter(i =>
+          i.id === ingredientId || (targetNameNorm && i.name.toLowerCase().trim() === targetNameNorm)
+        );
+
+        sameNameIngredients.forEach(ing => {
+          const ingRef = doc(db, `users/${user.uid}/stok/${ing.id}`);
+          batch.set(ingRef, sanitizeData({ ...ing, price: newPrice }), { merge: true });
+        });
+
+        // Also update HPP recipes in Firestore so syncHppToStock won't overwrite the price back
+        products.forEach(p => {
+          let pChanged = false;
+          const newVarian = p.varian.map(v => {
+            if (!v.bahan || v.bahan.length === 0) return v;
+            let vChanged = false;
+            const newBahan = v.bahan.map(b => {
+              const matchesId = b.ingredientId === ingredientId;
+              const matchesName = targetNameNorm && b.nama && b.nama.toLowerCase().trim() === targetNameNorm;
+              if (matchesId || matchesName) {
+                vChanged = true;
+                pChanged = true;
+                const unitPrice = newPrice;
+                const qtyInBase = toBaseValue(b.qty || 0, b.satuan || 'gram');
+                const newTotal = Math.round(qtyInBase * unitPrice);
+                return { ...b, harga: newPrice, total: newTotal };
+              }
+              return b;
+            });
+            return vChanged ? { ...v, bahan: newBahan } : v;
+          });
+          if (pChanged) {
+            const pRef = doc(db, `users/${user.uid}/hpp/${p.id}`);
+            batch.set(pRef, sanitizeData({ ...p, varian: newVarian }), { merge: true });
+          }
+        });
+
+        await batch.commit();
+        toast.success(`Harga acuan di database & HPP berhasil diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
       } catch (err) {
         console.error("Gagal update harga ingredient:", err);
         toast.error("Gagal memperbarui harga di database");
