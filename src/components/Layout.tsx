@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet, Scan, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Calculator, Package, ReceiptText, PieChart, Menu, X, Trash2, ArrowLeft, History, Plus, Store, LogOut, TrendingUp, Wallet, Scan, Sparkles, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StoreSettings } from '../types';
@@ -40,6 +40,7 @@ const MENU_GROUPS = [
       { id: 'reports', label: 'Laporan Keuangan', icon: PieChart },
       { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
       { id: 'dompet', label: 'Dompet Tabungan', icon: Wallet },
+      { id: 'backup', label: 'Backup & Restore Data', icon: Database },
     ]
   },
   {

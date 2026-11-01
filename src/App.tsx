@@ -11,6 +11,7 @@ import CategoryManager from './components/CategoryManager';
 import DompetManager from './components/DompetManager';
 import Kasir from './components/Kasir';
 import StoreCatalog from './components/StoreCatalog';
+import BackupRestoreManager from './components/BackupRestoreManager';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
 import { Ingredient, Product, Transaction, StoreSettings, Dompet } from './types';
 import { Toaster } from '@/components/ui/sonner';
@@ -792,13 +793,29 @@ function AppContent() {
       case 'roas':
         return <ROASCalculator products={products} ingredients={ingredients} transactions={transactions} user={user} />;
       case 'store-settings':
-        return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} onManageCategories={() => handleTabChange('category-settings')} />;
+        return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} onManageCategories={() => handleTabChange('category-settings')} onManageBackup={() => handleTabChange('backup')} />;
       case 'category-settings':
         return <CategoryManager onBack={() => handleTabChange('store-settings')} />;
+      case 'backup':
+        return (
+          <BackupRestoreManager
+            user={user}
+            ingredients={ingredients}
+            setIngredients={setIngredients}
+            products={products}
+            setProducts={setProducts}
+            transactions={transactions}
+            setTransactions={setTransactions}
+            dompets={dompets}
+            setDompets={setDompets}
+            storeSettings={storeSettings}
+            setStoreSettings={updateStoreSettings}
+            onBack={() => handleTabChange('dashboard')}
+          />
+        );
       case 'products':
       case 'notifications':
       case 'receipt-settings':
-      case 'backup':
       case 'profile':
       case 'password':
         if (activeTab !== 'dashboard') {

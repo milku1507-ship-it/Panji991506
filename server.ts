@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { runAIParse } from './scripts/aiParseShared.js';
 import { runParseHpp } from './scripts/aiParseHppShared.js';
 import { GoogleGenAI } from '@google/genai';
@@ -27,15 +26,44 @@ async function startServer() {
   });
 
   // Proxy Firebase Auth handler BEFORE express.json
-  app.use(
-    createProxyMiddleware({
-      target: 'https://mila1507.firebaseapp.com',
-      changeOrigin: true,
-      secure: true,
-      xfwd: false,
-      pathFilter: ['/__/auth/**', '/__/firebase/**'],
-    })
-  );
+  app.use(['/__/auth', '/__/firebase'], async (req, res) => {
+    try {
+      const targetUrl = `https://mila1507.firebaseapp.com${req.originalUrl}`;
+      const headers: Record<string, string> = {};
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (key !== 'host' && key !== 'connection' && value !== undefined) {
+          headers[key] = Array.isArray(value) ? value.join(', ') : value;
+        }
+      }
+      headers['host'] = 'mila1507.firebaseapp.com';
+
+      const options: RequestInit = {
+        method: req.method,
+        headers,
+      };
+
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        options.body = Buffer.concat(chunks);
+      }
+
+      const response = await fetch(targetUrl, options);
+      res.status(response.status);
+      response.headers.forEach((val, key) => {
+        if (key !== 'transfer-encoding' && key !== 'content-encoding') {
+          res.setHeader(key, val);
+        }
+      });
+      const responseArrayBuffer = await response.arrayBuffer();
+      res.send(Buffer.from(responseArrayBuffer));
+    } catch (err) {
+      console.error('Firebase proxy error:', err);
+      res.status(502).send('Proxy Error');
+    }
+  });
 
   app.use(express.json({ limit: '2mb' }));
 

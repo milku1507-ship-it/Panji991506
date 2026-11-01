@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { StoreSettings } from '../types';
 import { toast } from 'sonner';
-import { Store, Upload, ArrowLeft, Settings2, Image } from 'lucide-react';
+import { Store, Upload, ArrowLeft, Settings2, Image, Database } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 
 import { auth } from '../lib/firebase';
@@ -16,9 +16,10 @@ interface StoreSettingsManagerProps {
   setSettings: (newSettings: StoreSettings) => Promise<void>;
   onBack: () => void;
   onManageCategories: () => void;
+  onManageBackup?: () => void;
 }
 
-export default function StoreSettingsManager({ settings, setSettings, onBack, onManageCategories }: StoreSettingsManagerProps) {
+export default function StoreSettingsManager({ settings, setSettings, onBack, onManageCategories, onManageBackup }: StoreSettingsManagerProps) {
   const user = auth.currentUser;
   const [localSettings, setLocalSettings] = React.useState<StoreSettings>(settings);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -232,20 +233,20 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
           </CardContent>
         </Card>
 
-        {/* ── KELOLA KATEGORI ── */}
+        {/* ── BACKUP & RESTORE DATA TOKO ── */}
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
-            <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-primary" />
-              Kustomisasi Kategori
+            <CardTitle className="text-xl font-black flex items-center gap-2 text-emerald-950">
+              <Database className="w-5 h-5 text-emerald-600" />
+              Backup &amp; Restore Data Toko
             </CardTitle>
-            <CardDescription>Atur kategori HPP, Produk, dan Satuan Unit</CardDescription>
+            <CardDescription>Simpan seluruh data ke HP/Laptop atau unggah ke akun baru</CardDescription>
           </CardHeader>
           <CardContent className="p-6">
-            <Button onClick={onManageCategories} variant="outline" className="w-full h-14 rounded-2xl font-bold border-brand-100 text-primary hover:bg-brand-50 flex items-center justify-between px-6">
+            <Button onClick={onManageBackup} variant="outline" className="w-full h-14 rounded-2xl font-bold border-emerald-200 text-emerald-800 hover:bg-emerald-50 flex items-center justify-between px-6">
               <div className="flex items-center gap-3">
-                <Settings2 className="w-5 h-5" />
-                <span>Kelola Kategori & Label</span>
+                <Database className="w-5 h-5 text-emerald-600" />
+                <span>Buka Pusat Backup &amp; Pemulihan Data</span>
               </div>
               <ArrowLeft className="w-5 h-5 rotate-180" />
             </Button>
