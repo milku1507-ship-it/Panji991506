@@ -196,7 +196,7 @@ export default function TransactionManager({
       </div>
 
       {/* Filter Controls */}
-      <Card className="border-none shadow-sm rounded-3xl bg-white p-4 space-y-3">
+      <Card className="border-none shadow-sm rounded-3xl bg-white p-4">
         <div className="flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="relative w-full md:w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -221,24 +221,6 @@ export default function TransactionManager({
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Date Filter Preset Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-gray-100 text-xs">
-          <span className="font-bold text-gray-400 shrink-0">Periode:</span>
-          {(['Bulan Ini', 'Bulan Lalu', 'Minggu Ini', 'Hari Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
-            <button
-              key={p}
-              onClick={() => applyPreset(p)}
-              className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition-colors ${
-                rangeLabel === p || (p === 'Semua Waktu' && rangeLabel === 'Semua Waktu')
-                  ? 'bg-orange-100 text-orange-700 border border-orange-200'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
         </div>
       </Card>
 
