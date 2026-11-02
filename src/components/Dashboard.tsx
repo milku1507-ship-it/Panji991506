@@ -2,6 +2,8 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
 import {
   TrendingUp,
   TrendingDown,
@@ -16,13 +18,16 @@ import {
   ArrowRight,
   Database,
   Store,
-  PiggyBank
+  PiggyBank,
+  Calendar,
+  Filter
 } from 'lucide-react';
 import { User } from '../lib/firebase';
 import { Ingredient, Transaction, StoreSettings, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 import { useDateFilter } from '../lib/dateFilterContext';
-import { filterByDateRange, computeStats } from '../lib/transactionStats';
+import { filterByDateRange, computeStats, RangePreset } from '../lib/transactionStats';
+import { cn } from '@/lib/utils';
 
 interface DashboardProps {
   user: User;
@@ -45,7 +50,8 @@ export default function Dashboard({
   onStartFresh,
   dompets = []
 }: DashboardProps) {
-  const { startDate, endDate, rangeLabel } = useDateFilter();
+  const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
+  const [pickerOpen, setPickerOpen] = React.useState(false);
 
   const filteredTransactions = React.useMemo(
     () => filterByDateRange(transactions, startDate, endDate),
@@ -68,11 +74,20 @@ export default function Dashboard({
   );
 
   const recentTransactions = React.useMemo(
-    () => transactions.slice(0, 5),
-    [transactions]
+    () => (filteredTransactions.length > 0 ? filteredTransactions : transactions).slice(0, 5),
+    [filteredTransactions, transactions]
   );
 
+  // Welcome card only for truly empty accounts (no transactions & no ingredients at all)
   const showWelcomeCard = transactions.length === 0 && ingredients.length === 0;
+
+  // Show a hint if data exists but current date filter yields 0
+  const showNoFilteredDataHint = transactions.length > 0 && filteredTransactions.length === 0;
+
+  const handlePresetSelect = (p: RangePreset) => {
+    applyPreset(p);
+    if (p !== 'Custom') setPickerOpen(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -85,9 +100,42 @@ export default function Dashboard({
               Halo, {user.displayName || 'Pengguna'} 👋
             </span>
             <h2 className="text-2xl sm:text-3xl font-black">{storeSettings.name || 'CeuMilan'} Dashboard</h2>
-            <p className="text-xs sm:text-sm text-amber-100 font-medium mt-1">
-              Ringkasan performa &amp; keuangan toko untuk periode <strong className="underline">{rangeLabel}</strong>
-            </p>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <p className="text-xs sm:text-sm text-amber-100 font-medium">
+                Ringkasan performa &amp; keuangan toko periode:
+              </p>
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <button className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full text-xs font-bold text-white transition-colors cursor-pointer border border-white/30">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {rangeLabel}
+                    </button>
+                  }
+                />
+                <PopoverContent align="start" className="w-[300px] p-4 z-50 bg-white">
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Pilih Periode</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(['Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Bulan Lalu', 'Tahun Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => handlePresetSelect(p)}
+                          className={cn(
+                            'px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors text-left',
+                            preset === p
+                              ? 'bg-orange-500 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          )}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -107,6 +155,44 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+
+      {/* Date Filter Quick Switcher Pills for Mobile/Tablet */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+        <span className="text-[11px] font-bold text-gray-400 shrink-0 flex items-center gap-1">
+          <Filter className="w-3.5 h-3.5" /> Filter:
+        </span>
+        {(['Bulan Ini', 'Bulan Lalu', 'Minggu Ini', 'Hari Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
+          <button
+            key={p}
+            onClick={() => applyPreset(p)}
+            className={cn(
+              'px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all',
+              preset === p
+                ? 'bg-orange-500 text-white shadow-xs'
+                : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-100'
+            )}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      {/* Notice if data exists but zero in active range filter */}
+      {showNoFilteredDataHint && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between text-amber-900 gap-3">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>Tidak ada transaksi pada periode <strong>{rangeLabel}</strong>. Anda memiliki total {transactions.length} transaksi di periode lain.</span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => applyPreset('Semua Waktu')}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shrink-0"
+          >
+            Tampilkan Semua Waktu
+          </Button>
+        </div>
+      )}
 
       {/* Welcome & Quick Seed Action for Clean Accounts */}
       {showWelcomeCard && (
