@@ -24,8 +24,6 @@ import {
   onSnapshot, 
   query, 
   where, 
-  orderBy,
-  limit,
   deleteDoc, 
   writeBatch, 
   getDocFromServer, 
@@ -128,7 +126,7 @@ googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
 // Force network connection
-export { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject };
+export { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject };
 export type { User };
 
 // Error Handling Types

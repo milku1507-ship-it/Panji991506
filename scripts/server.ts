@@ -1,8 +1,12 @@
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { runAIParse } from './aiParseShared';
 import { runParseHpp } from './aiParseHppShared';
 import { GoogleGenAI } from '@google/genai';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -98,7 +102,7 @@ app.post('/api/parse-hpp', async (req, res) => {
   }
 });
 
-const distDir = path.join(process.cwd(), 'dist');
+const distDir = path.resolve(__dirname, '..', 'dist');
 app.use(express.static(distDir));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'));
