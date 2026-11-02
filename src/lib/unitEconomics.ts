@@ -242,7 +242,7 @@ export function calculateProductEconomics(params: UnitEconomicsParams): UnitEcon
 
       feeBreakdown.push({
         nama: fee.nama,
-        tipe: fee.tipe,
+        tipe: fee.tipe === 'persen' ? 'persen' : 'nominal',
         nilai,
         amountPerUnit,
         amountPerOrder,

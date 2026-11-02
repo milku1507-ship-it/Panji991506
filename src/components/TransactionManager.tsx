@@ -207,6 +207,7 @@ export default function TransactionManager({ user, transactions, setTransactions
           qty_total: derivedQtyTotal,
           penjualan_detail: Array.isArray(fields.penjualan_detail) ? fields.penjualan_detail : [],
           materialId: fields.materialId || '',
+          saveToDatabase: fields.saveToDatabase,
         };
 
         // Penjualan: hitung subtotal, biaya, dan nominal bersih
@@ -314,13 +315,36 @@ export default function TransactionManager({ user, transactions, setTransactions
         if (material) {
           const delta = Number(txData.qty_beli || 0) || 0;
           const nominal = Number(txData.nominal || 0) || 0;
-          if (delta > 0 && nominal > 0) {
+          if (delta > 0 && nominal > 0 && txData.saveToDatabase !== false) {
             const calcPrice = Math.round(nominal / delta);
             if (calcPrice > 0 && Math.abs(calcPrice - (material.price || 0)) > 0.01) {
               try {
-                const ingRef = doc(db, `users/${user.uid}/stok/${material.id}`);
-                await setDoc(ingRef, { price: calcPrice }, { merge: true });
-                setIngredients(prev => prev.map(i => i.id === material.id ? { ...i, price: calcPrice } : i));
+                const targetName = material.name ? material.name.toLowerCase().trim() : '';
+                const matchingIngIds = new Set<string>();
+                matchingIngIds.add(material.id);
+                if (targetName) {
+                  ingredients.forEach(i => {
+                    if (i.name.toLowerCase().trim() === targetName) matchingIngIds.add(i.id);
+                  });
+                }
+                const batch = writeBatch(db);
+                matchingIngIds.forEach(id => {
+                  batch.set(doc(db, `users/${user.uid}/stok/${id}`), { price: calcPrice }, { merge: true });
+                });
+                await batch.commit();
+
+                setIngredients(prev => prev.map(i => (matchingIngIds.has(i.id) || (targetName && i.name.toLowerCase().trim() === targetName)) ? { ...i, price: calcPrice } : i));
+
+                matchingIngIds.forEach(id => {
+                  const ingInMap = ingredientIdMap.get(id);
+                  if (ingInMap) ingInMap.price = calcPrice;
+                });
+                if (targetName) {
+                  ingredientIdMap.forEach(ing => {
+                    if (ing.name.toLowerCase().trim() === targetName) ing.price = calcPrice;
+                  });
+                }
+
                 toast.info(`Harga acuan "${material.name}" di database otomatis diperbarui ke Rp ${formatCurrency(calcPrice, true)}/${material.unit}`);
               } catch (err) {
                 console.error("Gagal auto-update harga bahan baku di DB:", err);

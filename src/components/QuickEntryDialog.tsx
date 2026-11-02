@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Product, Ingredient, Dompet } from '../types';
 import { formatCurrency } from '../lib/formatUtils';
 import { User } from 'firebase/auth';
-import { doc, updateDoc, setDoc, db } from '../lib/firebase';
+import { doc, updateDoc, setDoc, writeBatch, db } from '../lib/firebase';
 import { toast } from 'sonner';
 
 export type QuickEntryFields = {
@@ -890,9 +890,17 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
 
   const selectedMaterial = ingredients.find(i => i.id === draft.materialId);
 
+  const updateDraft = (updater: (prev: QuickEntryFields) => QuickEntryFields) => {
+    setDraft(prev => {
+      const next = updater(prev);
+      onUpdate(next);
+      return next;
+    });
+  };
+
   // Auto-fill calculation handlers (only active for preset DB materials; disabled in custom mode)
   const handleQtyChange = (newQty: number) => {
-    setDraft(prev => {
+    updateDraft(prev => {
       let nextNominal = prev.nominal;
       // Auto-compute nominal ONLY for non-custom items when a valid DB material with price is selected
       if (!isCustomCategory && selectedMaterial && selectedMaterial.price > 0) {
@@ -903,7 +911,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   };
 
   const handleNominalChange = (newNominal: number) => {
-    setDraft(prev => {
+    updateDraft(prev => {
       let nextQty = prev.qty_beli;
       // Auto-compute qty ONLY for non-custom items when a valid DB material with price is selected
       if (!isCustomCategory && selectedMaterial && selectedMaterial.price > 0 && prev.qty_beli === 0) {
@@ -952,7 +960,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     involvedProductIds.forEach(pid => {
       const prod = products.find(p => p.id === pid);
       prod?.biaya_lain?.forEach(fee => {
-        if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, fee);
+        if (!feesByName.has(fee.nama)) feesByName.set(fee.nama, { tipe: fee.tipe || 'nominal', nilai: fee.nilai || 0 });
       });
     });
     let totalFees = 0;
@@ -963,7 +971,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
     const autoKet = detail.filter(pd => pd.varian.some(v => v.qty > 0)).map(pd => pd.produk_nama).join(', ')
       || detail.map(pd => pd.produk_nama).join(', ');
 
-    setDraft(prev => ({
+    updateDraft(prev => ({
       ...prev,
       nominal: subtotal - totalFees,
       qty_total: totalQty,
@@ -975,7 +983,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   const toggleDraftProduct = (productId: string) => {
     const product = products.find(p => p.id === productId);
     if (!product) return;
-    setDraft(prev => {
+    updateDraft(prev => {
       const isSelected = prev.penjualan_detail?.some(pd => pd.produk_id === productId);
       if (isSelected) {
         return { ...prev, penjualan_detail: prev.penjualan_detail?.filter(pd => pd.produk_id !== productId) };
@@ -990,7 +998,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   };
 
   const changeVariantQty = (productId: string, variantId: string, qty: number) => {
-    setDraft(prev => ({
+    updateDraft(prev => ({
       ...prev,
       penjualan_detail: prev.penjualan_detail?.map(pd =>
         pd.produk_id !== productId ? pd : {
@@ -1007,7 +1015,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
   const setJenis = (j: 'Pemasukan' | 'Pengeluaran') => {
     const validCats = categories.filter(c => c.type === j);
     const catStillValid = validCats.some(c => c.name === draft.kategori);
-    setDraft(prev => ({
+    updateDraft(prev => ({
       ...prev,
       jenis: j,
       kategori: catStillValid ? prev.kategori : (validCats[0]?.name || 'Lainnya'),
@@ -1308,7 +1316,10 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
             <input
               type="text"
               value={draft.kategori}
-              onChange={e => setDraft(prev => ({ ...prev, kategori: e.target.value }))}
+              onChange={e => {
+                const val = e.target.value;
+                updateDraft(prev => ({ ...prev, kategori: val }));
+              }}
               placeholder="Nama kategori custom..."
               className="w-full h-8 rounded-xl border border-orange-300 px-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-300 bg-orange-50/60"
             />
@@ -1320,10 +1331,11 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 if (e.target.value === '__custom__') {
                   setIsCustomCategory(true);
                 } else {
-                  setDraft(prev => ({
+                  const val = e.target.value;
+                  updateDraft(prev => ({
                     ...prev,
-                    kategori: e.target.value,
-                    penjualan_detail: e.target.value !== 'Penjualan' && !e.target.value.toLowerCase().includes('jual') ? [] : prev.penjualan_detail,
+                    kategori: val,
+                    penjualan_detail: val !== 'Penjualan' && !val.toLowerCase().includes('jual') ? [] : prev.penjualan_detail,
                     materialId: undefined,
                   }));
                 }
@@ -1417,7 +1429,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     <p className="text-[10px] text-gray-400">{selectedMaterial.unit} · Rp{selectedMaterial.price.toLocaleString('id-ID')}/{selectedMaterial.unit}</p>
                   </div>
                   <button
-                    onClick={() => setDraft(prev => ({ ...prev, materialId: undefined }))}
+                    onClick={() => updateDraft(prev => ({ ...prev, materialId: undefined }))}
                     className="text-[10px] text-gray-400 hover:text-red-500 font-bold px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
                   >
                     Ganti
@@ -1438,7 +1450,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                         <button
                           key={ing.id}
                           onClick={() => {
-                            setDraft(prev => ({
+                            updateDraft(prev => ({
                               ...prev,
                               materialId: ing.id,
                               keterangan: `Beli ${ing.name}`,
@@ -1486,7 +1498,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                       type="button"
                       onClick={() => {
                         const autoQty = Math.round((draft.nominal / selectedMaterial.price) * 100) / 100;
-                        setDraft(prev => ({ ...prev, qty_beli: autoQty }));
+                        updateDraft(prev => ({ ...prev, qty_beli: autoQty }));
                         toast.info(`Qty disesuaikan ke ${autoQty} ${selectedMaterial.unit}`);
                       }}
                       className="text-orange-600 hover:text-orange-800 font-bold underline cursor-pointer"
@@ -1506,7 +1518,10 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
               ref={keteranganRef}
               type="text"
               value={draft.keterangan}
-              onChange={e => setDraft(prev => ({ ...prev, keterangan: e.target.value }))}
+              onChange={e => {
+                const val = e.target.value;
+                updateDraft(prev => ({ ...prev, keterangan: val }));
+              }}
               placeholder="Keterangan transaksi..."
               className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
             />
@@ -1535,7 +1550,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     type="button"
                     onClick={() => {
                       const autoNominal = Math.round(draft.qty_beli * selectedMaterial.price);
-                      setDraft(prev => ({ ...prev, nominal: autoNominal }));
+                      updateDraft(prev => ({ ...prev, nominal: autoNominal }));
                       toast.info(`Nominal disesuaikan ke ${formatCurrency(autoNominal, true)}`);
                     }}
                     className="text-orange-600 hover:text-orange-800 font-bold underline cursor-pointer"
@@ -1586,7 +1601,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     <button
                       type="button"
                       onClick={() => {
-                        setDraft(prev => ({ ...prev, saveToDatabase: true }));
+                        updateDraft(prev => ({ ...prev, saveToDatabase: true }));
                         if (onUpdateIngredientPrice) {
                           onUpdateIngredientPrice(selectedMaterial.id, calcUnitPrice);
                         }
@@ -1610,7 +1625,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                     <button
                       type="button"
                       onClick={() => {
-                        setDraft(prev => ({ ...prev, saveToDatabase: false }));
+                        updateDraft(prev => ({ ...prev, saveToDatabase: false }));
                         toast.info("Set ke: Jangan update acuan Database");
                       }}
                       className={cn(
@@ -1648,7 +1663,7 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-amber-200/80">
                 <button
                   type="button"
-                  onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: true }))}
+                  onClick={() => updateDraft(prev => ({ ...prev, saveToDatabase: true }))}
                   className={cn(
                     "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
                     draft.saveToDatabase
@@ -1665,12 +1680,12 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDraft(prev => ({ ...prev, saveToDatabase: false }))}
+                  onClick={() => updateDraft(prev => ({ ...prev, saveToDatabase: false }))}
                   className={cn(
                     "px-2.5 py-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between shadow-xs",
                     !draft.saveToDatabase
                       ? "bg-slate-800 text-white border-slate-900 ring-2 ring-slate-400 font-bold"
-                      : "bg-white text-gray-700 border-amber-200 hover:bg-slate-100"
+                      : "bg-white text-gray-700 border-amber-200 hover:bg-amber-100"
                   )}
                 >
                   <div className="text-[11px] font-black flex items-center gap-1">
@@ -1692,7 +1707,10 @@ function EditCard({ fields, raw, products, ingredients, categories, hppCategorie
                 ref={qtyRef}
                 type="number" min="0"
                 value={draft.qty_total || ''}
-                onChange={e => setDraft(prev => ({ ...prev, qty_total: Number(e.target.value) || 0 }))}
+                onChange={e => {
+                  const q = Number(e.target.value) || 0;
+                  updateDraft(prev => ({ ...prev, qty_total: q }));
+                }}
                 placeholder="0"
                 className="w-full h-9 rounded-xl border border-gray-200 px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
               />
@@ -1733,13 +1751,30 @@ export default function QuickEntryDialog({ open, onOpenChange, products, ingredi
   }, [open]);
 
   const handleUpdateIngredientPrice = async (ingredientId: string, newPrice: number) => {
-    if (setIngredients) {
-      setIngredients(prev => prev.map(ing => ing.id === ingredientId ? { ...ing, price: newPrice } : ing));
+    const targetIng = ingredients.find(i => i.id === ingredientId);
+    const targetName = targetIng ? targetIng.name.toLowerCase().trim() : '';
+
+    const matchingIngIds = new Set<string>();
+    matchingIngIds.add(ingredientId);
+    if (targetName) {
+      ingredients.forEach(i => {
+        if (i.name.toLowerCase().trim() === targetName) {
+          matchingIngIds.add(i.id);
+        }
+      });
     }
+
+    if (setIngredients) {
+      setIngredients(prev => prev.map(ing => (matchingIngIds.has(ing.id) || (targetName && ing.name.toLowerCase().trim() === targetName)) ? { ...ing, price: newPrice } : ing));
+    }
+
     if (user) {
       try {
-        const ingRef = doc(db, `users/${user.uid}/stok/${ingredientId}`);
-        await setDoc(ingRef, { price: newPrice }, { merge: true });
+        const batch = writeBatch(db);
+        matchingIngIds.forEach(id => {
+          batch.set(doc(db, `users/${user.uid}/stok/${id}`), { price: newPrice }, { merge: true });
+        });
+        await batch.commit();
         toast.success(`Harga acuan di database berhasil diperbarui menjadi Rp ${formatCurrency(newPrice, true)}`);
       } catch (err) {
         console.error("Gagal update harga ingredient:", err);

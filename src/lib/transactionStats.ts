@@ -1,287 +1,191 @@
+import { Transaction } from '../types';
 import { getTxNominal } from './formatUtils';
 
-/**
- * SINGLE SOURCE OF TRUTH untuk semua perhitungan transaksi.
- *
- * Halaman Transaksi DAN halaman Laporan WAJIB pakai modul ini supaya
- * angka pemasukan, pengeluaran, dan saldo selalu identik 100%.
- *
- * Aturan:
- *  - Filter periode pakai parameter sama: startDate (ISO) + endDate (ISO)
- *  - Default periode: bulan berjalan (Bulan Ini)
- *  - Validasi transaksi: wajib punya tanggal valid + jenis Pemasukan/Pengeluaran + nominal > 0
- *  - Rumus: total_pemasukan = SUM(nominal jenis=Pemasukan dalam range)
- *           total_pengeluaran = SUM(nominal jenis=Pengeluaran dalam range)
- *           saldo = total_pemasukan - total_pengeluaran
- */
-
-export type RangePreset =
-  | 'Hari Ini'
-  | 'Minggu Ini'
-  | 'Bulan Ini'
-  | 'Tahun Ini'
-  | 'Semua Waktu'
-  | 'Custom';
+export type RangePreset = 'Hari Ini' | 'Minggu Ini' | 'Bulan Ini' | 'Bulan Lalu' | 'Tahun Ini' | 'Semua Waktu' | 'Custom';
 
 export const DEFAULT_PRESET: RangePreset = 'Bulan Ini';
 
 /**
- * Daftar preset untuk dropdown Dashboard (subset yang masuk akal di kartu ringkas).
- * Halaman Transaksi/Laporan boleh tampilkan subset berbeda; semuanya tetap valid
- * sebagai filter karena `getPresetRange` menangani semua varian.
+ * Robustly converts any date representation (string, Date, Firestore Timestamp, number)
+ * into a standard YYYY-MM-DD local date string.
  */
-export const DASHBOARD_PRESETS: RangePreset[] = ['Bulan Ini', 'Tahun Ini', 'Semua Waktu'];
-
-const pad2 = (n: number) => String(n).padStart(2, '0');
-
-export const toISO = (d: Date): string => {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-};
-
-/**
- * Parse tanggal transaksi dari berbagai format umum:
- *  - ISO: "2026-04-28"
- *  - DD/MM/YYYY: "28/04/2026"
- *  - Date object string apapun yg dimengerti new Date()
- */
-export const parseTxDate = (raw: any): Date | null => {
-  if (!raw) return null;
-  // Firestore Timestamp object — has .toDate() method
-  if (typeof raw === 'object' && typeof (raw as any).toDate === 'function') {
-    const d = (raw as any).toDate() as Date;
-    return isNaN(d.getTime()) ? null : d;
+export function toISODateString(raw: any): string {
+  if (!raw) return '';
+  if (typeof raw === 'string') {
+    // If it's YYYY-MM-DD or YYYY-MM-DDTHH:mm...
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      return raw.slice(0, 10);
+    }
+    // If it's DD/MM/YYYY or DD-MM-YYYY
+    if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(raw)) {
+      const parts = raw.split(/[\/-]/);
+      const dd = parts[0].padStart(2, '0');
+      const mm = parts[1].padStart(2, '0');
+      const yyyy = parts[2];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return raw.slice(0, 10);
   }
-  // Plain Firestore Timestamp serialised as { seconds, nanoseconds }
-  if (typeof raw === 'object' && typeof (raw as any).seconds === 'number') {
-    return new Date((raw as any).seconds * 1000);
+  if (typeof raw === 'object') {
+    if (typeof raw.toDate === 'function') {
+      const d = raw.toDate();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    if (typeof raw.seconds === 'number') {
+      const d = new Date(raw.seconds * 1000);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    if (raw instanceof Date) {
+      const yyyy = raw.getFullYear();
+      const mm = String(raw.getMonth() + 1).padStart(2, '0');
+      const dd = String(raw.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
   }
-  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
-  const s = String(raw).trim();
-  if (!s) return null;
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d;
-  const parts = s.split('/');
-  if (parts.length === 3) {
-    const nd = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
-    if (!isNaN(nd.getTime())) return nd;
+  if (typeof raw === 'number') {
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
   }
-  return null;
-};
+  return String(raw).slice(0, 10);
+}
 
-/**
- * Hitung rentang tanggal preset.
- * - Hari Ini      = hari ini saja
- * - Minggu Ini    = Senin minggu ini → hari ini
- * - Bulan Ini     = tanggal 1 bulan ini → hari ini
- * - Tahun Ini     = 1 Januari tahun ini → hari ini
- * - Semua Waktu   = tidak ada filter (start='' end='') — `filterByDateRange`
- *                   menafsirkan ini sebagai "semua transaksi valid"
- * - Custom        = dipakai untuk rentang manual; getPresetRange tidak
- *                   memutuskan apa-apa, cuma fallback ke hari ini
- */
-export const getPresetRange = (preset: RangePreset): { start: string; end: string } => {
-  if (preset === 'Semua Waktu') return { start: '', end: '' };
+export function getPresetRange(preset: RangePreset): { start: string; end: string } {
   const now = new Date();
-  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let start = new Date(todayMidnight);
-  if (preset === 'Hari Ini') {
-    // start = today
-  } else if (preset === 'Minggu Ini') {
-    const day = now.getDay();
-    const diff = day === 0 ? 6 : day - 1; // Senin sebagai awal minggu
-    start = new Date(todayMidnight);
-    start.setDate(todayMidnight.getDate() - diff);
-  } else if (preset === 'Bulan Ini') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-  } else if (preset === 'Tahun Ini') {
-    start = new Date(now.getFullYear(), 0, 1);
-  }
-  return { start: toISO(start), end: toISO(todayMidnight) };
-};
-
-export const formatRangeLabel = (start: string, end: string): string => {
-  if (!start || !end) return 'Pilih Tanggal';
-  const fmt = (s: string) => {
-    const d = new Date(s);
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  
+  const formatDate = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
   };
-  return `${fmt(start)} – ${fmt(end)}`;
-};
 
-/**
- * Validasi: transaksi dianggap valid kalau punya tanggal valid,
- * jenis Pemasukan/Pengeluaran, dan nominal > 0.
- * Data corrupt / null otomatis di-skip.
- */
-export const isValidTransaction = (t: any): boolean => {
-  if (!t) return false;
-  const d = parseTxDate(t.tanggal);
-  if (!d) return false;
-  const jenis = String(t.jenis || t.type || '').toLowerCase();
-  if (jenis !== 'pemasukan' && jenis !== 'pengeluaran') return false;
-  const nominal = getTxNominal(t);
-  if (!Number.isFinite(nominal) || nominal <= 0) return false;
-  return true;
-};
+  switch (preset) {
+    case 'Hari Ini': {
+      const today = formatDate(now);
+      return { start: today, end: today };
+    }
+    case 'Minggu Ini': {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+      const monday = new Date(now.setDate(diff));
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      return { start: formatDate(monday), end: formatDate(sunday) };
+    }
+    case 'Bulan Ini': {
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      return { start: formatDate(firstDay), end: formatDate(lastDay) };
+    }
+    case 'Bulan Lalu': {
+      const firstDay = new Date(year, month - 1, 1);
+      const lastDay = new Date(year, month, 0);
+      return { start: formatDate(firstDay), end: formatDate(lastDay) };
+    }
+    case 'Tahun Ini': {
+      const firstDay = new Date(year, 0, 1);
+      const lastDay = new Date(year, 11, 31);
+      return { start: formatDate(firstDay), end: formatDate(lastDay) };
+    }
+    case 'Semua Waktu':
+    default: {
+      return { start: '2020-01-01', end: '2099-12-31' };
+    }
+  }
+}
 
-/**
- * Filter transaksi berdasarkan rentang tanggal [start, end] inklusif.
- * Otomatis skip transaksi tidak valid (data corrupt / null).
- */
-export const filterByDateRange = <T extends { tanggal?: any }>(
-  transactions: T[],
+export function formatRangeLabel(start: string, end: string): string {
+  if (!start && !end) return 'Semua Waktu';
+  if (start === end) return start;
+  return `${start} s/d ${end}`;
+}
+
+export function isOperational(t: Transaction): boolean {
+  return (t as any).kategori_arus_kas !== 'mutasi_ke_dompet';
+}
+
+export function filterByDateRange(
+  transactions: Transaction[],
   startDate: string,
   endDate: string
-): T[] => {
-  if (!Array.isArray(transactions)) return [];
-  if (!startDate || !endDate) return transactions.filter(isValidTransaction);
-  const s = new Date(startDate); s.setHours(0, 0, 0, 0);
-  const e = new Date(endDate); e.setHours(23, 59, 59, 999);
+): Transaction[] {
+  if (!startDate && !endDate) return transactions;
+  
   return transactions.filter(t => {
-    if (!isValidTransaction(t)) return false;
-    const d = parseTxDate((t as any).tanggal);
-    if (!d) return false;
-    const time = d.getTime();
-    return time >= s.getTime() && time <= e.getTime();
+    if (!t.tanggal) return false;
+    const txDateStr = toISODateString(t.tanggal);
+    if (!txDateStr) return false;
+    if (startDate && txDateStr < startDate) return false;
+    if (endDate && txDateStr > endDate) return false;
+    return true;
   });
-};
+}
 
-const isIncome = (t: any) => String(t.jenis || t.type || '').toLowerCase() === 'pemasukan';
-const isExpense = (t: any) => String(t.jenis || t.type || '').toLowerCase() === 'pengeluaran';
-
-export interface TransactionStats {
-  count: number;
+export interface StatsResult {
   totalPemasukan: number;
   totalPengeluaran: number;
   saldo: number;
-  range: { start: string; end: string };
+  countPemasukan: number;
+  countPengeluaran: number;
 }
 
-/**
- * Transaksi yang DIEKSKLUSI dari P&L:
- *  - mutasi_ke_dompet  : uang hanya pindah ke dompet tabungan, bukan pengeluaran nyata
- *  - pengeluaran_dompet: belanja dari saldo dompet, tidak menyentuh saldo operasional
- * Transaksi tanpa kategori_arus_kas (data lama) dianggap operasional.
- */
-export const isOperational = (t: any): boolean => {
-  const kat = t?.kategori_arus_kas;
-  return !kat || kat === 'pengeluaran_operasional';
-};
+export function computeStats(
+  transactions: Transaction[],
+  range?: { start: string; end: string },
+  contextName?: string
+): StatsResult {
+  let filtered = transactions;
+  if (range && (range.start || range.end)) {
+    filtered = filterByDateRange(transactions, range.start, range.end);
+  }
 
-export const computeStats = (
-  transactions: any[],
-  range: { start: string; end: string },
-  source: string = 'unknown'
-): TransactionStats => {
-  const valid = transactions.filter(t => isValidTransaction(t) && isOperational(t));
-  const totalPemasukan = valid
-    .filter(isIncome)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
-  const totalPengeluaran = valid
-    .filter(isExpense)
-    .reduce((acc, t) => acc + getTxNominal(t), 0);
+  // Only operational transactions count towards stats
+  const operational = filtered.filter(isOperational);
+
+  let totalPemasukan = 0;
+  let totalPengeluaran = 0;
+  let countPemasukan = 0;
+  let countPengeluaran = 0;
+
+  for (const t of operational) {
+    const amount = getTxNominal(t);
+    const jenis = (t.jenis || (t as any).type || '').toLowerCase();
+    if (jenis === 'pemasukan') {
+      totalPemasukan += amount;
+      countPemasukan++;
+    } else if (jenis === 'pengeluaran') {
+      totalPengeluaran += amount;
+      countPengeluaran++;
+    }
+  }
+
   const saldo = totalPemasukan - totalPengeluaran;
 
-  const stats: TransactionStats = {
-    count: valid.length,
+  return {
     totalPemasukan,
     totalPengeluaran,
     saldo,
-    range,
+    countPemasukan,
+    countPengeluaran,
   };
-
-  // Debug log konsisten lintas halaman — gampang dibandingkan di console
-  if (typeof window !== 'undefined' && window.console) {
-    console.log(`[STATS:${source}]`, {
-      filter: `${range.start} → ${range.end}`,
-      jumlah: stats.count,
-      pemasukan: stats.totalPemasukan,
-      pengeluaran: stats.totalPengeluaran,
-      saldo: stats.saldo,
-    });
-  }
-
-  // Daftarkan stats supaya bisa di-cross-check antar halaman.
-  registerStats(source, stats);
-
-  return stats;
-};
-
-/**
- * Sanity check antar halaman: daftar stats per "source" lalu emit event
- * 'stats:mismatch' kalau total Transaksi !== Laporan dalam satu range
- * yang sama. App.tsx menampilkan warning toast saat event ini muncul.
- *
- * Catatan: perbandingan hanya dilakukan jika SEMUA sumber sudah diperbarui
- * dalam window 800ms yang sama, untuk menghindari false-positive saat
- * komponen re-render satu per satu setelah data Firestore tiba.
- */
-
-interface RegistryEntry {
-  stats: TransactionStats;
-  ts: number; // timestamp saat entry didaftarkan
 }
-
-const _statsRegistry: Record<string, RegistryEntry> = {};
-let _mismatchTimer: ReturnType<typeof setTimeout> | null = null;
-const FRESH_WINDOW_MS = 800; // semua sumber harus terupdate dalam window ini
-
-const sameRange = (a: TransactionStats['range'], b: TransactionStats['range']) =>
-  a.start === b.start && a.end === b.end;
-
-export const areStatsEqual = (a: TransactionStats, b: TransactionStats): boolean => {
-  return (
-    a.count === b.count &&
-    a.totalPemasukan === b.totalPemasukan &&
-    a.totalPengeluaran === b.totalPengeluaran &&
-    a.saldo === b.saldo
-  );
-};
-
-const TRACKED_SOURCES = ['Dashboard', 'Transaksi', 'Laporan'];
-
-const checkMismatch = () => {
-  if (typeof window === 'undefined') return;
-  const now = Date.now();
-
-  // Kumpulkan entri yang fresh dalam window terakhir
-  const freshEntries = TRACKED_SOURCES
-    .map(s => ({ source: s, entry: _statsRegistry[s] }))
-    .filter(({ entry }) => entry && now - entry.ts <= FRESH_WINDOW_MS);
-
-  if (freshEntries.length < 2) return; // belum cukup sumber untuk dibandingkan
-
-  // Pastikan semua yang ada memakai range yang sama
-  const firstRange = freshEntries[0].entry.stats.range;
-  const allSameRange = freshEntries.every(({ entry }) => sameRange(entry.stats.range, firstRange));
-  if (!allSameRange) return;
-
-  // Cari pasangan yang berbeda
-  for (let i = 0; i < freshEntries.length; i++) {
-    for (let j = i + 1; j < freshEntries.length; j++) {
-      const a = freshEntries[i];
-      const b = freshEntries[j];
-      if (!areStatsEqual(a.entry.stats, b.entry.stats)) {
-        console.warn('[STATS:mismatch]', { [a.source]: a.entry.stats, [b.source]: b.entry.stats });
-        window.dispatchEvent(
-          new CustomEvent('stats:mismatch', {
-            detail: { sources: { [a.source]: a.entry.stats, [b.source]: b.entry.stats } },
-          })
-        );
-        return; // cukup 1 event per batch
-      }
-    }
-  }
-};
-
-const registerStats = (source: string, stats: TransactionStats) => {
-  if (!TRACKED_SOURCES.includes(source)) return;
-  _statsRegistry[source] = { stats, ts: Date.now() };
-
-  // Debounce: tunda perbandingan sampai semua komponen selesai render
-  if (_mismatchTimer !== null) clearTimeout(_mismatchTimer);
-  _mismatchTimer = setTimeout(() => {
-    _mismatchTimer = null;
-    checkMismatch();
-  }, FRESH_WINDOW_MS);
-};

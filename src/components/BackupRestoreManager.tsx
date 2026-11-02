@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { User, db, doc, setDoc, writeBatch, sanitizeData, OperationType, handleFirestoreError, getDoc } from '../lib/firebase';
+import { User, db, doc, setDoc, writeBatch, sanitizeData, OperationType, handleFirestoreError, getDoc, getDocs, collection } from '../lib/firebase';
 import { Ingredient, Product, Transaction, Dompet, StoreSettings, KategoriSettings } from '../types';
 import { toast } from 'sonner';
 import { DEFAULT_KATEGORI } from '../SettingsContext';
@@ -151,7 +151,7 @@ export default function BackupRestoreManager({
           throw new Error('Format file tidak valid.');
         }
 
-        if (!Array.isArray(data.ingredients) && !Array.isArray(data.products) && !Array.isArray(data.transactions)) {
+        if (!Array.isArray(data.ingredients) && !Array.isArray(data.products) && !Array.isArray(data.transactions) && !Array.isArray(data.hpp) && !Array.isArray(data.stok)) {
           throw new Error('File JSON tidak berisi struktur data CeuMilan yang valid.');
         }
 
@@ -160,12 +160,12 @@ export default function BackupRestoreManager({
           exportDate: data.exportDate || new Date().toISOString(),
           appName: data.appName || 'CeuMilan',
           userEmail: data.userEmail || null,
-          storeSettings: data.storeSettings || undefined,
-          kategoriSettings: data.kategoriSettings || undefined,
-          ingredients: Array.isArray(data.ingredients) ? data.ingredients : [],
-          products: Array.isArray(data.products) ? data.products : [],
-          transactions: Array.isArray(data.transactions) ? data.transactions : [],
-          dompets: Array.isArray(data.dompets) ? data.dompets : []
+          storeSettings: data.storeSettings || data.settings || undefined,
+          kategoriSettings: data.kategoriSettings || data.kategori || undefined,
+          ingredients: Array.isArray(data.ingredients) ? data.ingredients : (Array.isArray(data.stok) ? data.stok : []),
+          products: Array.isArray(data.products) ? data.products : (Array.isArray(data.hpp) ? data.hpp : (Array.isArray(data.produk) ? data.produk : [])),
+          transactions: Array.isArray(data.transactions) ? data.transactions : (Array.isArray(data.transaksi) ? data.transaksi : []),
+          dompets: Array.isArray(data.dompets) ? data.dompets : (Array.isArray(data.dompet) ? data.dompet : [])
         };
 
         setParsedBackup(validPayload);
@@ -190,11 +190,16 @@ export default function BackupRestoreManager({
 
       // 1. If 'replace' mode selected, wipe existing documents first
       if (importMode === 'replace') {
+        const stokSnap = await getDocs(collection(db, `users/${uid}/stok`));
+        const hppSnap = await getDocs(collection(db, `users/${uid}/hpp`));
+        const txSnap = await getDocs(collection(db, `users/${uid}/transaksi`));
+        const dompetSnap = await getDocs(collection(db, `users/${uid}/dompet`));
+
         const docsToDelete: Array<{ path: string }> = [
-          ...ingredients.map(ing => ({ path: `users/${uid}/stok/${ing.id}` })),
-          ...products.map(p => ({ path: `users/${uid}/hpp/${p.id}` })),
-          ...transactions.map(t => ({ path: `users/${uid}/transaksi/${t.id}` })),
-          ...dompets.map(d => ({ path: `users/${uid}/dompet/${d.id}` }))
+          ...stokSnap.docs.map(d => ({ path: `users/${uid}/stok/${d.id}` })),
+          ...hppSnap.docs.map(d => ({ path: `users/${uid}/hpp/${d.id}` })),
+          ...txSnap.docs.map(d => ({ path: `users/${uid}/transaksi/${d.id}` })),
+          ...dompetSnap.docs.map(d => ({ path: `users/${uid}/dompet/${d.id}` }))
         ];
 
         for (let i = 0; i < docsToDelete.length; i += 450) {

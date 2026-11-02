@@ -1,348 +1,412 @@
-
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator, Calendar, PiggyBank } from 'lucide-react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
-import { Ingredient, Transaction, StoreSettings, Dompet } from '../types';
-import { User } from 'firebase/auth';
-import { cn } from '@/lib/utils';
-import { formatSmartUnit } from '../lib/unitUtils';
-import { formatCompactNumber, formatCurrency, getTxNominal } from '../lib/formatUtils';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useDateFilter } from '../lib/dateFilterContext';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
 import {
-  filterByDateRange,
-  computeStats,
-  DASHBOARD_PRESETS,
-  RangePreset,
-} from '../lib/transactionStats';
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Package,
+  Scan,
+  Calculator,
+  PieChart,
+  History,
+  AlertTriangle,
+  Plus,
+  ArrowRight,
+  Database,
+  Store,
+  PiggyBank,
+  Calendar,
+  Filter
+} from 'lucide-react';
+import { User } from '../lib/firebase';
+import { Ingredient, Transaction, StoreSettings, Dompet } from '../types';
+import { formatCurrency } from '../lib/formatUtils';
+import { useDateFilter } from '../lib/dateFilterContext';
+import { filterByDateRange, computeStats, RangePreset } from '../lib/transactionStats';
+import { cn } from '@/lib/utils';
 
 interface DashboardProps {
-  user: User | null;
+  user: User;
   ingredients: Ingredient[];
   transactions: Transaction[];
   storeSettings: StoreSettings;
   setActiveTab: (tab: string) => void;
-  onSeedData?: () => Promise<void>;
-  onStartFresh?: () => Promise<void>;
+  onSeedData?: () => void;
+  onStartFresh?: () => void;
   dompets?: Dompet[];
 }
 
-export default function Dashboard({ user, ingredients, transactions, storeSettings, setActiveTab, onSeedData, onStartFresh, dompets = [] }: DashboardProps) {
-  // Filter periode bersama (single source of truth) — sama persis dengan
-  // halaman Transaksi & Laporan. Mengubah preset di sini ikut mengubah
-  // angka di halaman lain.
-  const { preset, startDate, endDate, applyPreset, rangeLabel } = useDateFilter();
+export default function Dashboard({
+  user,
+  ingredients,
+  transactions,
+  storeSettings,
+  setActiveTab,
+  onSeedData,
+  onStartFresh,
+  dompets = []
+}: DashboardProps) {
+  const { preset, startDate, endDate, applyPreset, setStartDate, setEndDate, rangeLabel } = useDateFilter();
+  const [pickerOpen, setPickerOpen] = React.useState(false);
 
   const filteredTransactions = React.useMemo(
     () => filterByDateRange(transactions, startDate, endDate),
     [transactions, startDate, endDate]
   );
 
-  const isIncome = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
-  const isExpense = (t: any) => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
-
-  // Hitung pakai fungsi pusat — wajib supaya identik dengan Transaksi & Laporan.
   const stats = React.useMemo(
     () => computeStats(filteredTransactions, { start: startDate, end: endDate }, 'Dashboard'),
     [filteredTransactions, startDate, endDate]
   );
 
-  const totalRevenue = stats.totalPemasukan;
-  const totalExpense = stats.totalPengeluaran;
-  const netProfit = stats.saldo; // Laba Operasional (tanpa tabungan)
-
-  // Uang yang disisihkan ke dompet tabungan dalam periode ini.
-  // Dikurangi dari Laba untuk menghasilkan Saldo Kas Aktual yang tersedia.
-  const totalMutasiTabunganPeriode = React.useMemo(
-    () => filteredTransactions
-      .filter(t => (t as any).kategori_arus_kas === 'mutasi_ke_dompet')
-      .reduce((s, t) => s + getTxNominal(t), 0),
-    [filteredTransactions]
+  const lowStockIngredients = React.useMemo(
+    () => ingredients.filter(i => i.currentStock <= (i.minStock || 0)),
+    [ingredients]
   );
 
-  // Saldo Kas = Laba Operasional - Uang yang sudah disisihkan ke tabungan
-  const saldoKas = netProfit - totalMutasiTabunganPeriode;
+  const totalTabungan = React.useMemo(
+    () => dompets.reduce((acc, d) => acc + (d.saldo_terkumpul || 0), 0),
+    [dompets]
+  );
 
-  const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+  const recentTransactions = React.useMemo(
+    () => (filteredTransactions.length > 0 ? filteredTransactions : transactions).slice(0, 5),
+    [filteredTransactions, transactions]
+  );
 
-  const incomeCount = filteredTransactions.filter(isIncome).length;
-  const expenseCount = filteredTransactions.filter(isExpense).length;
-  const totalTabungan = dompets.reduce((s, d) => s + (d.saldo_terkumpul || 0), 0);
+  // Welcome card only for truly empty accounts (no transactions & no ingredients at all)
+  const showWelcomeCard = transactions.length === 0 && ingredients.length === 0;
 
-  const lowStockItems = ingredients.filter(i => i.currentStock <= i.minStock);
+  // Show a hint if data exists but current date filter yields 0
+  const showNoFilteredDataHint = transactions.length > 0 && filteredTransactions.length === 0;
 
-  // 7-day sales data
-  const last7Days = [...Array(7)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const dateStr = d.toISOString().split('T')[0];
-    const daySales = transactions
-      .filter(t => t.tanggal === dateStr && isIncome(t))
-      .reduce((acc, t) => acc + getTxNominal(t), 0);
-    return {
-      name: d.toLocaleDateString('id-ID', { weekday: 'short' }),
-      sales: daySales
-    };
-  });
-
-  const showWelcome = ingredients.length === 0 && transactions.length === 0 && !storeSettings.onboardingCompleted;
+  const handlePresetSelect = (p: RangePreset) => {
+    applyPreset(p);
+    if (p !== 'Custom') setPickerOpen(false);
+  };
 
   return (
-    <div className="space-y-6 pb-8">
-      {showWelcome && (
-        <Card className="border-none shadow-xl rounded-[2.5rem] bg-brand-50 p-8 text-center space-y-4 animate-in fade-in zoom-in duration-500">
-          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto text-primary shadow-sm">
-            <Package className="w-8 h-8" />
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="bg-gradient-to-r from-orange-500 via-amber-500 to-amber-600 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+        <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-white/10 skew-x-12 pointer-events-none" />
+        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <span className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold text-white mb-2">
+              Halo, {user.displayName || 'Pengguna'} 👋
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black">{storeSettings.name || 'CeuMilan'} Dashboard</h2>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <p className="text-xs sm:text-sm text-amber-100 font-medium">
+                Ringkasan performa &amp; keuangan toko periode:
+              </p>
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <button className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full text-xs font-bold text-white transition-colors cursor-pointer border border-white/30">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {rangeLabel}
+                    </button>
+                  }
+                />
+                <PopoverContent align="start" className="w-[300px] p-4 z-50 bg-white">
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Pilih Periode</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(['Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Bulan Lalu', 'Tahun Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => handlePresetSelect(p)}
+                          className={cn(
+                            'px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors text-left',
+                            preset === p
+                              ? 'bg-orange-500 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          )}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-black text-[#1A1A2E]">Selamat Datang di Cloud!</h3>
-            <p className="text-sm text-gray-500 font-medium max-w-xs mx-auto">
-              Akun kamu masih kosong. Mulai masukkan data atau gunakan data contoh untuk mencoba fitur.
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setActiveTab('kasir')}
+              className="bg-white text-orange-600 hover:bg-orange-50 font-black rounded-2xl shadow-md gap-2"
+            >
+              <Scan className="w-4 h-4" />
+              Kasir POS
+            </Button>
+            <Button
+              onClick={() => setActiveTab('transactions')}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-black rounded-2xl border border-white/20 gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Catat Transaksi
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Date Filter Quick Switcher Pills for Mobile/Tablet */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+        <span className="text-[11px] font-bold text-gray-400 shrink-0 flex items-center gap-1">
+          <Filter className="w-3.5 h-3.5" /> Filter:
+        </span>
+        {(['Bulan Ini', 'Bulan Lalu', 'Minggu Ini', 'Hari Ini', 'Semua Waktu'] as RangePreset[]).map(p => (
+          <button
+            key={p}
+            onClick={() => applyPreset(p)}
+            className={cn(
+              'px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all',
+              preset === p
+                ? 'bg-orange-500 text-white shadow-xs'
+                : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-100'
+            )}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      {/* Notice if data exists but zero in active range filter */}
+      {showNoFilteredDataHint && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between text-amber-900 gap-3">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>Tidak ada transaksi pada periode <strong>{rangeLabel}</strong>. Anda memiliki total {transactions.length} transaksi di periode lain.</span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => applyPreset('Semua Waktu')}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shrink-0"
+          >
+            Tampilkan Semua Waktu
+          </Button>
+        </div>
+      )}
+
+      {/* Welcome & Quick Seed Action for Clean Accounts */}
+      {showWelcomeCard && (
+        <Card className="border-2 border-dashed border-orange-200 bg-orange-50/50 rounded-3xl p-6 text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mx-auto">
+            <Store className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-black text-lg text-[#1A1A2E]">Selamat Datang di {storeSettings.name}!</h3>
+            <p className="text-xs text-gray-500 max-w-md mx-auto mt-1">
+              Akun Anda belum memiliki data produk, transaksi, atau stok. Pilih cara memulai di bawah:
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button onClick={onStartFresh || (() => setActiveTab('hpp'))} className="orange-gradient text-white font-bold rounded-2xl px-8 h-12">
-              Mulai Input HPP
-            </Button>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
             {onSeedData && (
-              <Button onClick={onSeedData} variant="outline" className="bg-white border-brand-100 text-primary font-bold rounded-2xl px-8 h-12">
-                Gunakan Data Contoh
+              <Button
+                onClick={onSeedData}
+                className="orange-gradient text-white font-bold rounded-2xl shadow-sm text-xs px-6"
+              >
+                Muat Data Contoh
+              </Button>
+            )}
+            {onStartFresh && (
+              <Button
+                onClick={onStartFresh}
+                variant="outline"
+                className="rounded-2xl font-bold text-xs px-6 bg-white border-orange-200 text-orange-700"
+              >
+                Mulai dari Nol (Input HPP)
               </Button>
             )}
           </div>
         </Card>
       )}
 
-      {/* E-Wallet Header Card */}
-      <div className="relative overflow-hidden wallet-gradient rounded-[2.5rem] p-6 text-white shadow-2xl shadow-brand-200">
-        <div className="relative z-10">
-          {/* Top row: wallet icon + period selector */}
-          <div className="flex justify-between items-center gap-3 mb-5">
-            <div className="w-10 h-10 rounded-full glass-card flex items-center justify-center shrink-0">
+      {/* Main Financial KPI Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Pemasukan */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+          <div className="flex justify-between items-center mb-3">
+            <div className="p-3 rounded-2xl bg-green-100 text-green-600">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <Badge className="bg-green-50 text-green-700 border-none font-black text-[10px]">Pemasukan</Badge>
+          </div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Income</p>
+          <h3 className="text-xl font-black text-[#1A1A2E] mt-1">{formatCurrency(stats.totalPemasukan, true)}</h3>
+          <p className="text-[10px] text-gray-400 mt-1 font-medium">{stats.countPemasukan} transaksi</p>
+        </Card>
+
+        {/* Pengeluaran */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+          <div className="flex justify-between items-center mb-3">
+            <div className="p-3 rounded-2xl bg-red-100 text-red-500">
+              <TrendingDown className="w-5 h-5" />
+            </div>
+            <Badge className="bg-red-50 text-red-600 border-none font-black text-[10px]">Pengeluaran</Badge>
+          </div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Expense</p>
+          <h3 className="text-xl font-black text-[#1A1A2E] mt-1">{formatCurrency(stats.totalPengeluaran, true)}</h3>
+          <p className="text-[10px] text-gray-400 mt-1 font-medium">{stats.countPengeluaran} transaksi</p>
+        </Card>
+
+        {/* Saldo Bersih */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+          <div className="flex justify-between items-center mb-3">
+            <div className="p-3 rounded-2xl bg-blue-100 text-blue-600">
               <Wallet className="w-5 h-5" />
             </div>
-            <Select
-              value={DASHBOARD_PRESETS.includes(preset) ? preset : 'Custom'}
-              onValueChange={(v) => applyPreset(v as RangePreset)}
-            >
-              <SelectTrigger className="w-auto max-w-[60%] bg-white/20 border-white/30 text-white text-xs font-bold rounded-full h-9 px-3 gap-1.5">
-                <Calendar className="w-3.5 h-3.5 shrink-0" />
-                <SelectValue>{rangeLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent className="rounded-2xl">
-                {DASHBOARD_PRESETS.map((p) => (
-                  <SelectItem key={p} value={p}>{p}</SelectItem>
-                ))}
-                {!DASHBOARD_PRESETS.includes(preset) && (
-                  <SelectItem value="Custom" disabled>
-                    {rangeLabel}
-                  </SelectItem>
-                )}
-              </SelectContent>
-            </Select>
+            <Badge className="bg-blue-50 text-blue-700 border-none font-black text-[10px]">Net Saldo</Badge>
           </div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Saldo Periode</p>
+          <h3 className={`text-xl font-black mt-1 ${stats.saldo >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+            {formatCurrency(stats.saldo, true)}
+          </h3>
+          <p className="text-[10px] text-gray-400 mt-1 font-medium">{rangeLabel}</p>
+        </Card>
 
-          {/* Balance block — full width to avoid clipping for large numbers */}
-          <div className="mb-5">
-            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">
-              Saldo Kas · {rangeLabel}
-            </p>
-            <h3 className="text-3xl sm:text-4xl font-black leading-tight break-words">
-              {formatCurrency(saldoKas, true)}
-            </h3>
+        {/* Total Tabungan / Dompet */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-5">
+          <div className="flex justify-between items-center mb-3">
+            <div className="p-3 rounded-2xl bg-amber-100 text-amber-600">
+              <PiggyBank className="w-5 h-5" />
+            </div>
+            <Badge className="bg-amber-50 text-amber-700 border-none font-black text-[10px]">Dompet</Badge>
           </div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Tabungan</p>
+          <h3 className="text-xl font-black text-[#1A1A2E] mt-1">{formatCurrency(totalTabungan, true)}</h3>
+          <p className="text-[10px] text-gray-400 mt-1 font-medium">{dompets.length} dompet tersimpan</p>
+        </Card>
+      </div>
 
-          {/* Tabungan mini badge */}
-          {totalTabungan > 0 && (
+      {/* Quick Menu Shortcuts Grid */}
+      <div>
+        <h3 className="text-sm font-black text-gray-500 uppercase tracking-widest mb-3">Menu Pintas Utam</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
+          {[
+            { id: 'kasir', label: 'Kasir POS', icon: Scan, color: 'bg-orange-50 text-orange-600 border-orange-100' },
+            { id: 'hpp', label: 'Hitung HPP', icon: Calculator, color: 'bg-blue-50 text-blue-600 border-blue-100' },
+            { id: 'stock', label: 'Stok Bahan', icon: Package, color: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
+            { id: 'transactions', label: 'Transaksi', icon: History, color: 'bg-purple-50 text-purple-600 border-purple-100' },
+            { id: 'reports', label: 'Laporan', icon: PieChart, color: 'bg-indigo-50 text-indigo-600 border-indigo-100' },
+            { id: 'roas', label: 'Iklan ROAS', icon: TrendingUp, color: 'bg-teal-50 text-teal-600 border-teal-100' },
+            { id: 'dompet', label: 'Dompet', icon: PiggyBank, color: 'bg-amber-50 text-amber-600 border-amber-100' },
+            { id: 'backup', label: 'Backup', icon: Database, color: 'bg-slate-50 text-slate-700 border-slate-200' },
+          ].map((item) => (
             <button
-              onClick={() => setActiveTab('dompet')}
-              className="flex items-center gap-1.5 mb-5 px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors"
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`p-4 rounded-3xl border flex flex-col items-center justify-center gap-2 hover:scale-105 transition-all bg-white shadow-2xs ${item.color}`}
             >
-              <PiggyBank className="w-3 h-3" />
-              Tabungan: {formatCurrency(totalTabungan, true)}
+              <item.icon className="w-6 h-6" />
+              <span className="text-[11px] font-bold text-gray-800 text-center">{item.label}</span>
             </button>
-          )}
-
-          <div className="grid grid-cols-4 gap-2">
-            <HeaderAction icon={Calculator} label="HPP" onClick={() => setActiveTab('hpp')} />
-            <HeaderAction icon={Package} label="Stok" onClick={() => setActiveTab('stock')} />
-            <HeaderAction icon={PiggyBank} label="Tabungan" onClick={() => setActiveTab('dompet')} />
-            <HeaderAction icon={History} label="Riwayat" onClick={() => setActiveTab('transactions')} />
-          </div>
-        </div>
-        
-        {/* Decorative elements */}
-        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-3xl" />
-        <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-black/10 rounded-full blur-3xl" />
-      </div>
-
-      {/* Summary Bento */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-50">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center text-green-600">
-              <ArrowUpRight className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pemasukan</span>
-          </div>
-          <p className="text-xl font-black text-[#1A1A2E]">{formatCurrency(totalRevenue, true)}</p>
-          <p className="text-[10px] text-green-600 font-bold mt-1">+{incomeCount} Transaksi</p>
-        </div>
-        <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-50">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-600">
-              <ArrowDown className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pengeluaran</span>
-          </div>
-          <p className="text-xl font-black text-[#1A1A2E]">{formatCurrency(totalExpense, true)}</p>
-          <p className="text-[10px] text-red-500 font-bold mt-1">-{expenseCount} Transaksi</p>
+          ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Sales Chart */}
-        <Card className="lg:col-span-2 border-none shadow-sm rounded-[2rem] overflow-hidden bg-white">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-lg font-bold text-[#1A1A2E]">Grafik Penjualan</CardTitle>
-              <CardDescription>Performa 7 hari terakhir</CardDescription>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Peringatan Stok Rendah */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2.5 rounded-2xl bg-amber-100 text-amber-600">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-black text-base text-[#1A1A2E]">Stok Perlu Diisi Ulang</h3>
+                <p className="text-[11px] font-medium text-gray-400">{lowStockIngredients.length} item di bawah stok minimum</p>
+              </div>
             </div>
-            <Badge variant="secondary" className="rounded-full bg-brand-50 text-primary border-none font-bold">
-              Mingguan
-            </Badge>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <div className="h-[250px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={last7Days}>
-                  <defs>
-                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#9CA3AF', fontWeight: 'bold' }}
-                  />
-                  <YAxis 
-                    hide
-                  />
-                  <Tooltip 
-                    cursor={{ stroke: 'var(--primary)', strokeWidth: 2 }}
-                    contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Area type="monotone" dataKey="sales" stroke="var(--primary)" strokeWidth={4} fillOpacity={1} fill="url(#colorSales)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Recent Activity */}
-        <Card className="border-none shadow-sm rounded-[2rem] bg-white">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-lg font-bold text-[#1A1A2E]">Aktivitas</CardTitle>
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <MoreHorizontal className="w-5 h-5 text-gray-400" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setActiveTab('stock')}
+              className="text-xs font-bold text-primary hover:bg-orange-50 rounded-xl"
+            >
+              Kelola Stok <ArrowRight className="w-3.5 h-3.5 ml-1" />
             </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {transactions.slice(0, 6).map((t) => (
-              <div key={t.id} className="flex items-center gap-4 group">
-                <div className={cn(
-                  "w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110",
-                  t.jenis === 'Pemasukan' ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
-                )}>
-                  {t.jenis === 'Pemasukan' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDown className="w-5 h-5" />}
+          </div>
+
+          {lowStockIngredients.length === 0 ? (
+            <div className="p-6 text-center bg-gray-50 rounded-2xl">
+              <p className="text-xs font-bold text-gray-500">Semua stok bahan aman &amp; di atas ambang batas! ✨</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {lowStockIngredients.slice(0, 5).map(ing => (
+                <div key={ing.id} className="flex items-center justify-between p-3 bg-amber-50/60 border border-amber-100 rounded-2xl">
+                  <div>
+                    <span className="font-bold text-xs text-[#1A1A2E]">{ing.name}</span>
+                    <span className="text-[10px] text-gray-500 block">Kategori: {ing.category}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-black text-xs text-amber-700">{ing.currentStock} {ing.unit}</span>
+                    <span className="text-[10px] text-gray-400 block">Min: {ing.minStock} {ing.unit}</span>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-[#1A1A2E] truncate">{t.keterangan}</p>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase">{t.kategori}</p>
-                </div>
-                <div className="text-right">
-                  <p className={cn(
-                    "text-sm font-black",
-                    t.jenis === 'Pemasukan' ? "text-green-600" : "text-red-500"
-                  )}>
-                    {t.jenis === 'Pemasukan' ? '+' : '-'} {formatCompactNumber(t.nominal)}
-                  </p>
-                  <p className="text-[10px] text-gray-400">{t.tanggal}</p>
-                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Transaksi Terbaru */}
+        <Card className="border-none shadow-sm rounded-3xl bg-white p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2.5 rounded-2xl bg-purple-100 text-purple-600">
+                <History className="w-5 h-5" />
               </div>
-            ))}
-          </CardContent>
+              <div>
+                <h3 className="font-black text-base text-[#1A1A2E]">Transaksi Terakhir</h3>
+                <p className="text-[11px] font-medium text-gray-400">Catatan transaksi terbaru toko</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setActiveTab('transactions')}
+              className="text-xs font-bold text-primary hover:bg-orange-50 rounded-xl"
+            >
+              Lihat Semua <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </div>
+
+          {recentTransactions.length === 0 ? (
+            <div className="p-6 text-center bg-gray-50 rounded-2xl">
+              <p className="text-xs font-bold text-gray-500">Belum ada transaksi tercatat.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {recentTransactions.map(tx => {
+                const isIncome = (tx.jenis || '').toLowerCase() === 'pemasukan';
+                return (
+                  <div key={tx.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                    <div className="space-y-0.5 max-w-[200px] sm:max-w-xs">
+                      <p className="font-bold text-xs text-[#1A1A2E] truncate">{tx.keterangan || tx.kategori}</p>
+                      <span className="text-[10px] text-gray-400 block">{tx.tanggal} · {tx.kategori}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className={`font-black text-xs ${isIncome ? 'text-green-600' : 'text-red-500'}`}>
+                        {isIncome ? '+' : '-'}{formatCurrency(tx.nominal, true)}
+                      </span>
+                      <Badge className={`block text-[9px] font-bold border-none ${isIncome ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        {tx.jenis}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
-
-      {/* Stock Alert Section */}
-      {lowStockItems.length > 0 && (
-        <div className="bg-white rounded-[2rem] p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-[#1A1A2E]">Perhatian Stok</h3>
-            <Badge className="bg-red-50 text-red-600 border-none font-bold">
-              {lowStockItems.length} Item Menipis
-            </Badge>
-          </div>
-          <div className="flex gap-4 overflow-x-auto pb-2 no-scrollbar">
-            {lowStockItems.map((item) => (
-              <div key={item.id} className="shrink-0 w-40 p-4 bg-brand-50 rounded-3xl border border-brand-100">
-                <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-primary mb-3 shadow-sm">
-                  <AlertCircle className="w-4 h-4" />
-                </div>
-                <p className="text-xs font-bold text-[#1A1A2E] truncate">{item.name}</p>
-                <p className="text-[10px] font-bold text-primary mt-1">Sisa: {formatSmartUnit(item.currentStock, item.unit)}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-function HeaderAction({ icon: Icon, label, onClick }: any) {
-  return (
-    <button 
-      onClick={onClick}
-      className="flex flex-col items-center gap-2 group"
-    >
-      <div className="w-12 h-12 rounded-2xl glass-card flex items-center justify-center transition-all group-hover:bg-white/30 group-active:scale-95">
-        <Icon className="w-5 h-5" />
-      </div>
-      <span className="text-[10px] font-bold uppercase tracking-wider opacity-90">{label}</span>
-    </button>
-  );
-}
-
-function StatCard({ title, value, icon: Icon, color, isCurrency, isPercentage }: any) {
-  const formattedValue = isCurrency 
-    ? new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(value)
-    : isPercentage 
-    ? `${value.toFixed(1)}%`
-    : value;
-
-  return (
-    <Card className="border-none shadow-sm hover:shadow-md transition-all duration-300 rounded-3xl bg-white group">
-      <CardContent className="p-6">
-        <div className="flex justify-between items-start">
-          <div className={cn("p-3 rounded-2xl text-white shadow-lg", color)}>
-            <Icon className="w-5 h-5" />
-          </div>
-        </div>
-        <div className="mt-4">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{title}</p>
-          <h3 className="text-xl font-black text-[#1A1A2E] mt-1 group-hover:text-primary transition-colors">{formattedValue}</h3>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

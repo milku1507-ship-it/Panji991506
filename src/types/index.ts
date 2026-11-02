@@ -1,5 +1,52 @@
+export interface AdditionalFee {
+  nama?: string;
+  name?: string;
+  tipe?: string;
+  type?: string;
+  nilai?: number;
+  amount?: number;
+}
 
-export type Ingredient = {
+export interface HppMaterial {
+  id?: string;
+  nama: string;
+  satuan: string;
+  qty: number;
+  harga: number;
+  kelompok?: string;
+  ingredientId?: string;
+}
+
+export interface Variant {
+  id: string;
+  nama: string;
+  harga_jual: number;
+  qty_batch: number;
+  harga_packing: number;
+  bahan: HppMaterial[];
+  photoUrl?: string;
+  sku?: string;
+  harga_coret?: number;
+  diskon_persen?: number;
+  min_order?: number;
+  biaya_lain?: AdditionalFee[];
+}
+
+export interface Product {
+  id: string;
+  nama: string;
+  deskripsi?: string;
+  varian: Variant[];
+  photoUrl?: string;
+  foto?: string;
+  category?: string;
+  kategori?: string;
+  sku?: string;
+  min_order?: number;
+  biaya_lain?: AdditionalFee[];
+}
+
+export interface Ingredient {
   id: string;
   name: string;
   category: string;
@@ -9,117 +56,74 @@ export type Ingredient = {
   currentStock: number;
   minStock: number;
   fromHpp?: boolean;
-};
+}
 
-export type HppMaterial = {
-  id?: string;
-  ingredientId?: string;
-  nama: string;
-  satuan: string;
-  qty: number;
-  harga: number;
-  kelompok: string;
-};
-
-export type Variant = {
-  id: string;
-  nama: string;
-  sku?: string;
-  harga_jual: number;
-  harga_coret?: number;
-  diskon_persen?: number;
-  qty_batch: number;
-  harga_packing: number;
-  min_order?: number;
-  bahan: HppMaterial[];
-  biaya_lain?: AdditionalFee[];
-};
-
-export type AdditionalFee = {
-  nama: string;
-  tipe: 'persen' | 'nominal';
-  nilai: number;
-};
-
-export type Product = {
-  id: string;
-  sku?: string;
-  nama: string;
-  deskripsi?: string;
-  foto?: string;
-  kategori?: string;
-  min_order?: number;
-  varian: Variant[];
-  biaya_lain?: AdditionalFee[];
-};
-
-export type PenjualanVarian = {
+export interface PenjualanDetailVarian {
   varian_id: string;
   varian_nama: string;
   qty: number;
   harga?: number;
   hpp?: number;
-};
+  sku?: string;
+}
 
-export type PenjualanDetail = {
+export interface PenjualanDetail {
   produk_id: string;
   produk_nama: string;
-  varian: PenjualanVarian[];
-};
+  varian: PenjualanDetailVarian[];
+}
 
-export type KategoriArusKas =
-  | 'pengeluaran_operasional'
-  | 'mutasi_ke_dompet'
-  | 'pengeluaran_dompet';
+export type KategoriArusKas = 'pengeluaran_operasional' | 'mutasi_ke_dompet' | 'pengeluaran_dompet';
 
-export type Transaction = {
+export interface Transaction {
   id: string;
   tanggal: string;
   tanggal_akhir?: string | null;
   keterangan: string;
   kategori: string;
-  jenis: 'Pemasukan' | 'Pengeluaran';
-  type?: 'pemasukan' | 'pengeluaran';
+  jenis: 'Pemasukan' | 'Pengeluaran' | string;
   nominal: number;
-  total_penjualan?: number;
-  total_biaya?: number;
-  laba?: number;
-  qty_total: number;
-  qty_beli: number;
+  qty_total?: number;
+  qty_beli?: number;
   materialId?: string;
+  total_biaya?: number;
+  total_penjualan?: number;
+  sumber_dana?: string;
+  dompet_id?: string;
+  kategori_arus_kas?: KategoriArusKas | string;
   penjualan_detail?: PenjualanDetail[];
-  stockSnapshot?: { ingredientId: string; stockBefore: number; delta: number }[];
-  createdAt?: any;
-  // Dompet Tabungan fields
-  sumber_dana?: string;       // 'saldo_utama' | dompet_id
-  kategori_arus_kas?: KategoriArusKas;
-};
+  shopee_audit?: any;
+  stockSnapshot?: any;
+}
 
-export type KategoriSettings = {
-  kategori_hpp: string[];
-  kategori_produk: string[];
-  satuan_unit: string[];
-};
-
-export type StoreSettings = {
-  logo?: string;
-  banner?: string;
+export interface StoreSettings {
   name: string;
-  tagline?: string;
-  phone?: string;
+  logoUrl?: string;
+  logo?: string;
   address?: string;
-  showLogoOnReceipt: boolean;
-  showNameOnReceipt: boolean;
-  showAddressOnReceipt: boolean;
-  showLogoInHeader: boolean;
-  showLogoInSidebar: boolean;
+  phone?: string;
+  showLogoOnReceipt?: boolean;
+  showNameOnReceipt?: boolean;
+  showAddressOnReceipt?: boolean;
+  showLogoInHeader?: boolean;
+  showLogoInSidebar?: boolean;
   receiptFooter?: string;
   onboardingCompleted?: boolean;
-};
+}
 
-export type Dompet = {
+export interface Dompet {
   id: string;
   nama: string;
+  jenis?: 'rekening' | 'ewallet' | 'kas' | string;
   saldo_terkumpul: number;
+  target_saldo?: number;
+  catatan?: string;
   createdAt?: any;
-};
+}
+
+export interface KategoriSettings {
+  kategori_hpp?: string[];
+  kategori_produk?: string[];
+  satuan_unit?: string[];
+  kategoriList?: { name: string; type: 'Pemasukan' | 'Pengeluaran'; fixed?: boolean }[];
+}
